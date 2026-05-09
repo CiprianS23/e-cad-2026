@@ -1,0 +1,112 @@
+<% content_for :title, "Clădire #{@cladire.numar_cadastral}" %>
+
+<% if @cladire.geom %>
+  <% content_for :head do %>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <% end %>
+<% end %>
+
+<div class="page-header">
+  <h1>Clădire <%= @cladire.numar_cadastral %></h1>
+  <div class="header-actions">
+    <%= link_to "✏ Digitizare", digitizare_path, class: "btn btn-secondary" %>
+    <%= link_to "← Înapoi", harta_path, class: "btn btn-link" %>
+  </div>
+</div>
+
+<div class="show-layout">
+  <div class="detail-card">
+    <h2>Date generale</h2>
+    <dl class="detail-list">
+      <dt>Număr cadastral</dt>
+      <dd><strong><%= @cladire.numar_cadastral %></strong></dd>
+
+      <dt>Destinație</dt>
+      <dd><%= @cladire.destinatie&.humanize.presence || "—" %></dd>
+
+      <dt>Regim înălțime</dt>
+      <dd><%= @cladire.regim_inaltime.presence || "—" %></dd>
+
+      <dt>Suprafață construită</dt>
+      <dd><%= @cladire.suprafata_construita_mp ? "#{number_with_precision(@cladire.suprafata_construita_mp, precision: 2)} mp" : "—" %></dd>
+
+      <dt>Status</dt>
+      <dd><span class="badge badge-<%= @cladire.status %>"><%= @cladire.status %></span></dd>
+    </dl>
+
+    <h2>Localizare</h2>
+    <dl class="detail-list">
+      <dt>Județ</dt>
+      <dd><%= @cladire.judet %></dd>
+
+      <dt>Localitate</dt>
+      <dd><%= @cladire.localitate %></dd>
+
+      <dt>Proprietar</dt>
+      <dd><%= @cladire.proprietar.presence || "—" %></dd>
+    </dl>
+
+    <!-- Parcelă asociată — determinată prin intersecție spațială -->
+    <h2>Parcelă asociată</h2>
+    <% parcela = @cladire.parcela_cadastrala %>
+    <% if parcela %>
+      <dl class="detail-list">
+        <dt>Număr cadastral</dt>
+        <dd>
+          <%= link_to parcela.numar_cadastral, parcela_cadastrala_path(parcela), class: "link-primary" %>
+        </dd>
+
+        <dt>Categorie folosință</dt>
+        <dd><%= parcela.categoria_folosinta&.humanize %></dd>
+
+        <dt>Suprafață parcelă</dt>
+        <dd><%= parcela.suprafata_mp ? "#{number_with_precision(parcela.suprafata_mp, precision: 2)} mp" : "—" %></dd>
+
+        <dt>Status parcelă</dt>
+        <dd><span class="badge badge-<%= parcela.status %>"><%= parcela.status %></span></dd>
+      </dl>
+    <% else %>
+      <p class="text-muted">Nicio parcelă asociată.</p>
+    <% end %>
+  </div>
+
+  <!-- Hartă clădire + parcelă -->
+  <% if @cladire.geom %>
+    <% cladire_geojson = ActiveRecord::Base.connection.select_value(
+         "SELECT ST_AsGeoJSON(ST_Transform(geom, 4326), 6) FROM cladiri_cadastrale WHERE id = #{@cladire.id}"
+       ) %>
+    <% parcela_geojson = parcela && ActiveRecord::Base.connection.select_value(
+         "SELECT ST_AsGeoJSON(ST_Transform(geom, 4326), 6) FROM parcele_cadastrale WHERE id = #{parcela.id}"
+       ) %>
+
+    <div class="detail-map-wrap">
+      <div id="cladire-map" style="height:400px;border-radius:8px;overflow:hidden"></div>
+      <script>
+        (function() {
+          const map = L.map("cladire-map")
+          L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            { attribution: "© OpenStreetMap contributors", maxZoom: 19 }).addTo(map)
+
+          const bounds = []
+
+          <% if parcela_geojson %>
+          const parcelaLayer = L.geoJSON(<%= raw parcela_geojson %>, {
+            style: { color: "#1d4ed8", weight: 2, fillColor: "#93c5fd", fillOpacity: 0.25 }
+          }).addTo(map)
+          parcelaLayer.bindTooltip("Parcelă: <%= j parcela.numar_cadastral %>")
+          bounds.push(...parcelaLayer.getBounds().toArray())
+          <% end %>
+
+          const cladireLayer = L.geoJSON(<%= raw cladire_geojson %>, {
+            style: { color: "#b45309", weight: 2, fillColor: "#fbbf24", fillOpacity: 0.45 }
+          }).addTo(map)
+          cladireLayer.bindTooltip("Clădire: <%= j @cladire.numar_cadastral %>")
+          bounds.push(...cladireLayer.getBounds().toArray())
+
+          if (bounds.length) map.fitBounds(bounds, { padding: [30, 30] })
+        })()
+      </script>
+    </div>
+  <% end %>
+</div>

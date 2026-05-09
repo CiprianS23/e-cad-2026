@@ -4,6 +4,8 @@ export default class extends Controller {
   static values = {
     geojsonUrl:      String,
     cgxmlGeojsonUrl: String,
+    cladiriUrl:      String,
+    uatUrl:          String,
     mapproxyUrl:     String
   }
 
@@ -17,6 +19,7 @@ export default class extends Controller {
     this._addLayers()
     this._loadParcele()
     this._loadCgxml()
+    this._loadCladiri()
   }
 
   disconnect() {
@@ -42,9 +45,47 @@ export default class extends Controller {
       osm.addTo(this.map)
     }
 
+    this.uatLayer = L.geoJSON(null, {
+      style: () => ({
+        color:       "#6b21a8",
+        weight:      1.2,
+        fillColor:   "#a855f7",
+        fillOpacity: 0.06,
+        dashArray:   "4 3"
+      }),
+      onEachFeature: (f, l) => {
+        const p = f.properties || {}
+        l.bindTooltip(p.name || p.nat_code || "UAT", { sticky: true })
+        l.on("mouseover", () => l.setStyle({ weight: 2, fillOpacity: 0.18 }))
+        l.on("mouseout",  () => this.uatLayer.resetStyle(l))
+      }
+    })
+
     this.parcelLayer = L.geoJSON(null, {
       style: this._parcelStyle.bind(this),
       onEachFeature: this._bindParcelPopup.bind(this)
+    })
+
+    this.cladiriLayer = L.geoJSON(null, {
+      style: () => ({ color: "#b45309", weight: 1.5, fillColor: "#fbbf24", fillOpacity: 0.3 }),
+      onEachFeature: (f, l) => {
+        const p = f.properties || {}
+        l.bindPopup(`
+          <div class="map-popup">
+            <strong>${p.numar_cadastral || "—"}</strong>
+            <dl>
+              <dt>Destinație</dt><dd>${p.destinatie || "—"}</dd>
+              <dt>Regim înălțime</dt><dd>${p.regim_inaltime || "—"}</dd>
+              <dt>Suprafață</dt><dd>${p.suprafata_construita_mp ? Number(p.suprafata_construita_mp).toLocaleString("ro") + " mp" : "—"}</dd>
+              <dt>Județ</dt><dd>${p.judet || "—"}</dd>
+              <dt>Localitate</dt><dd>${p.localitate || "—"}</dd>
+              <dt>Proprietar</dt><dd>${p.proprietar || "—"}</dd>
+            </dl>
+          </div>
+        `, { maxWidth: 240 })
+        l.on("mouseover", () => l.setStyle({ weight: 2.5, fillOpacity: 0.55 }))
+        l.on("mouseout",  () => this.cladiriLayer.resetStyle(l))
+      }
     })
 
     this.cgxmlLayer = L.geoJSON(null, {
@@ -53,12 +94,16 @@ export default class extends Controller {
     })
 
     const overlays = {
+      "Limite UAT":          this.uatLayer,
       "Parcele cadastrale":  this.parcelLayer,
+      "Clădiri cadastrale":  this.cladiriLayer,
       "Imobile CGXML":       this.cgxmlLayer
     }
 
     L.control.layers(baseLayers, overlays, { collapsed: false }).addTo(this.map)
+    this.uatLayer.addTo(this.map)
     this.parcelLayer.addTo(this.map)
+    this.cladiriLayer.addTo(this.map)
     this.cgxmlLayer.addTo(this.map)
   }
 
@@ -70,6 +115,7 @@ export default class extends Controller {
 
       if (this.parcelLayer.getLayers().length > 0) {
         this.map.fitBounds(this.parcelLayer.getBounds(), { padding: [40, 40] })
+        this._loadUatLayer(this.parcelLayer.getBounds().getCenter())
       }
     } catch (e) {
       console.warn("Nu s-au putut încărca parcelele:", e)
@@ -85,9 +131,34 @@ export default class extends Controller {
 
       if (this.parcelLayer.getLayers().length === 0 && this.cgxmlLayer.getLayers().length > 0) {
         this.map.fitBounds(this.cgxmlLayer.getBounds(), { padding: [40, 40] })
+        this._loadUatLayer(this.cgxmlLayer.getBounds().getCenter())
       }
     } catch (e) {
       console.warn("Nu s-au putut încărca imobilele CGXML:", e)
+    }
+  }
+
+  async _loadCladiri() {
+    if (!this.cladiriUrlValue) return
+    try {
+      const res  = await fetch(this.cladiriUrlValue)
+      const data = await res.json()
+      this.cladiriLayer.addData(data)
+    } catch (e) {
+      console.warn("Nu s-au putut încărca clădirile:", e)
+    }
+  }
+
+  async _loadUatLayer(center) {
+    if (!this.uatUrlValue || !center) return
+    try {
+      const url  = `${this.uatUrlValue}?lat=${center.lat}&lng=${center.lng}`
+      const res  = await fetch(url)
+      const data = await res.json()
+      this.uatLayer.clearLayers()
+      this.uatLayer.addData(data)
+    } catch (e) {
+      console.warn("Nu s-a putut încărca limita UAT:", e)
     }
   }
 

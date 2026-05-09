@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_09_220002) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_09_220003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -98,6 +98,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_09_220002) do
     t.string "judet", null: false
     t.string "localitate", null: false
     t.string "numar_cadastral", null: false
+    t.bigint "parcela_cadastrala_id", null: false
     t.string "proprietar"
     t.string "regim_inaltime"
     t.string "status", default: "activ", null: false
@@ -107,6 +108,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_09_220002) do
     t.index ["geom"], name: "index_cladiri_cadastrale_on_geom", using: :gist
     t.index ["judet"], name: "index_cladiri_cadastrale_on_judet"
     t.index ["numar_cadastral"], name: "index_cladiri_cadastrale_on_numar_cadastral", unique: true
+    t.index ["parcela_cadastrala_id"], name: "index_cladiri_cadastrale_on_parcela_cadastrala_id"
     t.index ["status"], name: "index_cladiri_cadastrale_on_status"
   end
 
@@ -370,6 +372,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_09_220002) do
   add_foreign_key "buildings", "addresses"
   add_foreign_key "buildings", "lands"
   add_foreign_key "cgxml_validation_errors", "file_descriptions"
+  add_foreign_key "cladiri_cadastrale", "parcele_cadastrale"
   add_foreign_key "contested_x_entities", "buildings"
   add_foreign_key "contested_x_entities", "contesteds"
   add_foreign_key "contested_x_entities", "individual_units"

@@ -12,7 +12,7 @@ export default class extends Controller {
     parcelUrl:     String,
     cladireUrl:    String,
     mapproxyUrl:   String,
-    uatUrl:        String,
+    uatUrl:             String,
     locateUatUrl:  String,
     snapTolerance: { type: Number, default: 15 }
   }
@@ -51,6 +51,7 @@ export default class extends Controller {
     this._markerGroup  = null     // L.LayerGroup vertex markers
     this._uatLayer     = null     // L.GeoJSON UAT boundaries
     this._cladireLayer = null     // L.GeoJSON cladiri cadastrale
+    this._entityType = "parcela"
 
     this._initMap()
     this._loadParcelLayer()
@@ -353,6 +354,7 @@ export default class extends Controller {
   }
 
   switchToParcel() {
+    this._entityType = "parcela"
     this.formParcelaTarget.style.display = ""
     this.formCladireTarget.style.display = "none"
     this.btnEntityParcelaTarget.classList.add("digi-entity-btn--active")
@@ -360,6 +362,7 @@ export default class extends Controller {
   }
 
   switchToBuilding() {
+    this._entityType = "cladire"
     this.formParcelaTarget.style.display = "none"
     this.formCladireTarget.style.display = ""
     this.btnEntityCladireTarget.classList.add("digi-entity-btn--active")

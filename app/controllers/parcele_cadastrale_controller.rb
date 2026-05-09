@@ -9,6 +9,19 @@ class ParceleCadastraleController < ApplicationController
     render json: geojson_collection(filtrare)
   end
 
+  def lookup
+    q = params[:q].to_s.strip
+    return render json: [] if q.length < 2
+
+    results = ParcelaCadastrala
+                .where("numar_cadastral ILIKE ?", "%#{q}%")
+                .order(:numar_cadastral)
+                .limit(10)
+                .pluck(:id, :numar_cadastral, :judet, :localitate)
+                .map { |id, nr, jud, loc| { id: id, numar_cadastral: nr, judet: jud, localitate: loc } }
+    render json: results
+  end
+
   def show; end
 
   def new

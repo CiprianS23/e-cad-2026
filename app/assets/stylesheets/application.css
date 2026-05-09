@@ -666,6 +666,21 @@ nav.pagination a:hover  { background: #f3f4f6; }
 .digi-entity-btn--active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
 .digi-entity-btn--active:hover { background: #1e40af; }
 
+/* ── Digitizare — referință parcelă ─────────────────────────────── */
+.digi-parcela-ref { margin-bottom: 6px; }
+.digi-parcela-hint {
+  font-size: 11px;
+  color: #6b7280;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 5px;
+  padding: 5px 8px;
+  margin: 0;
+}
+
+/* ── Detalii clădire — hartă ─────────────────────────────────────── */
+.detail-map-wrap { flex: 1 1 400px; min-width: 300px; }
+
 /* ── Digitizare — autofill flash ─────────────────────────────────── */
 @keyframes digi-autofill-flash {
   0%   { background: #d1fae5; border-color: #10b981; }

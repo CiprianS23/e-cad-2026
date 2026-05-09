@@ -8,10 +8,11 @@ Rails.application.routes.draw do
   resources :parcele_cadastrale do
     collection do
       get :geojson
+      get :lookup
     end
   end
 
-  resources :cladiri_cadastrale, only: [:create] do
+  resources :cladiri_cadastrale, only: [:show, :create] do
     collection do
       get :geojson
     end
@@ -43,6 +44,7 @@ Rails.application.routes.draw do
     post "/calculeaza",       to: "digitizare#calculeaza_suprafata", as: :digitizare_calculeaza
     post "/export_dxf",       to: "digitizare#export_dxf",         as: :digitizare_export_dxf
     post "/locate_uat",       to: "digitizare#locate_uat",         as: :digitizare_locate_uat
+    post "/locate_parcela",   to: "digitizare#locate_parcela",     as: :digitizare_locate_parcela
   end
   get "/siruta/autocomplete", to: "siruta#autocomplete", as: :siruta_autocomplete
 

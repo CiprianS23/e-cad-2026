@@ -1,10 +1,16 @@
 class CladiriCadastraleController < ApplicationController
+  before_action :set_cladire, only: :show
+
+  def show; end
+
   def create
     @cladire = CladireCadastrala.new(cladire_params)
     if @cladire.save
-      redirect_to digitizare_path, notice: "Clădirea #{@cladire.numar_cadastral} a fost creată."
+      redirect_to cladire_cadastrala_path(@cladire),
+                  notice: "Clădirea #{@cladire.numar_cadastral} a fost creată."
     else
-      redirect_to digitizare_path, alert: @cladire.errors.full_messages.to_sentence
+      redirect_to digitizare_path,
+                  alert: @cladire.errors.full_messages.to_sentence
     end
   end
 
@@ -50,11 +56,15 @@ class CladiriCadastraleController < ApplicationController
     ActiveRecord::Base.connection.select_value(sql)
   end
 
+  def set_cladire
+    @cladire = CladireCadastrala.find(params[:id])
+  end
+
   def cladire_params
     params.require(:cladire_cadastrala).permit(
       :numar_cadastral, :destinatie, :regim_inaltime,
       :suprafata_construita_mp, :judet, :localitate,
-      :proprietar, :status, :geom_wkt
+      :proprietar, :status, :geom_wkt, :parcela_cadastrala_id
     )
   end
 end
