@@ -11,6 +11,12 @@ Rails.application.routes.draw do
     end
   end
 
+  resources :cladiri_cadastrale, only: [:create] do
+    collection do
+      get :geojson
+    end
+  end
+
   resources :cgxml_imports, only: [ :new, :create ]
 
   resources :cgxml_files, only: [ :index, :show ] do

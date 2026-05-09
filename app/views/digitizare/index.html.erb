@@ -11,7 +11,8 @@
      data-digitizare-mapproxy-url-value="http://localhost:8080"
      data-digitizare-snap-tolerance-value="15"
      data-digitizare-uat-url-value="<%= uat_boundaries_geojson_path %>"
-     data-digitizare-locate-uat-url-value="<%= digitizare_locate_uat_path %>">
+     data-digitizare-locate-uat-url-value="<%= digitizare_locate_uat_path %>"
+     data-digitizare-cladire-url-value="<%= geojson_cladiri_cadastrale_index_path %>">
 
   <!-- ── Hartă ──────────────────────────────────────────────────── -->
   <div id="digi-map"
@@ -154,50 +155,121 @@
 
     <!-- 7. Salvare -->
     <section class="digi-section">
-      <div class="digi-section-label">Salvează ca parcelă cadastrală</div>
-      <%= form_with url: parcele_cadastrale_path, method: :post, data: { digitizare_target: "saveForm" } do |f| %>
-        <%= hidden_field_tag "parcela_cadastrala[geom_wkt]", "", data: { digitizare_target: "wktField" } %>
-        <div class="digi-save-grid">
-          <%= f.text_field  "parcela_cadastrala[numar_cadastral]",    placeholder: "Nr. cadastral *", class: "input input-sm" %>
-          <%= f.select      "parcela_cadastrala[categoria_folosinta]",
-                            [["— Categorie *", ""], ["Arabil","arabil"], ["Pășune","pasune"],
-                             ["Fânețe","faneata"], ["Vie","vie"], ["Livadă","livada"],
-                             ["Pădure","padure"], ["Curți/construcții","curti_constructii"],
-                             ["Ape","ape"], ["Neproductiv","neproductiv"]],
-                            {}, { class: "input input-sm" } %>
-        </div>
-        <div data-controller="siruta"
-             data-siruta-url-value="<%= siruta_autocomplete_path %>"
-             style="display:contents">
-          <div class="digi-save-grid" style="flex-direction:row">
-            <div class="ac-wrap">
-              <%= f.text_field "parcela_cadastrala[judet]",
-                    placeholder: "Județ *", class: "input input-sm", autocomplete: "off",
-                    data: { siruta_target: "judetInput",
-                            action: "input->siruta#onJudetInput keydown->siruta#onJudetKeydown" } %>
-              <ul class="ac-dropdown" data-siruta-target="judetDropdown" hidden></ul>
-            </div>
-            <div class="ac-wrap">
-              <%= f.text_field "parcela_cadastrala[localitate]",
-                    placeholder: "Localitate *", class: "input input-sm", autocomplete: "off",
-                    data: { siruta_target: "localitateInput",
-                            action: "input->siruta#onLocalitateInput keydown->siruta#onLocalitateKeydown" } %>
-              <ul class="ac-dropdown" data-siruta-target="localitateDropdown" hidden></ul>
+
+      <!-- Toggle entitate -->
+      <div class="digi-entity-toggle">
+        <button type="button" class="digi-entity-btn digi-entity-btn--active"
+                data-digitizare-target="btnEntityParcela"
+                data-action="click->digitizare#switchToParcel">
+          Parcelă
+        </button>
+        <button type="button" class="digi-entity-btn"
+                data-digitizare-target="btnEntityCladire"
+                data-action="click->digitizare#switchToBuilding">
+          Clădire
+        </button>
+      </div>
+
+      <!-- Formular parcelă -->
+      <div data-digitizare-target="formParcela">
+        <%= form_with url: parcele_cadastrale_path, method: :post, data: { digitizare_target: "saveForm" } do |f| %>
+          <%= hidden_field_tag "parcela_cadastrala[geom_wkt]", "", data: { digitizare_target: "wktField" } %>
+          <div class="digi-save-grid">
+            <%= f.text_field  "parcela_cadastrala[numar_cadastral]", placeholder: "Nr. cadastral *", class: "input input-sm" %>
+            <%= f.select      "parcela_cadastrala[categoria_folosinta]",
+                              [["— Categorie *", ""], ["Arabil","arabil"], ["Pășune","pasune"],
+                               ["Fânețe","faneata"], ["Vie","vie"], ["Livadă","livada"],
+                               ["Pădure","padure"], ["Curți/construcții","curti_constructii"],
+                               ["Ape","ape"], ["Neproductiv","neproductiv"]],
+                              {}, { class: "input input-sm" } %>
+          </div>
+          <div data-controller="siruta"
+               data-siruta-url-value="<%= siruta_autocomplete_path %>"
+               style="display:contents">
+            <div class="digi-save-grid" style="flex-direction:row">
+              <div class="ac-wrap">
+                <%= f.text_field "parcela_cadastrala[judet]",
+                      placeholder: "Județ *", class: "input input-sm", autocomplete: "off",
+                      data: { siruta_target: "judetInput",
+                              action: "input->siruta#onJudetInput keydown->siruta#onJudetKeydown" } %>
+                <ul class="ac-dropdown" data-siruta-target="judetDropdown" hidden></ul>
+              </div>
+              <div class="ac-wrap">
+                <%= f.text_field "parcela_cadastrala[localitate]",
+                      placeholder: "Localitate *", class: "input input-sm", autocomplete: "off",
+                      data: { siruta_target: "localitateInput",
+                              action: "input->siruta#onLocalitateInput keydown->siruta#onLocalitateKeydown" } %>
+                <ul class="ac-dropdown" data-siruta-target="localitateDropdown" hidden></ul>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="digi-save-grid">
-          <%= f.text_field  "parcela_cadastrala[proprietar]", placeholder: "Proprietar",   class: "input input-sm" %>
-          <%= f.number_field "parcela_cadastrala[suprafata_mp]", placeholder: "Suprafață mp",
-                              step: 0.01, class: "input input-sm",
-                              data: { digitizare_target: "saveAreaField" } %>
-        </div>
-        <button type="button" class="btn btn-primary btn-sm"
-                style="width:100%;margin-top:8px"
-                data-action="click->digitizare#saveParcel">
-          💾 Salvează parcela
-        </button>
-      <% end %>
+          <div class="digi-save-grid">
+            <%= f.text_field   "parcela_cadastrala[proprietar]",  placeholder: "Proprietar",   class: "input input-sm" %>
+            <%= f.number_field "parcela_cadastrala[suprafata_mp]", placeholder: "Suprafață mp",
+                                step: 0.01, class: "input input-sm",
+                                data: { digitizare_target: "saveAreaField" } %>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm"
+                  style="width:100%;margin-top:8px"
+                  data-action="click->digitizare#saveParcel">
+            💾 Salvează parcela
+          </button>
+        <% end %>
+      </div>
+
+      <!-- Formular clădire -->
+      <div data-digitizare-target="formCladire" style="display:none">
+        <%= form_with url: cladiri_cadastrale_index_path, method: :post, data: { digitizare_target: "saveFormCladire" } do |f| %>
+          <%= hidden_field_tag "cladire_cadastrala[geom_wkt]", "", data: { digitizare_target: "wktFieldCladire" } %>
+          <div class="digi-save-grid">
+            <%= f.text_field "cladire_cadastrala[numar_cadastral]", placeholder: "Nr. cadastral *", class: "input input-sm" %>
+            <%= f.select     "cladire_cadastrala[destinatie]",
+                             [["— Destinație", ""], ["Locuințe","locuinte"], ["Birouri","birouri"],
+                              ["Comercial","comercial"], ["Industrial","industrial"],
+                              ["Cult","cult"], ["Învățământ","invatamant"],
+                              ["Sănătate","sanatate"], ["Cultură","cultura"],
+                              ["Sport","sport"], ["Agrement","agrement"],
+                              ["Administrativ","administrativ"], ["Tehnico-edilitar","tehnico_edilitar"],
+                              ["Gospodărie","gospodarie"], ["Neproductiv","neproductiv"]],
+                             {}, { class: "input input-sm" } %>
+          </div>
+          <div class="digi-save-grid" style="flex-direction:row">
+            <%= f.text_field   "cladire_cadastrala[regim_inaltime]",       placeholder: "Regim înălțime (P, P+1...)", class: "input input-sm" %>
+            <%= f.number_field "cladire_cadastrala[suprafata_construita_mp]", placeholder: "Suprafață mp",
+                                step: 0.01, class: "input input-sm",
+                                data: { digitizare_target: "saveAreaFieldCladire" } %>
+          </div>
+          <div data-controller="siruta"
+               data-siruta-url-value="<%= siruta_autocomplete_path %>"
+               style="display:contents">
+            <div class="digi-save-grid" style="flex-direction:row">
+              <div class="ac-wrap">
+                <%= f.text_field "cladire_cadastrala[judet]",
+                      placeholder: "Județ *", class: "input input-sm", autocomplete: "off",
+                      data: { siruta_target: "judetInput",
+                              action: "input->siruta#onJudetInput keydown->siruta#onJudetKeydown" } %>
+                <ul class="ac-dropdown" data-siruta-target="judetDropdown" hidden></ul>
+              </div>
+              <div class="ac-wrap">
+                <%= f.text_field "cladire_cadastrala[localitate]",
+                      placeholder: "Localitate *", class: "input input-sm", autocomplete: "off",
+                      data: { siruta_target: "localitateInput",
+                              action: "input->siruta#onLocalitateInput keydown->siruta#onLocalitateKeydown" } %>
+                <ul class="ac-dropdown" data-siruta-target="localitateDropdown" hidden></ul>
+              </div>
+            </div>
+          </div>
+          <div class="digi-save-grid">
+            <%= f.text_field "cladire_cadastrala[proprietar]", placeholder: "Proprietar", class: "input input-sm" %>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm"
+                  style="width:100%;margin-top:8px"
+                  data-action="click->digitizare#saveBuilding">
+            💾 Salvează clădirea
+          </button>
+        <% end %>
+      </div>
+
     </section>
 
   </aside>

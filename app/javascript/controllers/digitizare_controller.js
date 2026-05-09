@@ -10,6 +10,7 @@ export default class extends Controller {
     exportDxfUrl:  String,
     cgxmlUrl:      String,
     parcelUrl:     String,
+    cladireUrl:    String,
     mapproxyUrl:   String,
     uatUrl:        String,
     locateUatUrl:  String,
@@ -26,7 +27,10 @@ export default class extends Controller {
     "inputX", "inputY",
     "areaCalc", "areaAct", "areaDiff",
     "topologyMsg",
-    "wktField", "saveForm", "saveAreaField"
+    "wktField", "saveForm", "saveAreaField",
+    "wktFieldCladire", "saveFormCladire", "saveAreaFieldCladire",
+    "formParcela", "formCladire",
+    "btnEntityParcela", "btnEntityCladire"
   ]
 
   // ── Lifecycle ────────────────────────────────────────────────────────────
@@ -46,9 +50,11 @@ export default class extends Controller {
     this._layerSnap    = null     // L.CircleMarker snap indicator
     this._markerGroup  = null     // L.LayerGroup vertex markers
     this._uatLayer     = null     // L.GeoJSON UAT boundaries
+    this._cladireLayer = null     // L.GeoJSON cladiri cadastrale
 
     this._initMap()
     this._loadParcelLayer()
+    this._loadCladireLayer()
     this._loadCgxmlLayer()
   }
 
@@ -100,6 +106,18 @@ export default class extends Controller {
       }
     })
 
+    this._cladireLayer = L.geoJSON(null, {
+      style:         () => ({ color: "#b45309", weight: 1.5, fillOpacity: 0.2, fillColor: "#fbbf24" }),
+      onEachFeature: (f, l) => {
+        const p = f.properties || {}
+        l.bindPopup(
+          `<b>${p.numar_cadastral || "—"}</b> · Clădire<br>` +
+          `${[p.destinatie, p.regim_inaltime].filter(Boolean).join(", ") || "—"}<br>` +
+          `${p.localitate || ""} ${p.judet || ""}`.trim()
+        )
+      }
+    })
+
     this._cgxmlLayer = L.geoJSON(null, {
       style:          (f) => this._cgxmlStyle(f),
       onEachFeature:  (f, l) => this._cgxmlPopup(f, l)
@@ -109,10 +127,12 @@ export default class extends Controller {
     L.control.layers(baseLayers, {
       "Limite UAT":         this._uatLayer,
       "Parcele cadastrale": this._parcelLayer,
+      "Clădiri cadastrale": this._cladireLayer,
       "Imobile CGXML":      this._cgxmlLayer
     }, { collapsed: false }).addTo(this.map)
     this._uatLayer.addTo(this.map)
     this._parcelLayer.addTo(this.map)
+    this._cladireLayer.addTo(this.map)
     this._cgxmlLayer.addTo(this.map)
 
     this.map.on("mousemove",  (e) => this._onMouseMove(e))
@@ -152,6 +172,17 @@ export default class extends Controller {
     }
   }
 
+  async _loadCladireLayer() {
+    if (!this.cladireUrlValue) return
+    try {
+      const res  = await fetch(this.cladireUrlValue)
+      const data = await res.json()
+      this._cladireLayer.addData(data)
+    } catch (e) {
+      console.warn("Cladire layer error:", e)
+    }
+  }
+
   async _loadUatLayer(center) {
     if (!this.uatUrlValue || !center) return
     try {
@@ -176,10 +207,8 @@ export default class extends Controller {
       const data = await res.json()
       if (!data.judet) return
 
-      const judetEl     = this.element.querySelector('[data-siruta-target="judetInput"]')
-      const localitateEl = this.element.querySelector('[data-siruta-target="localitateInput"]')
-      if (judetEl)     this._flashFill(judetEl,     data.judet)
-      if (localitateEl) this._flashFill(localitateEl, data.localitate)
+      this.element.querySelectorAll('[data-siruta-target="judetInput"]').forEach(el => this._flashFill(el, data.judet))
+      this.element.querySelectorAll('[data-siruta-target="localitateInput"]').forEach(el => this._flashFill(el, data.localitate))
     } catch (e) {
       console.warn("Locate UAT error:", e)
     }
@@ -314,6 +343,27 @@ export default class extends Controller {
     this.wktFieldTarget.value      = this._buildWkt("MULTIPOLYGON")
     this.saveAreaFieldTarget.value = this._areaCalc > 0 ? this._areaCalc.toFixed(4) : ""
     this.saveFormTarget.submit()
+  }
+
+  saveBuilding() {
+    if (this._verts.length < 3) { this._setStatus("Niciun poligon pentru salvare.", "warn"); return }
+    this.wktFieldCladireTarget.value      = this._buildWkt("MULTIPOLYGON")
+    this.saveAreaFieldCladireTarget.value = this._areaCalc > 0 ? this._areaCalc.toFixed(4) : ""
+    this.saveFormCladireTarget.submit()
+  }
+
+  switchToParcel() {
+    this.formParcelaTarget.style.display = ""
+    this.formCladireTarget.style.display = "none"
+    this.btnEntityParcelaTarget.classList.add("digi-entity-btn--active")
+    this.btnEntityCladireTarget.classList.remove("digi-entity-btn--active")
+  }
+
+  switchToBuilding() {
+    this.formParcelaTarget.style.display = "none"
+    this.formCladireTarget.style.display = ""
+    this.btnEntityCladireTarget.classList.add("digi-entity-btn--active")
+    this.btnEntityParcelaTarget.classList.remove("digi-entity-btn--active")
   }
 
   // ── Map event handlers ───────────────────────────────────────────────────

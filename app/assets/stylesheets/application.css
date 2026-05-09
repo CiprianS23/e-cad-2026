@@ -643,6 +643,29 @@ nav.pagination a:hover  { background: #f3f4f6; }
   color: #1d4ed8;
 }
 
+/* ── Digitizare — toggle entitate Parcelă / Clădire ─────────────── */
+.digi-entity-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.digi-entity-btn {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  background: #f9fafb;
+  color: #374151;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.digi-entity-btn:hover { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
+.digi-entity-btn--active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+.digi-entity-btn--active:hover { background: #1e40af; }
+
 /* ── Digitizare — autofill flash ─────────────────────────────────── */
 @keyframes digi-autofill-flash {
   0%   { background: #d1fae5; border-color: #10b981; }

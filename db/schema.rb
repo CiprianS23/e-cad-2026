@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_09_220001) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_09_220002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -88,6 +88,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_09_220001) do
     t.index ["file_description_id", "error_code"], name: "idx_on_file_description_id_error_code_33f50cadc9"
     t.index ["file_description_id"], name: "index_cgxml_validation_errors_on_file_description_id"
     t.index ["fixed_at"], name: "index_cgxml_validation_errors_on_fixed_at"
+  end
+
+  create_table "cladiri_cadastrale", force: :cascade do |t|
+    t.geometry "centroid", limit: {:srid=>3844, :type=>"st_point"}
+    t.datetime "created_at", null: false
+    t.string "destinatie"
+    t.geometry "geom", limit: {:srid=>3844, :type=>"multi_polygon"}
+    t.string "judet", null: false
+    t.string "localitate", null: false
+    t.string "numar_cadastral", null: false
+    t.string "proprietar"
+    t.string "regim_inaltime"
+    t.string "status", default: "activ", null: false
+    t.decimal "suprafata_construita_mp", precision: 12, scale: 4
+    t.datetime "updated_at", null: false
+    t.index ["centroid"], name: "index_cladiri_cadastrale_on_centroid", using: :gist
+    t.index ["geom"], name: "index_cladiri_cadastrale_on_geom", using: :gist
+    t.index ["judet"], name: "index_cladiri_cadastrale_on_judet"
+    t.index ["numar_cadastral"], name: "index_cladiri_cadastrale_on_numar_cadastral", unique: true
+    t.index ["status"], name: "index_cladiri_cadastrale_on_status"
   end
 
   create_table "contested_x_entities", force: :cascade do |t|
