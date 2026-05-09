@@ -1,0 +1,56 @@
+<% content_for :title, "Hartă Cadastrală" %>
+<% content_for :map, true %>
+<% content_for :fullpage, true %>
+
+<div class="harta-page">
+  <aside class="harta-sidebar">
+    <div class="sidebar-header">
+      <h2>Parcele Cadastrale</h2>
+      <%= link_to "Adaugă parcelă", new_parcela_cadastrala_path, class: "btn btn-primary btn-sm" %>
+    </div>
+
+    <div class="sidebar-filters">
+      <%= form_with url: harta_path, method: :get do |f| %>
+        <%= f.text_field :q, value: params[:q], placeholder: "Caută număr cadastral…", class: "input input-sm" %>
+        <%= f.select :status,
+              [["Toate", ""], ["Activ", "activ"], ["Inactiv", "inactiv"], ["Litigiu", "litigiu"]],
+              {}, { class: "input input-sm", data: { action: "change->harta-map#reloadParcele" } } %>
+        <%= f.submit "Filtrează", class: "btn btn-sm" %>
+      <% end %>
+    </div>
+
+    <div class="legenda">
+      <h3>Legendă</h3>
+      <div class="legenda-grid">
+        <% {
+          "Arabil"            => "#22c55e",
+          "Pășune"            => "#84cc16",
+          "Fânețe"            => "#a3e635",
+          "Vie"               => "#a855f7",
+          "Livadă"            => "#f97316",
+          "Pădure"            => "#15803d",
+          "Curți/construcții" => "#f59e0b",
+          "Ape"               => "#38bdf8",
+          "Neproductiv"       => "#9ca3af"
+        }.each do |label, color| %>
+          <span class="legenda-item">
+            <span class="legenda-dot" style="background:<%= color %>"></span>
+            <%= label %>
+          </span>
+        <% end %>
+        <span class="legenda-item">
+          <span class="legenda-dot" style="background:#dc2626;border:2px dashed #dc2626;background:transparent"></span>
+          Litigiu
+        </span>
+      </div>
+    </div>
+
+    <%= link_to "Listă parcele", parcele_cadastrale_path, class: "btn btn-secondary btn-sm sidebar-link" %>
+  </aside>
+
+  <div id="harta-map"
+       data-controller="harta-map"
+       data-harta-map-geojson-url-value="<%= geojson_parcele_cadastrale_path(params.permit(:q, :status, :judet, :categoria_folosinta)) %>"
+       data-harta-map-mapproxy-url-value="http://localhost:8080">
+  </div>
+</div>

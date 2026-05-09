@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title><%= content_for(:title) || "e-CAD 2026" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="application-name" content="e-CAD 2026">
+    <meta name="mobile-web-app-capable" content="yes">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+
+    <%= yield :head %>
+
+    <link rel="icon" href="/icon.png" type="image/png">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/icon.png">
+
+    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+
+    <% if content_for?(:map) %>
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+      <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+      <script src="https://unpkg.com/proj4@2.9.0/dist/proj4.js"></script>
+    <% end %>
+
+    <%= javascript_importmap_tags %>
+  </head>
+
+  <body>
+    <nav class="topnav">
+      <%= link_to "e-CAD 2026", root_path, class: "brand" %>
+      <%= link_to "Hartă", harta_path %>
+      <%= link_to "Parcele", parcele_cadastrale_path %>
+      <%= link_to "Sidekiq", "/sidekiq", target: "_blank" %>
+    </nav>
+
+    <% unless content_for?(:fullpage) %>
+      <div class="container">
+        <% flash.each do |type, message| %>
+          <div class="flash <%= type %>"><%= message %></div>
+        <% end %>
+        <%= yield %>
+      </div>
+    <% else %>
+      <% flash.each do |type, message| %>
+        <div class="flash-overlay <%= type %>"><%= message %></div>
+      <% end %>
+      <%= yield %>
+    <% end %>
+  </body>
+</html>

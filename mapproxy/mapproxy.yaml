@@ -1,0 +1,76 @@
+services:
+  tms:
+    use_grid_names: true
+    origin: 'nw'
+  wmts:
+    restful: true
+    kvp: true
+  wms:
+    srs: ['EPSG:3857', 'EPSG:4326', 'EPSG:3844']
+    image_formats: ['image/png', 'image/jpeg']
+    bbox_srs: ['EPSG:3857', 'EPSG:4326', 'EPSG:3844']
+    versions: ['1.1.1', '1.3.0']
+
+layers:
+  - name: ortoplan
+    title: Ortofotoplan Romania (ANCPI)
+    sources: [ortoplan_cache]
+
+  - name: osm
+    title: OpenStreetMap
+    sources: [osm_cache]
+
+caches:
+  ortoplan_cache:
+    grids: [webmercator]
+    sources: [ortoplan_wms]
+    format: image/jpeg
+    cache:
+      type: file
+      directory: ./mapproxy/cache_data/ortoplan
+
+  osm_cache:
+    grids: [webmercator]
+    sources: [osm_tiles]
+    format: image/png
+    cache:
+      type: file
+      directory: ./mapproxy/cache_data/osm
+
+sources:
+  ortoplan_wms:
+    type: wms
+    req:
+      # URL WMS ortofotoplan ANCPI — editați dacă aveți alt endpoint sau credențiale
+      url: "https://geoportal.ancpi.ro/maps/services/ortoplan/MapServer/WMSServer"
+      layers: "0"
+      transparent: false
+    coverage:
+      bbox: [20.0, 43.5, 30.0, 48.5]
+      srs: 'EPSG:4326'
+    http:
+      ssl_no_cert_checks: true
+      timeout: 30
+
+  osm_tiles:
+    type: tile
+    url: https://tile.openstreetmap.org/%(z)s/%(x)s/%(y)s.png
+    grid: webmercator
+    http:
+      headers:
+        User-Agent: MapProxy/e-cad-2026
+
+grids:
+  webmercator:
+    base: GLOBAL_WEBMERCATOR
+
+globals:
+  cache:
+    base_dir: ./mapproxy/cache_data
+    lock_dir: ./mapproxy/cache_data/locks
+    concurrent_tile_creators: 2
+  http:
+    access_control_allow_origin: '*'
+    ssl_no_cert_checks: true
+  image:
+    resampling_method: bicubic

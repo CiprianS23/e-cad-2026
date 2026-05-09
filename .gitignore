@@ -1,0 +1,30 @@
+# Rails
+/.bundle
+/vendor/bundle
+/log/*
+/tmp/*
+!/log/.keep
+!/tmp/.keep
+/tmp/pids/*
+!/tmp/pids/.keep
+/tmp/cache/*
+/tmp/sockets/*
+/public/assets
+/storage/*
+!/storage/.keep
+/tmp/storage/*
+!/tmp/storage/.keep
+
+# Credențiale — NU comite master.key!
+/config/master.key
+/config/credentials/*.key
+
+# MapProxy cache
+/mapproxy/cache_data/
+
+# Node / assets
+/node_modules
+yarn-error.log
+
+# macOS
+.DS_Store

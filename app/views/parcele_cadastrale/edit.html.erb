@@ -1,0 +1,8 @@
+<% content_for :title, "Editează #{@parcela.numar_cadastral}" %>
+
+<div class="page-header">
+  <h1>Editează parcela <%= @parcela.numar_cadastral %></h1>
+  <%= link_to "← Înapoi", @parcela, class: "btn btn-link" %>
+</div>
+
+<%= render "form", parcela: @parcela %>
