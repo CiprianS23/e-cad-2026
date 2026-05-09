@@ -6,7 +6,7 @@ class CladiriCadastraleController < ApplicationController
   def create
     @cladire = CladireCadastrala.new(cladire_params)
     if @cladire.save
-      redirect_to cladire_cadastrala_path(@cladire),
+      redirect_to cladiri_cadastrale_path(@cladire),
                   notice: "Clădirea #{@cladire.numar_cadastral} a fost creată."
     else
       redirect_to digitizare_path,
