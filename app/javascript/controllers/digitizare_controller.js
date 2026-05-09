@@ -50,7 +50,6 @@ export default class extends Controller {
     this._initMap()
     this._loadParcelLayer()
     this._loadCgxmlLayer()
-    this._loadUatLayer()
   }
 
   disconnect() {
@@ -127,8 +126,10 @@ export default class extends Controller {
       const res  = await fetch(this.parcelUrlValue)
       const data = await res.json()
       this._parcelLayer.addData(data)
-      if (this._parcelLayer.getLayers().length > 0)
+      if (this._parcelLayer.getLayers().length > 0) {
         this.map.fitBounds(this._parcelLayer.getBounds(), { padding: [40, 40] })
+        this._loadUatLayer(this._parcelLayer.getBounds().getCenter())
+      }
       this._rebuildRefSnap()
     } catch (e) {
       console.warn("Parcel layer error:", e)
@@ -141,19 +142,23 @@ export default class extends Controller {
       const res  = await fetch(this.cgxmlUrlValue)
       const data = await res.json()
       this._cgxmlLayer.addData(data)
-      if (this._cgxmlLayer.getLayers().length > 0 && this._parcelLayer.getLayers().length === 0)
+      if (this._cgxmlLayer.getLayers().length > 0 && this._parcelLayer.getLayers().length === 0) {
         this.map.fitBounds(this._cgxmlLayer.getBounds(), { padding: [40, 40] })
+        this._loadUatLayer(this._cgxmlLayer.getBounds().getCenter())
+      }
       this._rebuildRefSnap()
     } catch (e) {
       console.warn("CGXML layer error:", e)
     }
   }
 
-  async _loadUatLayer() {
-    if (!this.uatUrlValue) return
+  async _loadUatLayer(center) {
+    if (!this.uatUrlValue || !center) return
     try {
-      const res  = await fetch(this.uatUrlValue)
+      const url  = `${this.uatUrlValue}?lat=${center.lat}&lng=${center.lng}`
+      const res  = await fetch(url)
       const data = await res.json()
+      this._uatLayer.clearLayers()
       this._uatLayer.addData(data)
     } catch (e) {
       console.warn("UAT layer error:", e)
