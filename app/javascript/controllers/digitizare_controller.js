@@ -9,6 +9,7 @@ export default class extends Controller {
     calcUrl:       String,
     exportDxfUrl:  String,
     cgxmlUrl:      String,
+    parcelUrl:     String,
     mapproxyUrl:   String,
     snapTolerance: { type: Number, default: 15 }
   }
@@ -44,6 +45,7 @@ export default class extends Controller {
     this._markerGroup  = null     // L.LayerGroup vertex markers
 
     this._initMap()
+    this._loadParcelLayer()
     this._loadCgxmlLayer()
   }
 
@@ -71,18 +73,44 @@ export default class extends Controller {
       osm.addTo(this.map)
     }
 
+    this._parcelLayer = L.geoJSON(null, {
+      style:         () => ({ color: "#1d4ed8", weight: 1.5, fillOpacity: 0.15, fillColor: "#3b82f6" }),
+      onEachFeature: (f, l) => {
+        const p = f.properties || {}
+        l.bindPopup(`<b>${p.numar_cadastral || "—"}</b><br>${p.localitate || ""} ${p.judet || ""}`.trim())
+      }
+    })
+
     this._cgxmlLayer = L.geoJSON(null, {
       style:          (f) => this._cgxmlStyle(f),
       onEachFeature:  (f, l) => this._cgxmlPopup(f, l)
     })
     this._markerGroup = L.layerGroup().addTo(this.map)
 
-    L.control.layers(baseLayers, { "Imobile CGXML": this._cgxmlLayer }, { collapsed: false }).addTo(this.map)
+    L.control.layers(baseLayers, {
+      "Parcele cadastrale": this._parcelLayer,
+      "Imobile CGXML":      this._cgxmlLayer
+    }, { collapsed: false }).addTo(this.map)
+    this._parcelLayer.addTo(this.map)
     this._cgxmlLayer.addTo(this.map)
 
     this.map.on("mousemove",  (e) => this._onMouseMove(e))
     this.map.on("click",      (e) => this._onMapClick(e))
     this.map.on("dblclick",   (e) => this._onDblClick(e))
+  }
+
+  async _loadParcelLayer() {
+    if (!this.parcelUrlValue) return
+    try {
+      const res  = await fetch(this.parcelUrlValue)
+      const data = await res.json()
+      this._parcelLayer.addData(data)
+      if (this._parcelLayer.getLayers().length > 0)
+        this.map.fitBounds(this._parcelLayer.getBounds(), { padding: [40, 40] })
+      this._rebuildRefSnap()
+    } catch (e) {
+      console.warn("Parcel layer error:", e)
+    }
   }
 
   async _loadCgxmlLayer() {
@@ -91,7 +119,7 @@ export default class extends Controller {
       const res  = await fetch(this.cgxmlUrlValue)
       const data = await res.json()
       this._cgxmlLayer.addData(data)
-      if (this._cgxmlLayer.getLayers().length > 0)
+      if (this._cgxmlLayer.getLayers().length > 0 && this._parcelLayer.getLayers().length === 0)
         this.map.fitBounds(this._cgxmlLayer.getBounds(), { padding: [40, 40] })
       this._rebuildRefSnap()
     } catch (e) {
@@ -306,11 +334,15 @@ export default class extends Controller {
 
   _rebuildRefSnap() {
     this._refSnap = []
-    this._cgxmlLayer.eachLayer(layer => {
-      const coords = layer.feature?.geometry?.coordinates?.[0]
-      if (!coords) return
-      coords.forEach(([lng, lat]) => this._refSnap.push(L.latLng(lat, lng)))
-    })
+    const addCoords = (layer) => {
+      const geom = layer.feature?.geometry
+      if (!geom) return
+      const rings = geom.type === "Polygon"      ? geom.coordinates :
+                    geom.type === "MultiPolygon"  ? geom.coordinates.flat() : []
+      rings.forEach(ring => ring.forEach(([lng, lat]) => this._refSnap.push(L.latLng(lat, lng))))
+    }
+    this._cgxmlLayer.eachLayer(addCoords)
+    this._parcelLayer.eachLayer(addCoords)
   }
 
   // ── Vertex management ────────────────────────────────────────────────────
