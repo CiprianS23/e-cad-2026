@@ -37,6 +37,8 @@ Rails.application.routes.draw do
     post "/calculeaza",       to: "digitizare#calculeaza_suprafata", as: :digitizare_calculeaza
     post "/export_dxf",       to: "digitizare#export_dxf",         as: :digitizare_export_dxf
   end
+  get "/siruta/autocomplete", to: "siruta#autocomplete", as: :siruta_autocomplete
+
   get "/harta", to: "harta#index", as: :harta
   root "harta#index"
 end

@@ -42,13 +42,22 @@
 
   <fieldset>
     <legend>Localizare</legend>
-    <div class="field">
-      <%= f.label :judet, "Județ *" %>
-      <%= f.text_field :judet, class: "input" %>
-    </div>
-    <div class="field">
-      <%= f.label :localitate, "Localitate *" %>
-      <%= f.text_field :localitate, class: "input" %>
+    <div data-controller="siruta"
+         data-siruta-url-value="<%= siruta_autocomplete_path %>">
+      <div class="field ac-wrap">
+        <%= f.label :judet, "Județ *" %>
+        <%= f.text_field :judet, class: "input", autocomplete: "off",
+              data: { siruta_target: "judetInput",
+                      action: "input->siruta#onJudetInput keydown->siruta#onJudetKeydown" } %>
+        <ul class="ac-dropdown" data-siruta-target="judetDropdown" hidden></ul>
+      </div>
+      <div class="field ac-wrap">
+        <%= f.label :localitate, "Localitate *" %>
+        <%= f.text_field :localitate, class: "input", autocomplete: "off",
+              data: { siruta_target: "localitateInput",
+                      action: "input->siruta#onLocalitateInput keydown->siruta#onLocalitateKeydown" } %>
+        <ul class="ac-dropdown" data-siruta-target="localitateDropdown" hidden></ul>
+      </div>
     </div>
     <div class="field">
       <%= f.label :adresa, "Adresă" %>

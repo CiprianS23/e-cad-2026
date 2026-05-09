@@ -610,3 +610,38 @@ nav.pagination a:hover  { background: #f3f4f6; }
 
 /* Salvare */
 .digi-save-grid { display: flex; flex-direction: column; gap: 5px; }
+
+/* ── Autocomplete SIRUTA ─────────────────────────────────────────── */
+.ac-wrap {
+  position: relative;
+}
+.ac-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  margin: 2px 0 0;
+  padding: 4px 0;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,.12);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.ac-item {
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #1f2937;
+}
+.ac-item:hover,
+.ac-item--active {
+  background: #eff6ff;
+  color: #1d4ed8;
+}

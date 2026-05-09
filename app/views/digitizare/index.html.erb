@@ -162,8 +162,28 @@
                              ["Pădure","padure"], ["Curți/construcții","curti_constructii"],
                              ["Ape","ape"], ["Neproductiv","neproductiv"]],
                             {}, { class: "input input-sm" } %>
-          <%= f.text_field  "parcela_cadastrala[judet]",      placeholder: "Județ *",      class: "input input-sm" %>
-          <%= f.text_field  "parcela_cadastrala[localitate]", placeholder: "Localitate *", class: "input input-sm" %>
+        </div>
+        <div data-controller="siruta"
+             data-siruta-url-value="<%= siruta_autocomplete_path %>"
+             style="display:contents">
+          <div class="digi-save-grid" style="grid-template-columns:1fr 1fr">
+            <div class="ac-wrap">
+              <%= f.text_field "parcela_cadastrala[judet]",
+                    placeholder: "Județ *", class: "input input-sm", autocomplete: "off",
+                    data: { siruta_target: "judetInput",
+                            action: "input->siruta#onJudetInput keydown->siruta#onJudetKeydown" } %>
+              <ul class="ac-dropdown" data-siruta-target="judetDropdown" hidden></ul>
+            </div>
+            <div class="ac-wrap">
+              <%= f.text_field "parcela_cadastrala[localitate]",
+                    placeholder: "Localitate *", class: "input input-sm", autocomplete: "off",
+                    data: { siruta_target: "localitateInput",
+                            action: "input->siruta#onLocalitateInput keydown->siruta#onLocalitateKeydown" } %>
+              <ul class="ac-dropdown" data-siruta-target="localitateDropdown" hidden></ul>
+            </div>
+          </div>
+        </div>
+        <div class="digi-save-grid">
           <%= f.text_field  "parcela_cadastrala[proprietar]", placeholder: "Proprietar",   class: "input input-sm" %>
           <%= f.number_field "parcela_cadastrala[suprafata_mp]", placeholder: "Suprafață mp",
                               step: 0.01, class: "input input-sm",
