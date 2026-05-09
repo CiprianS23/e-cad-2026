@@ -23,10 +23,7 @@ class UatBoundariesController < ApplicationController
           'type',       'Feature',
           'id',         id,
           'geometry',   ST_AsGeoJSON(
-                          ST_Transform(
-                            ST_SimplifyPreserveTopology(geom, 50),
-                            4326
-                          ), 6
+                          ST_Transform(geom, 4326)
                         )::json,
           'properties', json_build_object(
             'id',           id,
