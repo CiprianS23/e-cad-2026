@@ -15,6 +15,8 @@ Rails.application.routes.draw do
     end
   end
 
+  resources :cgxml_imports, only: [ :new, :create ]
+
   get "/harta", to: "harta#index", as: :harta
   root "harta#index"
 

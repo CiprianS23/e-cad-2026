@@ -1,0 +1,124 @@
+<% content_for :title, "Rezultat import CGXML" %>
+
+<div class="page-header">
+  <h1>Rezultat import</h1>
+  <div class="header-actions">
+    <%= link_to "Import nou", new_cgxml_import_path, class: "btn btn-primary" %>
+  </div>
+</div>
+
+<% if @result.errors.any? %>
+  <div class="flash alert" style="margin-bottom:20px">
+    <strong>Importul a eșuat — nicio înregistrare nu a fost salvată.</strong>
+    <ul style="margin-top:8px;padding-left:18px">
+      <% @result.errors.each do |err| %>
+        <li><%= err %></li>
+      <% end %>
+    </ul>
+  </div>
+<% else %>
+  <div class="flash notice" style="margin-bottom:20px">
+    Fișierul <strong><%= @filename %></strong> a fost importat cu succes.
+  </div>
+<% end %>
+
+<% total = @result.counts.values.sum %>
+
+<div class="show-layout" style="grid-template-columns: 1fr 1fr; gap: 20px;">
+  <div class="detail-card">
+    <h2>Entități importate</h2>
+    <table class="data-table" style="margin-top:12px">
+      <thead>
+        <tr>
+          <th>Entitate</th>
+          <th style="text-align:right">Înregistrări</th>
+        </tr>
+      </thead>
+      <tbody>
+        <%
+          labels = {
+            file_descriptions:       "FileDescription (Fișiere)",
+            addresses:               "Address (Adrese)",
+            deeds:                   "Deed (Acte)",
+            lands:                   "Land (Terenuri)",
+            buildings:               "Building (Construcții)",
+            building_common_parts:   "BuildingCommonPart (Părți comune)",
+            individual_units:        "IndividualUnit (Unități individuale)",
+            parcels:                 "Parcel (Parcele)",
+            registrations:           "Registration (Înscrieri)",
+            registration_x_entities: "RegistrationXEntity (Linkuri înscrieri)",
+            points:                  "Points (Puncte topografice)",
+            persons:                 "Person (Persoane)",
+            contesteds:              "Contested (Contestații)",
+            contested_x_entities:    "ContestedXEntity (Linkuri contestații)"
+          }
+        %>
+        <% labels.each do |key, label| %>
+          <% count = @result.counts[key] %>
+          <% next if count.zero? && @result.errors.any? %>
+          <tr>
+            <td><%= label %></td>
+            <td style="text-align:right;font-weight:600;color:<%= count > 0 ? '#065f46' : '#6b7280' %>">
+              <%= count %>
+            </td>
+          </tr>
+        <% end %>
+        <tr style="border-top:2px solid #e5e7eb;font-weight:700">
+          <td>Total</td>
+          <td style="text-align:right"><%= total %></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <% if @result.file_description %>
+    <% fd = @result.file_description %>
+    <div class="detail-card">
+      <h2>Detalii fișier</h2>
+      <dl class="detail-list" style="margin-top:12px">
+        <dt>Fișier</dt>
+        <dd><%= fd.filename %></dd>
+        <% if fd.exportdate %>
+          <dt>Dată export</dt>
+          <dd><%= fd.exportdate.strftime("%d.%m.%Y %H:%M") %></dd>
+        <% end %>
+        <% if fd.operationtype.present? %>
+          <dt>Tip operațiune</dt>
+          <dd><%= fd.operationtype %></dd>
+        <% end %>
+        <% if fd.licensedname.present? %>
+          <dt>Persoană autorizată</dt>
+          <dd><%= fd.licensedname %></dd>
+        <% end %>
+        <% if fd.licensenumber.present? %>
+          <dt>Nr. licență</dt>
+          <dd><%= fd.licensenumber %></dd>
+        <% end %>
+        <% if fd.fileversion.present? %>
+          <dt>Versiune</dt>
+          <dd><%= fd.fileversion %></dd>
+        <% end %>
+      </dl>
+
+      <% land_count = @result.counts[:lands] %>
+      <% if land_count > 0 %>
+        <h2 style="margin-top:20px">Terenuri importate</h2>
+        <table class="data-table" style="margin-top:12px">
+          <thead>
+            <tr><th>ID</th><th>Sector cadastral</th><th>Suprafață (m²)</th><th>Nr. cadastral</th></tr>
+          </thead>
+          <tbody>
+            <% fd.lands.each do |l| %>
+              <tr>
+                <td><%= l.id %></td>
+                <td><%= l.cadsector.presence || "—" %></td>
+                <td><%= number_with_precision(l.measuredarea, precision: 2) %></td>
+                <td><%= l.papercadno.presence || "—" %></td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      <% end %>
+    </div>
+  <% end %>
+</div>

@@ -1,0 +1,59 @@
+<% content_for :title, "Import CGXML" %>
+
+<div class="page-header">
+  <h1>Import fișier CGXML</h1>
+</div>
+
+<div class="import-card">
+  <p class="hint">
+    Importă date cadastrale din fișiere <strong>CGXML v3</strong> generate de sistemul ETERRA / ANCPI.<br>
+    Sunt acceptate fișiere <code>.cgxml</code> sau <code>.xml</code>. Toate înregistrările sunt salvate
+    într-o singură tranzacție — dacă apare o eroare, nicio înregistrare nu este salvată.
+  </p>
+
+  <%= form_with url: cgxml_imports_path, multipart: true, local: true do |f| %>
+    <div class="drop-zone" id="drop-zone">
+      <div class="drop-zone-inner">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5">
+          <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M8 12l4-4 4 4M12 8v8"/>
+        </svg>
+        <p class="drop-label">Trageți fișierul CGXML aici sau</p>
+        <%= f.label :cgxml_file, "Alegeți fișier", class: "btn btn-secondary btn-sm drop-btn" %>
+        <%= f.file_field :cgxml_file, accept: ".cgxml,.xml", class: "drop-input", id: "cgxml_file" %>
+        <p class="drop-hint" id="file-name">Niciun fișier selectat</p>
+      </div>
+    </div>
+
+    <div class="form-actions" style="margin-top:20px">
+      <%= f.submit "Importă", class: "btn btn-primary", id: "submit-btn", disabled: true %>
+      <%= link_to "Anulare", root_path, class: "btn btn-secondary" %>
+    </div>
+  <% end %>
+</div>
+
+<script>
+  const input = document.getElementById('cgxml_file');
+  const label = document.getElementById('file-name');
+  const btn   = document.getElementById('submit-btn');
+  const zone  = document.getElementById('drop-zone');
+
+  function selectFile(file) {
+    if (!file) return;
+    label.textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+    label.style.color = '#1d4ed8';
+    btn.disabled = false;
+  }
+
+  input.addEventListener('change', () => selectFile(input.files[0]));
+
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    const dt = new DataTransfer();
+    dt.items.add(e.dataTransfer.files[0]);
+    input.files = dt.files;
+    selectFile(e.dataTransfer.files[0]);
+  });
+</script>
