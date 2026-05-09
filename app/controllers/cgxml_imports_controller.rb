@@ -18,7 +18,7 @@ class CgxmlImportsController < ApplicationController
     @filename = file.original_filename
 
     if @result.file_description
-      CgxmlValidateJob.perform_later(@result.file_description.id)
+      CgxmlValidationService.new(@result.file_description).call
     end
   end
 end

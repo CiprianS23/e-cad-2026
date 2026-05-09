@@ -26,9 +26,8 @@ class CgxmlFilesController < ApplicationController
   end
 
   def revalidate
-    @fd.update_columns(validation_status: "pending")
-    CgxmlValidateJob.perform_later(@fd.id)
-    redirect_to cgxml_file_path(@fd), notice: "Revalidarea a fost programată."
+    CgxmlValidationService.new(@fd).call
+    redirect_to cgxml_file_path(@fd), notice: "Revalidarea s-a finalizat."
   end
 
   def report
