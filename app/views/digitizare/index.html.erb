@@ -166,7 +166,7 @@
         <div data-controller="siruta"
              data-siruta-url-value="<%= siruta_autocomplete_path %>"
              style="display:contents">
-          <div class="digi-save-grid" style="grid-template-columns:1fr 1fr">
+          <div class="digi-save-grid" style="flex-direction:row">
             <div class="ac-wrap">
               <%= f.text_field "parcela_cadastrala[judet]",
                     placeholder: "Județ *", class: "input input-sm", autocomplete: "off",

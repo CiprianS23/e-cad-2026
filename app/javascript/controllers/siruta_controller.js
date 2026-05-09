@@ -25,8 +25,8 @@ export default class extends Controller {
   }
 
   onJudetKeydown(e) {
-    this._handleKeydown(e, this.judetDropdownTarget, (val) => {
-      this.judetInputTarget.value = val
+    this._handleKeydown(e, this.judetDropdownTarget, (item) => {
+      this.judetInputTarget.value = item.value
       this._hide(this.judetDropdownTarget)
       this._clearLocalitate()
       this.localitateInputTarget.focus()
@@ -39,8 +39,8 @@ export default class extends Controller {
   }
 
   onLocalitateKeydown(e) {
-    this._handleKeydown(e, this.localitateDropdownTarget, (val) => {
-      this.localitateInputTarget.value = val
+    this._handleKeydown(e, this.localitateDropdownTarget, (item) => {
+      this.localitateInputTarget.value = item.value
       this._hide(this.localitateDropdownTarget)
     }, "_locIdx")
   }
@@ -52,7 +52,7 @@ export default class extends Controller {
     if (!q) { this._hide(this.judetDropdownTarget); return }
 
     const items = await this._get({ type: "judet", q })
-    this._render(this.judetDropdownTarget, items, "_judetIdx", (item) => {
+    this._render(this.judetDropdownTarget, this.judetInputTarget, items, "_judetIdx", (item) => {
       this.judetInputTarget.value = item.value
       this._hide(this.judetDropdownTarget)
       this._clearLocalitate()
@@ -66,7 +66,7 @@ export default class extends Controller {
     if (!q && !judet) { this._hide(this.localitateDropdownTarget); return }
 
     const items = await this._get({ type: "localitate", q, judet })
-    this._render(this.localitateDropdownTarget, items, "_locIdx", (item) => {
+    this._render(this.localitateDropdownTarget, this.localitateInputTarget, items, "_locIdx", (item) => {
       this.localitateInputTarget.value = item.value
       this._hide(this.localitateDropdownTarget)
     })
@@ -82,22 +82,27 @@ export default class extends Controller {
 
   // ── render ────────────────────────────────────────────────────────
 
-  _render(el, items, idxKey, onSelect) {
+  // Uses position:fixed so the dropdown is never clipped by overflow:auto ancestors
+  _render(el, inputEl, items, idxKey, onSelect) {
     el.innerHTML = ""
     this[idxKey]  = -1
     if (!items.length) { el.hidden = true; return }
 
+    const rect    = inputEl.getBoundingClientRect()
+    el.style.top  = `${rect.bottom + 2}px`
+    el.style.left = `${rect.left}px`
+    el.style.width = `${rect.width}px`
+
     items.forEach((item, i) => {
       const li = document.createElement("li")
-      li.className    = "ac-item"
-      li.textContent  = item.label
-      li.dataset.idx  = i
+      li.className   = "ac-item"
+      li.textContent = item.label
+      li.dataset.idx = i
       li.addEventListener("mousedown", (e) => { e.preventDefault(); onSelect(item) })
       el.appendChild(li)
     })
-    el._items    = items
-    el._onSelect = onSelect
-    el.hidden    = false
+    el._items = items
+    el.hidden = false
   }
 
   _handleKeydown(e, dropdown, onSelect, idxKey) {
@@ -140,7 +145,7 @@ export default class extends Controller {
 
   _handleOutsideClick(e) {
     if (this.element.contains(e.target)) return
-    if (this.hasJudetDropdownTarget)     this._hide(this.judetDropdownTarget)
+    if (this.hasJudetDropdownTarget)      this._hide(this.judetDropdownTarget)
     if (this.hasLocalitateDropdownTarget) this._hide(this.localitateDropdownTarget)
   }
 }
