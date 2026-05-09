@@ -11,6 +11,7 @@
   <h1>Parcela <%= @parcela.numar_cadastral %></h1>
   <div class="header-actions">
     <%= link_to "Editează", edit_parcela_cadastrala_path(@parcela), class: "btn btn-secondary" %>
+    <%= link_to "✏ Digitizare", digitizare_path, class: "btn btn-secondary" %>
     <%= button_to "Șterge", @parcela, method: :delete,
           class: "btn btn-danger",
           data: { turbo_confirm: "Ești sigur că vrei să ștergi această parcelă?" } %>
