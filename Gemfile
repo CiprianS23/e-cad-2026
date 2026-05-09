@@ -30,6 +30,7 @@ gem "tzinfo-data", platforms: %i[ windows jruby ]
 gem "redis", ">= 4.0"
 gem "sidekiq", "~> 7.0"
 gem "kaminari"
+gem "csv"
 
 # Reduces boot times through caching; required in config/boot.rb
 gem "bootsnap", require: false

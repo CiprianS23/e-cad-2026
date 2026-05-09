@@ -10,10 +10,11 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_09_200001) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_09_210002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
+  enable_extension "unaccent"
 
   create_table "addresses", force: :cascade do |t|
     t.string "apno"
@@ -313,6 +314,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_09_200001) do
     t.string "valueamount"
     t.string "valuecurrency"
     t.index ["deed_id"], name: "index_registrations_on_deed_id"
+  end
+
+  create_table "siruta_uats", force: :cascade do |t|
+    t.integer "cod_judet", null: false
+    t.integer "cod_siruta", null: false
+    t.string "denumire_judet", limit: 60, null: false
+    t.string "denumire_uat", limit: 100, null: false
+    t.integer "tip_uat", null: false
+    t.string "tip_uat_abrev", limit: 4, null: false
+    t.index ["cod_judet"], name: "index_siruta_uats_on_cod_judet"
+    t.index ["cod_siruta"], name: "index_siruta_uats_on_cod_siruta", unique: true
+    t.index ["denumire_uat"], name: "index_siruta_uats_on_denumire_uat"
   end
 
   add_foreign_key "building_common_parts", "buildings"
