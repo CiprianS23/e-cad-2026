@@ -51,6 +51,7 @@
   <div id="harta-map"
        data-controller="harta-map"
        data-harta-map-geojson-url-value="<%= geojson_parcele_cadastrale_path(params.permit(:q, :status, :judet, :categoria_folosinta)) %>"
+       data-harta-map-cgxml-geojson-url-value="<%= cgxml_geojson_harta_path %>"
        data-harta-map-mapproxy-url-value="http://localhost:8080">
   </div>
 </div>

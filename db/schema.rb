@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_09_180002) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_09_200001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -126,6 +126,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_09_180002) do
   end
 
   create_table "file_descriptions", force: :cascade do |t|
+    t.string "content_hash", limit: 64
     t.datetime "created_at", null: false
     t.datetime "exportdate"
     t.string "filename", null: false
@@ -141,6 +142,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_09_180002) do
     t.integer "validation_errors_count", default: 0, null: false
     t.string "validation_status", default: "pending", null: false
     t.integer "validation_warnings_count", default: 0, null: false
+    t.index ["content_hash"], name: "index_file_descriptions_on_content_hash", unique: true
     t.index ["validation_status"], name: "index_file_descriptions_on_validation_status"
   end
 

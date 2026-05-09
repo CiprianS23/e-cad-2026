@@ -8,6 +8,7 @@ class FileDescription < ApplicationRecord
   VALIDATION_STATUSES = %w[pending in_progress valid errors].freeze
 
   validates :filename,          presence: true, length: { maximum: 50 }
+  validates :content_hash,      uniqueness: true, allow_nil: true
   validates :import_status,     inclusion: { in: IMPORT_STATUSES }
   validates :validation_status, inclusion: { in: VALIDATION_STATUSES }
 

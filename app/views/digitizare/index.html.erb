@@ -1,0 +1,181 @@
+<% content_for :title, "Digitizare Cadastrală" %>
+<% content_for :map, true %>
+<% content_for :fullpage, true %>
+
+<div class="digi-layout"
+     data-controller="digitizare"
+     data-digitizare-calc-url-value="<%= digitizare_calculeaza_path %>"
+     data-digitizare-export-dxf-url-value="<%= digitizare_export_dxf_path %>"
+     data-digitizare-cgxml-url-value="<%= cgxml_geojson_harta_path %>"
+     data-digitizare-mapproxy-url-value="http://localhost:8080"
+     data-digitizare-snap-tolerance-value="15">
+
+  <!-- ── Hartă ──────────────────────────────────────────────────── -->
+  <div id="digi-map"
+       data-digitizare-target="mapEl"
+       class="digi-map"></div>
+
+  <!-- ── Sidebar ────────────────────────────────────────────────── -->
+  <aside class="digi-sidebar">
+
+    <!-- Header -->
+    <div class="digi-sidebar-header">
+      <span class="digi-title">Digitizare Cadastrală</span>
+      <span class="badge badge-info" style="font-size:10px">Stereo 70</span>
+    </div>
+
+    <!-- 1. Coordonate cursor + snap -->
+    <section class="digi-section">
+      <div class="digi-section-label">Coordonate cursor</div>
+      <div class="digi-coords-row">
+        <div class="digi-coord-box">
+          <span class="digi-coord-label">X (E)</span>
+          <span class="digi-coord-val" data-digitizare-target="cursorX">—</span>
+        </div>
+        <div class="digi-coord-box">
+          <span class="digi-coord-label">Y (N)</span>
+          <span class="digi-coord-val" data-digitizare-target="cursorY">—</span>
+        </div>
+      </div>
+      <div class="digi-snap-row">
+        <span class="snap-dot" data-digitizare-target="snapDot" title="Snap inactiv"></span>
+        <span class="snap-label" data-digitizare-target="snapLabel">Snap: în așteptare</span>
+        <label class="snap-tol-label">
+          Toleranță
+          <input type="range" min="5" max="50" value="15" class="snap-slider"
+                 data-digitizare-target="snapSlider"
+                 data-action="input->digitizare#toleranceChanged">
+          <span data-digitizare-target="snapToleranceVal">15</span> px
+        </label>
+      </div>
+    </section>
+
+    <!-- 2. Acțiuni -->
+    <section class="digi-section">
+      <div class="digi-section-label">Acțiuni</div>
+      <div class="digi-btn-row">
+        <button class="btn btn-primary btn-sm"
+                data-digitizare-target="btnStart"
+                data-action="click->digitizare#startDrawing">
+          ✏ Digitizare
+        </button>
+        <button class="btn btn-secondary btn-sm"
+                data-digitizare-target="btnClose"
+                data-action="click->digitizare#closePolygon"
+                disabled>
+          ⬡ Închide
+        </button>
+        <button class="btn btn-secondary btn-sm"
+                data-action="click->digitizare#undoVertex"
+                disabled
+                data-digitizare-target="btnUndo">
+          ↩ Undo
+        </button>
+        <button class="btn btn-outline btn-sm"
+                data-action="click->digitizare#clearAll">
+          ✕ Șterge tot
+        </button>
+      </div>
+      <div class="digi-status" data-digitizare-target="statusBar">
+        Apăsați „Digitizare" pentru a începe.
+      </div>
+    </section>
+
+    <!-- 3. Vertecși -->
+    <section class="digi-section digi-section-flex">
+      <div class="digi-section-label">
+        Vertecși
+        <span class="badge badge-secondary" data-digitizare-target="vertexCount">0</span>
+      </div>
+      <div class="digi-vertex-scroll">
+        <table class="digi-vertex-table">
+          <thead>
+            <tr><th>#</th><th>X (m)</th><th>Y (m)</th><th></th></tr>
+          </thead>
+          <tbody data-digitizare-target="vertexTbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 4. Input manual / import TXT -->
+    <section class="digi-section">
+      <div class="digi-section-label">Adaugă coordonate</div>
+      <div class="digi-manual-row">
+        <input type="number" step="0.001" placeholder="X (E)" class="input input-sm digi-coord-input"
+               data-digitizare-target="inputX">
+        <input type="number" step="0.001" placeholder="Y (N)" class="input input-sm digi-coord-input"
+               data-digitizare-target="inputY">
+        <button class="btn btn-secondary btn-sm"
+                data-action="click->digitizare#addManualPoint">+ Adaugă</button>
+      </div>
+      <label class="digi-import-label">
+        <input type="file" accept=".txt,.csv" class="digi-file-input"
+               data-action="change->digitizare#importTxt">
+        📄 Import TXT stație totală
+      </label>
+    </section>
+
+    <!-- 5. Suprafață -->
+    <section class="digi-section">
+      <div class="digi-section-label">Suprafață</div>
+      <div class="digi-area-grid">
+        <span class="digi-area-label">Calculată (PostGIS)</span>
+        <span class="digi-area-val" data-digitizare-target="areaCalc">—</span>
+
+        <span class="digi-area-label">Din act (mp)</span>
+        <input type="number" step="0.01" class="input input-sm digi-area-input"
+               placeholder="0.00"
+               data-digitizare-target="areaAct"
+               data-action="input->digitizare#updateDiff">
+
+        <span class="digi-area-label">Diferență</span>
+        <span class="digi-area-diff" data-digitizare-target="areaDiff">—</span>
+      </div>
+      <div class="digi-topology" data-digitizare-target="topologyMsg"></div>
+    </section>
+
+    <!-- 6. Export -->
+    <section class="digi-section">
+      <div class="digi-section-label">Export</div>
+      <div class="digi-btn-row">
+        <button class="btn btn-secondary btn-sm"
+                data-action="click->digitizare#exportDxf">
+          ⬇ DXF
+        </button>
+        <button class="btn btn-secondary btn-sm"
+                data-action="click->digitizare#showRaport">
+          📋 Raport
+        </button>
+      </div>
+    </section>
+
+    <!-- 7. Salvare -->
+    <section class="digi-section">
+      <div class="digi-section-label">Salvează ca parcelă cadastrală</div>
+      <%= form_with url: parcele_cadastrale_path, method: :post, data: { digitizare_target: "saveForm" } do |f| %>
+        <%= hidden_field_tag "parcela_cadastrala[geom_wkt]", "", data: { digitizare_target: "wktField" } %>
+        <div class="digi-save-grid">
+          <%= f.text_field  "parcela_cadastrala[numar_cadastral]",    placeholder: "Nr. cadastral *", class: "input input-sm" %>
+          <%= f.select      "parcela_cadastrala[categoria_folosinta]",
+                            [["— Categorie *", ""], ["Arabil","arabil"], ["Pășune","pasune"],
+                             ["Fânețe","faneata"], ["Vie","vie"], ["Livadă","livada"],
+                             ["Pădure","padure"], ["Curți/construcții","curti_constructii"],
+                             ["Ape","ape"], ["Neproductiv","neproductiv"]],
+                            {}, { class: "input input-sm" } %>
+          <%= f.text_field  "parcela_cadastrala[judet]",      placeholder: "Județ *",      class: "input input-sm" %>
+          <%= f.text_field  "parcela_cadastrala[localitate]", placeholder: "Localitate *", class: "input input-sm" %>
+          <%= f.text_field  "parcela_cadastrala[proprietar]", placeholder: "Proprietar",   class: "input input-sm" %>
+          <%= f.number_field "parcela_cadastrala[suprafata_mp]", placeholder: "Suprafață mp",
+                              step: 0.01, class: "input input-sm",
+                              data: { digitizare_target: "saveAreaField" } %>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm"
+                style="width:100%;margin-top:8px"
+                data-action="click->digitizare#saveParcel">
+          💾 Salvează parcela
+        </button>
+      <% end %>
+    </section>
+
+  </aside>
+</div>

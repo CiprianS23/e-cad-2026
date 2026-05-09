@@ -247,6 +247,15 @@ legend { font-size: 13px; font-weight: 700; color: #374151; padding: 0 6px; }
 .map-popup dt { color: #9ca3af; font-weight: 500; }
 .map-popup dd { color: #1a1a2e; }
 
+.cgxml-popup { font-size: 12px; line-height: 1.5; min-width: 240px; }
+.cgxml-popup .popup-title { font-size: 14px; font-weight: 700; color: #1a1a2e; margin-bottom: 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; }
+.cgxml-popup .popup-section-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #9ca3af; margin: 8px 0 4px; }
+.cgxml-popup .popup-table { width: 100%; border-collapse: collapse; }
+.cgxml-popup .popup-table th { text-align: left; color: #6b7280; font-weight: 500; padding: 2px 8px 2px 0; white-space: nowrap; width: 1%; }
+.cgxml-popup .popup-table td { color: #1a1a2e; padding: 2px 0; }
+.cgxml-popup .popup-table a { color: #1d4ed8; text-decoration: none; font-family: monospace; font-size: 11px; }
+.cgxml-popup .popup-table a:hover { text-decoration: underline; }
+
 /* ── Draw map widget ── */
 .draw-map-container {
   height: 380px;
@@ -460,3 +469,144 @@ nav.pagination a:hover  { background: #f3f4f6; }
 /* ── Validation pending notice ── */
 .validation-pending-notice { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
 .total-row { font-weight: 700; background: #f8fafc; }
+
+/* ══════════════════════════════════════════════════════════════════
+   MODUL DIGITIZARE CADASTRALĂ
+   ══════════════════════════════════════════════════════════════════ */
+
+/* Layout principal */
+.digi-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  height: calc(100vh - 44px);
+  overflow: hidden;
+}
+.digi-map { width: 100%; height: 100%; }
+
+/* Sidebar */
+.digi-sidebar {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  background: #fff;
+  border-left: 1px solid #e5e7eb;
+  font-size: 12px;
+}
+.digi-sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #1a1a2e;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.digi-title { letter-spacing: .02em; }
+
+/* Secțiuni */
+.digi-section {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 10px 14px;
+}
+.digi-section-flex { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.digi-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: #9ca3af;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Coordonate cursor */
+.digi-coords-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.digi-coord-box  { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 8px; }
+.digi-coord-label { display: block; font-size: 10px; color: #9ca3af; font-weight: 600; }
+.digi-coord-val   { display: block; font-family: monospace; font-size: 13px; font-weight: 700; color: #1a1a2e; margin-top: 2px; }
+
+/* Snap */
+.digi-snap-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.snap-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #9ca3af; flex-shrink: 0;
+  transition: background .2s;
+}
+.snap-label { font-size: 11px; font-weight: 600; color: #374151; flex: 1; }
+.snap-tol-label { font-size: 10px; color: #9ca3af; display: flex; align-items: center; gap: 4px; }
+.snap-slider { width: 60px; accent-color: #1d4ed8; }
+
+/* Toolbar acțiuni */
+.digi-btn-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.btn-active   { background: #1d4ed8 !important; color: #fff !important; }
+.digi-status  {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #6b7280;
+  background: #f8fafc;
+  border-radius: 4px;
+  padding: 5px 8px;
+  min-height: 28px;
+  line-height: 1.4;
+}
+.digi-status-ok   { color: #16a34a; background: #f0fdf4; }
+.digi-status-warn { color: #b45309; background: #fffbeb; }
+
+/* Vertex list */
+.digi-vertex-scroll { overflow-y: auto; max-height: 200px; flex: 1 1 auto; }
+.digi-vertex-table  { width: 100%; border-collapse: collapse; }
+.digi-vertex-table thead th {
+  position: sticky; top: 0;
+  background: #f3f4f6;
+  padding: 4px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #6b7280;
+  text-align: left;
+}
+.digi-vertex-table tbody tr:hover { background: #f8fafc; }
+.vt-no    { color: #9ca3af; padding: 3px 6px; width: 24px; }
+.vt-coord { font-family: monospace; font-size: 11px; padding: 3px 6px; color: #1a1a2e; }
+.digi-del-btn {
+  background: none; border: none; color: #9ca3af; cursor: pointer; font-size: 11px;
+  padding: 2px 4px; border-radius: 3px;
+}
+.digi-del-btn:hover { background: #fee2e2; color: #dc2626; }
+
+/* Tooltip vertex pe hartă */
+.digi-vertex-tooltip { font-size: 11px; font-family: monospace; }
+
+/* Manual input */
+.digi-manual-row { display: flex; gap: 4px; align-items: center; }
+.digi-coord-input { width: 90px; font-family: monospace; font-size: 12px; }
+.digi-file-input  { display: none; }
+.digi-import-label {
+  display: inline-block; margin-top: 8px;
+  cursor: pointer; font-size: 11px; color: #1d4ed8;
+  padding: 4px 8px; border: 1px dashed #93c5fd; border-radius: 4px;
+}
+.digi-import-label:hover { background: #eff6ff; }
+
+/* Suprafață */
+.digi-area-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 5px 10px;
+  align-items: center;
+}
+.digi-area-label { font-size: 11px; color: #6b7280; white-space: nowrap; }
+.digi-area-val   { font-family: monospace; font-size: 13px; font-weight: 700; color: #1a1a2e; }
+.digi-area-input { font-family: monospace; font-size: 12px; }
+.digi-area-diff  { font-family: monospace; font-size: 13px; font-weight: 700; }
+.diff-ok   { color: #16a34a; }
+.diff-warn { color: #d97706; }
+.diff-bad  { color: #dc2626; }
+.digi-topology { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+.topo-warn { font-size: 11px; color: #b45309; background: #fffbeb; border-radius: 3px; padding: 2px 6px; }
+
+/* Salvare */
+.digi-save-grid { display: flex; flex-direction: column; gap: 5px; }

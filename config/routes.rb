@@ -30,6 +30,13 @@ Rails.application.routes.draw do
     end
   end
 
+  get  "/harta/cgxml_geojson", to: "harta#cgxml_geojson", as: :cgxml_geojson_harta
+
+  scope "/digitizare" do
+    get  "/",                 to: "digitizare#index",              as: :digitizare
+    post "/calculeaza",       to: "digitizare#calculeaza_suprafata", as: :digitizare_calculeaza
+    post "/export_dxf",       to: "digitizare#export_dxf",         as: :digitizare_export_dxf
+  end
   get "/harta", to: "harta#index", as: :harta
   root "harta#index"
 end

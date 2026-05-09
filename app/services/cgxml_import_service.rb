@@ -5,9 +5,10 @@ class CgxmlImportService
     def total_saved = counts.values.sum
   end
 
-  def initialize(xml_content, filename: "import.cgxml")
-    @xml_content = xml_content
-    @filename    = filename
+  def initialize(xml_content, filename: "import.cgxml", content_hash: nil)
+    @xml_content  = xml_content
+    @filename     = filename
+    @content_hash = content_hash
     @doc         = nil
     @id_map      = {}
     @counts      = Hash.new(0)
@@ -118,7 +119,8 @@ class CgxmlImportService
       import_status:       status,
       import_errors_count: @import_errors.size,
       raw_xml:             @xml_content.truncate(500_000),
-      imported_at:         Time.current
+      imported_at:         Time.current,
+      content_hash:        @content_hash
     )
   end
 
