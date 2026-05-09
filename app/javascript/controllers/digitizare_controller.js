@@ -11,6 +11,8 @@ export default class extends Controller {
     cgxmlUrl:      String,
     parcelUrl:     String,
     mapproxyUrl:   String,
+    uatUrl:        String,
+    locateUatUrl:  String,
     snapTolerance: { type: Number, default: 15 }
   }
 
@@ -43,10 +45,12 @@ export default class extends Controller {
     this._layerPreview = null     // L.Polyline cursor→last vertex
     this._layerSnap    = null     // L.CircleMarker snap indicator
     this._markerGroup  = null     // L.LayerGroup vertex markers
+    this._uatLayer     = null     // L.GeoJSON UAT boundaries
 
     this._initMap()
     this._loadParcelLayer()
     this._loadCgxmlLayer()
+    this._loadUatLayer()
   }
 
   disconnect() {
@@ -73,6 +77,22 @@ export default class extends Controller {
       osm.addTo(this.map)
     }
 
+    this._uatLayer = L.geoJSON(null, {
+      style: () => ({
+        color:       "#6b21a8",
+        weight:      1.2,
+        fillColor:   "#a855f7",
+        fillOpacity: 0.06,
+        dashArray:   "4 3"
+      }),
+      onEachFeature: (f, l) => {
+        const p = f.properties || {}
+        l.bindTooltip(p.name || p.nat_code || "UAT", { sticky: true, className: "uat-tooltip" })
+        l.on("mouseover", () => l.setStyle({ weight: 2, fillOpacity: 0.18 }))
+        l.on("mouseout",  () => this._uatLayer.resetStyle(l))
+      }
+    })
+
     this._parcelLayer = L.geoJSON(null, {
       style:         () => ({ color: "#1d4ed8", weight: 1.5, fillOpacity: 0.15, fillColor: "#3b82f6" }),
       onEachFeature: (f, l) => {
@@ -88,9 +108,11 @@ export default class extends Controller {
     this._markerGroup = L.layerGroup().addTo(this.map)
 
     L.control.layers(baseLayers, {
+      "Limite UAT":         this._uatLayer,
       "Parcele cadastrale": this._parcelLayer,
       "Imobile CGXML":      this._cgxmlLayer
     }, { collapsed: false }).addTo(this.map)
+    this._uatLayer.addTo(this.map)
     this._parcelLayer.addTo(this.map)
     this._cgxmlLayer.addTo(this.map)
 
@@ -127,6 +149,43 @@ export default class extends Controller {
     }
   }
 
+  async _loadUatLayer() {
+    if (!this.uatUrlValue) return
+    try {
+      const res  = await fetch(this.uatUrlValue)
+      const data = await res.json()
+      this._uatLayer.addData(data)
+    } catch (e) {
+      console.warn("UAT layer error:", e)
+    }
+  }
+
+  async _locateUat() {
+    if (!this.locateUatUrlValue || this._verts.length < 3) return
+    try {
+      const res  = await fetch(this.locateUatUrlValue, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": this._csrf() },
+        body:    JSON.stringify({ coords: this._verts.map(v => [v.x, v.y]) })
+      })
+      const data = await res.json()
+      if (!data.judet) return
+
+      const judetEl     = this.element.querySelector('[data-siruta-target="judetInput"]')
+      const localitateEl = this.element.querySelector('[data-siruta-target="localitateInput"]')
+      if (judetEl)     this._flashFill(judetEl,     data.judet)
+      if (localitateEl) this._flashFill(localitateEl, data.localitate)
+    } catch (e) {
+      console.warn("Locate UAT error:", e)
+    }
+  }
+
+  _flashFill(input, value) {
+    input.value = value
+    input.classList.add("digi-autofill")
+    setTimeout(() => input.classList.remove("digi-autofill"), 1800)
+  }
+
   // ── Public actions ───────────────────────────────────────────────────────
 
   startDrawing() {
@@ -153,6 +212,7 @@ export default class extends Controller {
     this._removeLayer("_layerSnap")
     this._updatePolyPreview()
     this._calcArea()
+    this._locateUat()
     this._setStatus(`Poligon închis — ${this._verts.length} vertecși.`, "ok")
   }
 

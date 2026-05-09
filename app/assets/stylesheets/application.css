@@ -642,3 +642,13 @@ nav.pagination a:hover  { background: #f3f4f6; }
   background: #eff6ff;
   color: #1d4ed8;
 }
+
+/* ── Digitizare — autofill flash ─────────────────────────────────── */
+@keyframes digi-autofill-flash {
+  0%   { background: #d1fae5; border-color: #10b981; }
+  70%  { background: #d1fae5; border-color: #10b981; }
+  100% { background: transparent; border-color: inherit; }
+}
+.digi-autofill {
+  animation: digi-autofill-flash 1.8s ease forwards;
+}

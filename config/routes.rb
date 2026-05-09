@@ -36,9 +36,11 @@ Rails.application.routes.draw do
     get  "/",                 to: "digitizare#index",              as: :digitizare
     post "/calculeaza",       to: "digitizare#calculeaza_suprafata", as: :digitizare_calculeaza
     post "/export_dxf",       to: "digitizare#export_dxf",         as: :digitizare_export_dxf
+    post "/locate_uat",       to: "digitizare#locate_uat",         as: :digitizare_locate_uat
   end
   get "/siruta/autocomplete", to: "siruta#autocomplete", as: :siruta_autocomplete
 
   get "/harta", to: "harta#index", as: :harta
+  get "/uat_boundaries/geojson", to: "uat_boundaries#geojson", as: :uat_boundaries_geojson
   root "harta#index"
 end

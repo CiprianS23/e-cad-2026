@@ -37,6 +37,38 @@ class DigitizareController < ApplicationController
     render json: { suprafata: 0, error: e.message }, status: :unprocessable_entity
   end
 
+  def locate_uat
+    coords = params[:coords]
+    return render json: {} if coords.blank? || coords.length < 3
+
+    pts  = coords.map { |c| [c[0].to_f, c[1].to_f] }
+    ring = pts.map { |x, y| "#{x} #{y}" }.join(", ")
+    ring += ", #{pts.first[0]} #{pts.first[1]}" unless pts.first == pts.last
+    wkt  = "POLYGON((#{ring}))"
+
+    sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt])
+      WITH poly AS (
+        SELECT ST_Centroid(ST_GeomFromText(?, 3844)) AS centroid
+      )
+      SELECT
+        initcap(s.denumire_judet) AS judet,
+        initcap(s.denumire_uat)   AS localitate,
+        s.tip_uat_abrev
+      FROM uat_boundaries u
+      JOIN siruta_uats s ON s.cod_siruta = u.nat_code::integer
+      CROSS JOIN poly
+      ORDER BY
+        CASE WHEN ST_Contains(u.geom, poly.centroid) THEN 0 ELSE 1 END,
+        ST_Distance(u.geom, poly.centroid)
+      LIMIT 1
+    SQL
+
+    result = ActiveRecord::Base.connection.select_one(sql)
+    render json: result || {}
+  rescue => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   def export_dxf
     coords = params[:coords]
     name   = params[:name].presence || "Parcela"

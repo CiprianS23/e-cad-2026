@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_09_210002) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_09_220001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -326,6 +326,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_09_210002) do
     t.index ["cod_judet"], name: "index_siruta_uats_on_cod_judet"
     t.index ["cod_siruta"], name: "index_siruta_uats_on_cod_siruta", unique: true
     t.index ["denumire_uat"], name: "index_siruta_uats_on_denumire_uat"
+  end
+
+  create_table "uat_boundaries", force: :cascade do |t|
+    t.date "begin_vers"
+    t.date "end_version"
+    t.geometry "geom", limit: {:srid=>3844, :type=>"multi_polygon"}
+    t.string "local_id", limit: 254
+    t.string "name", limit: 254
+    t.string "nat_code", limit: 254
+    t.string "nat_lev_name", limit: 254
+    t.string "nat_level", limit: 254
+    t.string "res_of_aut", limit: 254
+    t.float "shape_area"
+    t.float "shape_leng"
+    t.bigint "shp_id"
+    t.index ["geom"], name: "index_uat_boundaries_on_geom", using: :gist
+    t.index ["name"], name: "index_uat_boundaries_on_name"
+    t.index ["nat_code"], name: "index_uat_boundaries_on_nat_code"
   end
 
   add_foreign_key "building_common_parts", "buildings"
