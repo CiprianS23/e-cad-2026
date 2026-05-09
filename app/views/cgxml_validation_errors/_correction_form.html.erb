@@ -1,0 +1,54 @@
+<%# Inline correction form with Stimulus real-time validation %>
+<%
+  entity_rec = err.entity_record
+  current_val = entity_rec&.public_send(err.field_name) rescue nil
+%>
+
+<div class="correction-form"
+     data-controller="field-validator"
+     data-field-validator-entity-type-value="<%= err.entity_type %>"
+     data-field-validator-field-name-value="<%= err.field_name %>"
+     data-field-validator-error-id-value="<%= err.id %>"
+     data-field-validator-fix-url-value="<%= fix_cgxml_validation_error_path(err) %>"
+     data-field-validator-validate-url-value="<%= validate_field_cgxml_validation_errors_path %>">
+
+  <div class="cf-row">
+    <div class="cf-input-wrap">
+      <label class="cf-label" for="cf-<%= err.id %>">
+        Corectați <strong><%= err.field_name %></strong>
+        <% if err.expected_format.present? %>
+          <span class="cf-hint">(<%= err.expected_format %>)</span>
+        <% end %>
+      </label>
+
+      <div class="cf-input-group">
+        <input type="text"
+               id="cf-<%= err.id %>"
+               class="cf-input"
+               value="<%= current_val %>"
+               placeholder="<%= err.expected_format %>"
+               autocomplete="off"
+               data-field-validator-target="input"
+               data-action="input->field-validator#validate" />
+
+        <div class="cf-feedback" data-field-validator-target="feedback" aria-live="polite"></div>
+      </div>
+    </div>
+
+    <div class="cf-actions">
+      <button type="button"
+              class="btn btn-sm btn-primary cf-save-btn"
+              data-field-validator-target="saveBtn"
+              data-action="click->field-validator#save"
+              disabled>
+        Salvează
+      </button>
+      <button type="button"
+              class="btn btn-xs btn-secondary mark-fixed-btn"
+              data-error-id="<%= err.id %>"
+              data-fix-url="<%= fix_cgxml_validation_error_path(err) %>">
+        Marchează fără modificare
+      </button>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,16 @@
+<%
+  label = case status
+          when "pending"     then "În așteptare"
+          when "in_progress" then "În curs..."
+          when "valid"       then "Valid"
+          when "errors"      then "Cu erori"
+          else status
+          end
+  css = case status
+        when "valid"       then "badge-valid"
+        when "errors"      then "badge-error"
+        when "in_progress" then "badge-info"
+        else "badge-secondary"
+        end
+%>
+<span class="badge <%= css %>"><%= label %></span>

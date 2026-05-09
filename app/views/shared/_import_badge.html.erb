@@ -1,0 +1,15 @@
+<%
+  label = case status
+          when "done"    then "Importat"
+          when "partial" then "Parțial (#{errors} erori)"
+          when "failed"  then "Eșuat"
+          else status
+          end
+  css = case status
+        when "done"    then "badge-valid"
+        when "partial" then "badge-warning"
+        when "failed"  then "badge-error"
+        else "badge-secondary"
+        end
+%>
+<span class="badge <%= css %>"><%= label %></span>

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_09_170001) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_09_180002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -67,6 +67,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_09_170001) do
     t.index ["land_id"], name: "index_buildings_on_land_id"
   end
 
+  create_table "cgxml_validation_errors", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "current_value"
+    t.bigint "entity_id"
+    t.string "entity_type", null: false
+    t.string "error_code", null: false
+    t.text "error_message", null: false
+    t.string "expected_format"
+    t.string "field_name"
+    t.bigint "file_description_id", null: false
+    t.datetime "fixed_at"
+    t.string "fixed_by"
+    t.string "severity", default: "error", null: false
+    t.datetime "updated_at", null: false
+    t.string "xpath"
+    t.index ["entity_type", "entity_id"], name: "index_cgxml_validation_errors_on_entity_type_and_entity_id"
+    t.index ["file_description_id", "entity_type"], name: "idx_on_file_description_id_entity_type_7a09c0a15d"
+    t.index ["file_description_id", "error_code"], name: "idx_on_file_description_id_error_code_33f50cadc9"
+    t.index ["file_description_id"], name: "index_cgxml_validation_errors_on_file_description_id"
+    t.index ["fixed_at"], name: "index_cgxml_validation_errors_on_fixed_at"
+  end
+
   create_table "contested_x_entities", force: :cascade do |t|
     t.bigint "building_id"
     t.bigint "contested_id"
@@ -108,10 +130,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_09_170001) do
     t.datetime "exportdate"
     t.string "filename", null: false
     t.string "fileversion"
+    t.integer "import_errors_count", default: 0, null: false
+    t.string "import_status", default: "done", null: false
+    t.datetime "imported_at"
     t.string "licensedname"
     t.string "licensenumber"
     t.string "operationtype"
+    t.text "raw_xml"
     t.datetime "updated_at", null: false
+    t.integer "validation_errors_count", default: 0, null: false
+    t.string "validation_status", default: "pending", null: false
+    t.integer "validation_warnings_count", default: 0, null: false
+    t.index ["validation_status"], name: "index_file_descriptions_on_validation_status"
   end
 
   create_table "individual_units", force: :cascade do |t|
@@ -286,6 +316,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_09_170001) do
   add_foreign_key "building_common_parts", "buildings"
   add_foreign_key "buildings", "addresses"
   add_foreign_key "buildings", "lands"
+  add_foreign_key "cgxml_validation_errors", "file_descriptions"
   add_foreign_key "contested_x_entities", "buildings"
   add_foreign_key "contested_x_entities", "contesteds"
   add_foreign_key "contested_x_entities", "individual_units"

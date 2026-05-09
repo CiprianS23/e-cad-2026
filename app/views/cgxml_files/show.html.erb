@@ -1,0 +1,205 @@
+<% content_for :title, "#{@fd.filename} — Validare CGXML" %>
+
+<div class="page-header">
+  <div>
+    <div class="breadcrumb"><%= link_to "Fișiere CGXML", cgxml_files_path %> / <%= @fd.filename %></div>
+    <h1><%= @fd.filename %></h1>
+  </div>
+  <div class="header-actions">
+    <%= link_to "Raport JSON", report_cgxml_file_path(@fd, format: :json),
+        class: "btn btn-secondary", target: "_blank" %>
+    <%= button_to "Revalidează", revalidate_cgxml_file_path(@fd),
+        method: :post, class: "btn btn-outline",
+        data: { confirm: "Relanseați validarea?" } %>
+  </div>
+</div>
+
+<%# ── File metadata ── %>
+<div class="info-grid">
+  <div class="info-block">
+    <label>Versiune fișier</label>
+    <span><%= @fd.fileversion || "—" %></span>
+  </div>
+  <div class="info-block">
+    <label>Tip operațiune</label>
+    <span><%= @fd.operationtype || "—" %></span>
+  </div>
+  <div class="info-block">
+    <label>Data export</label>
+    <span><%= @fd.exportdate&.strftime("%d.%m.%Y %H:%M") || "—" %></span>
+  </div>
+  <div class="info-block">
+    <label>Titular licență</label>
+    <span><%= @fd.licensedname || "—" %></span>
+  </div>
+  <div class="info-block">
+    <label>Nr. licență</label>
+    <span><%= @fd.licensenumber || "—" %></span>
+  </div>
+  <div class="info-block">
+    <label>Status import</label>
+    <%= render partial: "shared/import_badge", locals: { status: @fd.import_status,
+        errors: @fd.import_errors_count } %>
+  </div>
+  <div class="info-block">
+    <label>Status validare</label>
+    <%= render partial: "shared/validation_badge", locals: { status: @fd.validation_status } %>
+  </div>
+  <div class="info-block">
+    <label>Erori / Avertismente</label>
+    <span>
+      <span class="badge badge-error"><%= @fd.validation_errors_count %> erori</span>
+      <span class="badge badge-warning"><%= @fd.validation_warnings_count %> avertismente</span>
+      <% if @fixed_count > 0 %>
+        <span class="badge badge-valid"><%= @fixed_count %> rezolvate</span>
+      <% end %>
+    </span>
+  </div>
+</div>
+
+<% if @fd.validation_status == "pending" || @fd.validation_status == "in_progress" %>
+  <div class="flash notice validation-pending-notice" id="pending-notice">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+    </svg>
+    Validarea este <%= @fd.validation_status == "in_progress" ? "în curs de desfășurare" : "programată" %>.
+    Reîncărcați pagina după câteva secunde.
+    <a href="" onclick="location.reload(); return false;" class="link-primary">Reîncarcă</a>
+  </div>
+<% end %>
+
+<% if @unfixed_count == 0 && @fd.validation_status == "valid" %>
+  <div class="flash notice">
+    Fișierul este valid conform schemei ANCPI CGXML v3. Nicio eroare nerezolvată.
+  </div>
+<% end %>
+
+<%# ── Error summary by code ── %>
+<% if @errors_by_code.any? %>
+<div data-controller="cgxml-errors">
+  <div class="section-header" id="erori">
+    <h2>Erori grupate pe tip
+      <span data-unfixed-count="<%= @unfixed_count %>">
+        (<%= @unfixed_count %> nerezolvate)
+      </span>
+    </h2>
+  </div>
+
+  <div class="error-summary-grid">
+    <% @errors_by_code.each do |code_label, errs| %>
+      <a class="error-summary-card <%= errs.any? { |e| e.severity == 'error' } ? 'card-error' : 'card-warning' %>"
+         href="#group-<%= errs.first.error_code %>">
+        <span class="esc-count"><%= errs.size %></span>
+        <span class="esc-label"><%= code_label %></span>
+        <span class="esc-sev">
+          <% errors_only = errs.count { |e| e.severity == 'error' } %>
+          <% warns_only  = errs.count { |e| e.severity == 'warning' } %>
+          <% if errors_only > 0 %><span class="badge badge-error"><%= errors_only %> E</span><% end %>
+          <% if warns_only > 0 %><span class="badge badge-warning"><%= warns_only %> A</span><% end %>
+        </span>
+      </a>
+    <% end %>
+  </div>
+
+  <%# ── Error groups (expanded) ── %>
+  <% @errors_by_code.each do |code_label, errs| %>
+    <div class="error-group" id="group-<%= errs.first.error_code %>">
+      <div class="error-group-header">
+        <h3>
+          <span class="error-group-icon <%= errs.any? { |e| e.severity == 'error' } ? 'icon-error' : 'icon-warning' %>">
+            <%= errs.any? { |e| e.severity == 'error' } ? "✕" : "⚠" %>
+          </span>
+          <%= code_label %>
+          <span class="badge <%= errs.any? { |e| e.severity == 'error' } ? 'badge-error' : 'badge-warning' %>">
+            <%= errs.size %>
+          </span>
+        </h3>
+        <button class="btn btn-xs btn-secondary toggle-group" data-target="errs-<%= errs.first.error_code %>">
+          Ascunde
+        </button>
+      </div>
+
+      <div class="error-list" id="errs-<%= errs.first.error_code %>">
+        <% errs.each do |err| %>
+          <div class="error-row <%= err.fixed? ? 'error-row-fixed' : '' %>"
+               id="error-<%= err.id %>"
+               data-error-id="<%= err.id %>">
+            <div class="error-row-meta">
+              <span class="badge badge-entity"><%= err.entity_label %></span>
+              <% if err.field_name.present? %>
+                <span class="field-badge"><%= err.field_name %></span>
+              <% end %>
+              <% if err.xpath.present? %>
+                <span class="xpath-badge" title="<%= err.xpath %>">XPath</span>
+              <% end %>
+            </div>
+
+            <div class="error-row-content">
+              <p class="error-msg"><%= err.error_message %></p>
+              <% if err.current_value.present? %>
+                <div class="value-compare">
+                  <span class="val-label">Valoare curentă:</span>
+                  <code class="val-current"><%= err.current_value %></code>
+                  <% if err.expected_format.present? %>
+                    <span class="val-label">Așteptat:</span>
+                    <code class="val-expected"><%= err.expected_format %></code>
+                  <% end %>
+                </div>
+              <% elsif err.expected_format.present? %>
+                <div class="value-compare">
+                  <span class="val-label">Format așteptat:</span>
+                  <code class="val-expected"><%= err.expected_format %></code>
+                </div>
+              <% end %>
+            </div>
+
+            <% unless err.fixed? %>
+              <% if err.field_name.present? && err.entity_id.present? %>
+                <%= render partial: "cgxml_validation_errors/correction_form",
+                    locals: { err: err } %>
+              <% else %>
+                <div class="error-row-actions">
+                  <button class="btn btn-xs btn-secondary mark-fixed-btn"
+                          data-error-id="<%= err.id %>"
+                          data-fix-url="<%= fix_cgxml_validation_error_path(err) %>">
+                    Marchează rezolvat
+                  </button>
+                </div>
+              <% end %>
+            <% else %>
+              <div class="error-row-fixed-label">
+                Rezolvat <%= err.fixed_at&.strftime("%d.%m.%Y %H:%M") %>
+                <% if err.fixed_by.present? %> de <em><%= err.fixed_by %></em><% end %>
+                <button class="btn btn-xs btn-outline unfix-btn"
+                        data-error-id="<%= err.id %>"
+                        data-unfix-url="<%= unfix_cgxml_validation_error_path(err) %>">
+                  Anulează
+                </button>
+              </div>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+</div><%# /data-controller="cgxml-errors" %>
+<% end %>
+
+<%# ── Entity-type summary ── %>
+<% if @errors_by_entity.any? %>
+  <div class="section-header" style="margin-top: 32px;">
+    <h2>Distribuție pe tip de entitate</h2>
+  </div>
+  <div class="entity-dist-grid">
+    <% @errors_by_entity.sort_by { |_, v| -v.size }.each do |entity_type, errs| %>
+      <div class="entity-dist-card">
+        <span class="edc-name"><%= errs.first.entity_label %></span>
+        <span class="edc-count"><%= errs.size %></span>
+        <div class="edc-bar">
+          <div class="edc-fill edc-fill-<%= errs.any? { |e| e.severity == 'error' } ? 'error' : 'warning' %>"
+               style="width: <%= [ errs.size * 100 / [ @unfixed_count, 1 ].max, 100 ].min %>%"></div>
+        </div>
+      </div>
+    <% end %>
+  </div>
+<% end %>

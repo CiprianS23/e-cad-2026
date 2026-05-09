@@ -29,6 +29,7 @@ gem "tzinfo-data", platforms: %i[ windows jruby ]
 # Redis pentru cache, joburi și Action Cable
 gem "redis", ">= 4.0"
 gem "sidekiq", "~> 7.0"
+gem "kaminari"
 
 # Reduces boot times through caching; required in config/boot.rb
 gem "bootsnap", require: false

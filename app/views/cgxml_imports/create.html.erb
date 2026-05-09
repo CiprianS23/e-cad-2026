@@ -1,28 +1,34 @@
-<% content_for :title, "Rezultat import CGXML" %>
+<% content_for :title, "Rezultat import — #{@filename}" %>
 
 <div class="page-header">
-  <h1>Rezultat import</h1>
+  <h1>Rezultat import: <span class="filename-badge"><%= @filename %></span></h1>
   <div class="header-actions">
     <%= link_to "Import nou", new_cgxml_import_path, class: "btn btn-primary" %>
   </div>
 </div>
 
-<% if @result.errors.any? %>
+<% if @result.import_errors.any? && @result.total_saved == 0 %>
   <div class="flash alert" style="margin-bottom:20px">
-    <strong>Importul a eșuat — nicio înregistrare nu a fost salvată.</strong>
+    <strong>Import eșuat.</strong> Fișierul conține erori care au împiedicat importul.
     <ul style="margin-top:8px;padding-left:18px">
-      <% @result.errors.each do |err| %>
-        <li><%= err %></li>
+      <% @result.import_errors.each do |err| %>
+        <li><strong><%= err[:entity] %>:</strong> <%= err[:message] %></li>
       <% end %>
     </ul>
   </div>
+<% elsif @result.partial? %>
+  <div class="flash alert" style="margin-bottom:20px">
+    <strong>Import parțial</strong> — <%= @result.import_errors.size %> înregistrare(i) respinse.
+    Restul datelor (<%= @result.total_saved %> înregistrări) au fost salvate.
+    Validarea CGXML v3 a fost programată și rulează în fundal.
+  </div>
 <% else %>
   <div class="flash notice" style="margin-bottom:20px">
-    Fișierul <strong><%= @filename %></strong> a fost importat cu succes.
+    <strong>Import reușit!</strong>
+    Fișierul <strong><%= @filename %></strong> a fost importat (<%= @result.total_saved %> înregistrări).
+    Validarea CGXML v3 rulează în fundal.
   </div>
 <% end %>
-
-<% total = @result.counts.values.sum %>
 
 <div class="show-layout" style="grid-template-columns: 1fr 1fr; gap: 20px;">
   <div class="detail-card">
@@ -31,7 +37,7 @@
       <thead>
         <tr>
           <th>Entitate</th>
-          <th style="text-align:right">Înregistrări</th>
+          <th style="text-align:right">Salvate</th>
         </tr>
       </thead>
       <tbody>
@@ -55,20 +61,30 @@
         %>
         <% labels.each do |key, label| %>
           <% count = @result.counts[key] %>
-          <% next if count.zero? && @result.errors.any? %>
+          <% next if count.zero? %>
           <tr>
             <td><%= label %></td>
-            <td style="text-align:right;font-weight:600;color:<%= count > 0 ? '#065f46' : '#6b7280' %>">
-              <%= count %>
-            </td>
+            <td style="text-align:right;font-weight:600;color:#065f46"><%= count %></td>
           </tr>
         <% end %>
         <tr style="border-top:2px solid #e5e7eb;font-weight:700">
           <td>Total</td>
-          <td style="text-align:right"><%= total %></td>
+          <td style="text-align:right"><%= @result.total_saved %></td>
         </tr>
       </tbody>
     </table>
+
+    <% if @result.import_errors.any? %>
+      <h3 style="margin-top:20px;color:#991b1b">Înregistrări respinse (<%= @result.import_errors.size %>)</h3>
+      <div class="error-list-simple" style="margin-top:8px">
+        <% @result.import_errors.each do |err| %>
+          <div class="simple-error">
+            <span class="badge badge-error"><%= err[:entity] %></span>
+            <%= err[:message] %>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
   </div>
 
   <% if @result.file_description %>
@@ -100,25 +116,10 @@
         <% end %>
       </dl>
 
-      <% land_count = @result.counts[:lands] %>
-      <% if land_count > 0 %>
-        <h2 style="margin-top:20px">Terenuri importate</h2>
-        <table class="data-table" style="margin-top:12px">
-          <thead>
-            <tr><th>ID</th><th>Sector cadastral</th><th>Suprafață (m²)</th><th>Nr. cadastral</th></tr>
-          </thead>
-          <tbody>
-            <% fd.lands.each do |l| %>
-              <tr>
-                <td><%= l.id %></td>
-                <td><%= l.cadsector.presence || "—" %></td>
-                <td><%= number_with_precision(l.measuredarea, precision: 2) %></td>
-                <td><%= l.papercadno.presence || "—" %></td>
-              </tr>
-            <% end %>
-          </tbody>
-        </table>
-      <% end %>
+      <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap">
+        <%= link_to "Raport validare →", cgxml_file_path(fd), class: "btn btn-primary" %>
+        <%= link_to "Lista fișierelor", cgxml_files_path, class: "btn btn-secondary" %>
+      </div>
     </div>
   <% end %>
 </div>

@@ -13,8 +13,12 @@ class CgxmlImportsController < ApplicationController
       return redirect_to new_cgxml_import_path, alert: "Fișierul trebuie să fie .cgxml sau .xml"
     end
 
-    content = file.read.force_encoding("UTF-8")
-    @result = CgxmlImportService.new(content).call
+    content  = file.read.force_encoding("UTF-8")
+    @result   = CgxmlImportService.new(content, filename: file.original_filename).call
     @filename = file.original_filename
+
+    if @result.file_description
+      CgxmlValidateJob.perform_later(@result.file_description.id)
+    end
   end
 end

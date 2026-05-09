@@ -1,0 +1,95 @@
+<% content_for :title, "Fișiere CGXML" %>
+
+<div class="page-header">
+  <h1>Fișiere CGXML importate</h1>
+  <div class="header-actions">
+    <%= link_to "Import fișier nou", new_cgxml_import_path, class: "btn btn-primary" %>
+  </div>
+</div>
+
+<div class="stats-row">
+  <div class="stat-card">
+    <span class="stat-num"><%= @stats[:total] %></span>
+    <span class="stat-label">Total</span>
+  </div>
+  <div class="stat-card stat-valid">
+    <span class="stat-num"><%= @stats[:valid] %></span>
+    <span class="stat-label">Valide</span>
+  </div>
+  <div class="stat-card stat-errors">
+    <span class="stat-num"><%= @stats[:errors] %></span>
+    <span class="stat-label">Cu erori</span>
+  </div>
+  <div class="stat-card stat-pending">
+    <span class="stat-num"><%= @stats[:pending] %></span>
+    <span class="stat-label">În așteptare</span>
+  </div>
+</div>
+
+<% if @files.empty? %>
+  <div class="empty-state">
+    <p>Nu există fișiere importate încă.</p>
+    <%= link_to "Importați primul fișier", new_cgxml_import_path, class: "btn btn-primary" %>
+  </div>
+<% else %>
+  <div class="table-card">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Fișier</th>
+          <th>Versiune</th>
+          <th>Data export</th>
+          <th>Titular licență</th>
+          <th>Import</th>
+          <th>Validare</th>
+          <th>Erori / Avert.</th>
+          <th>Acțiuni</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @files.each do |fd| %>
+          <tr>
+            <td>
+              <%= link_to fd.filename, cgxml_file_path(fd), class: "link-primary" %>
+              <div class="text-muted text-xs"><%= fd.imported_at&.strftime("%d.%m.%Y %H:%M") || "—" %></div>
+            </td>
+            <td><%= fd.fileversion || "—" %></td>
+            <td><%= fd.exportdate&.strftime("%d.%m.%Y") || "—" %></td>
+            <td><%= fd.licensedname || "—" %></td>
+            <td>
+              <%= render partial: "shared/import_badge", locals: { status: fd.import_status,
+                  errors: fd.import_errors_count } %>
+            </td>
+            <td>
+              <%= render partial: "shared/validation_badge", locals: { status: fd.validation_status } %>
+            </td>
+            <td>
+              <% if fd.validation_errors_count > 0 || fd.validation_warnings_count > 0 %>
+                <span class="badge badge-error"><%= fd.validation_errors_count %> E</span>
+                <span class="badge badge-warning"><%= fd.validation_warnings_count %> A</span>
+              <% else %>
+                <span class="text-muted">—</span>
+              <% end %>
+            </td>
+            <td class="actions-cell">
+              <%= link_to "Detalii", cgxml_file_path(fd), class: "btn btn-xs btn-secondary" %>
+              <% if fd.validation_errors? %>
+                <%= link_to "Corectează", cgxml_file_path(fd, anchor: "erori"),
+                    class: "btn btn-xs btn-warning" %>
+              <% end %>
+              <%= link_to "Raport JSON", report_cgxml_file_path(fd, format: :json),
+                  class: "btn btn-xs btn-secondary", target: "_blank" %>
+              <%= button_to "Revalidează", revalidate_cgxml_file_path(fd),
+                  method: :post, class: "btn btn-xs btn-outline",
+                  data: { confirm: "Relanseați validarea pentru #{fd.filename}?" } %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination-row">
+    <%= paginate @files %>
+  </div>
+<% end %>
