@@ -143,9 +143,19 @@ export default class extends Controller {
       return
     }
 
+    if (isDistance && this._cursorStereo && this._verts.length > 0) {
+      const last = this._verts[this._verts.length - 1]
+      const dx = this._cursorStereo.x - last.x
+      const dy = this._cursorStereo.y - last.y
+      if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {
+        this._cmdHint(`Mișcă mouse-ul departe de ultimul vertex pentru a stabili direcția, apoi reintroduce lungimea.`, true)
+        return
+      }
+    }
+
     const pt = this._parseCmd(raw)
     if (!pt) {
-      this._cmdHint(`Format invalid: ${raw}`, true)
+      this._cmdHint(`Format invalid: ${raw}  (acceptat: X,Y · doar număr · @ΔX,ΔY · @len<deg; punctul zecimal cu .)`, true)
       return
     }
 
@@ -467,7 +477,10 @@ export default class extends Controller {
 
   _onDrawStart(evt) {
     this._currentFeature = evt.feature
-    this._geomChangeKey  = this._currentFeature.getGeometry().on("change", (e) => {
+    // Extragem vertecșii inițiali — OL a creat deja geometria înainte de drawstart,
+    // deci listener-ul de „change" nu vede primul vertex (ar pierde populația _verts)
+    this._extractVerts(this._currentFeature.getGeometry())
+    this._geomChangeKey = this._currentFeature.getGeometry().on("change", (e) => {
       this._extractVerts(e.target)
       if (this._verts.length >= 3) {
         clearTimeout(this._areaDebounce)
@@ -490,8 +503,14 @@ export default class extends Controller {
 
   _extractVerts(geom) {
     const ring = geom.getCoordinates()[0] || []
-    const verts = ring.length > 1 ? ring.slice(0, -1) : ring
-    this._verts = verts.map((c) => {
+    // Format ring în timpul desenării: [v1, v2, ..., vN, cursor, v1]
+    // Format după finishDrawing:        [v1, v2, ..., vN, v1]
+    // Eliminăm întotdeauna ultimul (closing duplicate); dacă desenarea e activă
+    // mai eliminăm încă unul (cursor live) ca să rămână doar vertecșii confirmați.
+    let actual = ring.length > 1 ? ring.slice(0, -1) : ring
+    if (this._draw && actual.length > 1) actual = actual.slice(0, -1)
+
+    this._verts = actual.map((c) => {
       const [x, y] = ol.proj.transform(c, "EPSG:3857", "EPSG:3844")
       return { x, y }
     })
