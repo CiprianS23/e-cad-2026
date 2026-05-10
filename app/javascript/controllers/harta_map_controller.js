@@ -1,5 +1,29 @@
 import { Controller } from "@hotwired/stimulus"
 
+// Stereo70 (EPSG:3844) — proiecția națională română, sursa de adevăr pentru
+// coordonate stocate. Hart conține tiles în Web Mercator (EPSG:3857) pentru
+// compatibilitate cu OSM/Ortofotoplan; conversia se face on-the-fly.
+const STEREO70 = "+proj=sterea +lat_0=46 +lon_0=25 +k=0.99975 +x_0=500000 +y_0=500000 +ellps=krass +towgs84=33.4,-146.6,-76.3,-0.359,-0.053,0.844,-0.84 +units=m +no_defs"
+
+const PARCEL_COLORS = {
+  arabil:            "#22c55e",
+  pasune:            "#84cc16",
+  faneata:           "#a3e635",
+  vie:               "#a855f7",
+  livada:            "#f97316",
+  padure:            "#15803d",
+  curti_constructii: "#f59e0b",
+  ape:               "#38bdf8",
+  neproductiv:       "#9ca3af"
+}
+
+const hexToRgba = (hex, alpha) => {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r},${g},${b},${alpha})`
+}
+
 export default class extends Controller {
   static values = {
     geojsonUrl:      String,
@@ -9,85 +33,96 @@ export default class extends Controller {
     mapproxyUrl:     String
   }
 
-  connect() {
-    this.map = L.map(this.element, {
-      center: [45.75, 24.9],
-      zoom: 7,
-      zoomControl: true
-    })
+  // ── Lifecycle ────────────────────────────────────────────────────────────
 
-    this._addLayers()
+  connect() {
+    this._registerProjection()
+    this._buildMap()
+    this._buildLayers()
+    this._setupPopup()
     this._loadParcele()
     this._loadCgxml()
     this._loadCladiri()
   }
 
   disconnect() {
-    this.map?.remove()
+    this.map?.setTarget(undefined)
+    this.map = null
   }
 
-  _addLayers() {
-    const osm = L.tileLayer(
-      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      { attribution: "© OpenStreetMap contributors", maxZoom: 19 }
-    )
+  // ── Setup ────────────────────────────────────────────────────────────────
+
+  _registerProjection() {
+    if (!proj4.defs("EPSG:3844")) {
+      proj4.defs("EPSG:3844", STEREO70)
+    }
+    if (ol.proj?.proj4) ol.proj.proj4.register(proj4)
+  }
+
+  _buildMap() {
+    this.map = new ol.Map({
+      target: this.element,
+      controls: ol.control.defaults.defaults({ attribution: true, zoom: true }),
+      view: new ol.View({
+        center: ol.proj.fromLonLat([24.9, 45.75]),
+        zoom: 7,
+        minZoom: 4,
+        maxZoom: 22
+      })
+    })
+  }
+
+  _buildLayers() {
+    // ── Layere de bază (raster) ──
+    const osm = new ol.layer.Tile({
+      source: new ol.source.OSM(),
+      properties: { name: "OpenStreetMap" }
+    })
 
     this._baseLayers = { osm }
 
     if (this.mapproxyUrlValue) {
-      this._baseLayers.ortofotoplan = L.tileLayer(
-        `${this.mapproxyUrlValue}/tms/1.0.0/ortoplan/webmercator/{z}/{x}/{y}.jpeg`,
-        { attribution: "© ANCPI – Ortofotoplan", maxZoom: 20, tms: true }
-      )
+      this._baseLayers.ortofotoplan = new ol.layer.Tile({
+        source: new ol.source.XYZ({
+          url: `${this.mapproxyUrlValue}/tms/1.0.0/ortoplan/webmercator/{z}/{x}/{-y}.jpeg`,
+          attributions: "© ANCPI – Ortofotoplan",
+          maxZoom: 20
+        }),
+        properties: { name: "Ortofotoplan" }
+      })
     }
-    osm.addTo(this.map)
 
-    this.uatLayer = L.geoJSON(null, {
-      style: () => ({
-        color:       "#6b21a8",
-        weight:      1.2,
-        fillColor:   "#a855f7",
-        fillOpacity: 0.06,
-        dashArray:   "4 3"
+    this.map.addLayer(osm)
+
+    // ── Layere vectoriale (overlays) ──
+    this.uatLayer = new ol.layer.Vector({
+      source: new ol.source.Vector(),
+      style: () => new ol.style.Style({
+        stroke: new ol.style.Stroke({ color: "#6b21a8", width: 1.2, lineDash: [4, 3] }),
+        fill:   new ol.style.Fill({ color: "rgba(168, 85, 247, 0.06)" })
       }),
-      onEachFeature: (f, l) => {
-        const p = f.properties || {}
-        l.bindTooltip(p.name || p.nat_code || "UAT", { sticky: true })
-        l.on("mouseover", () => l.setStyle({ weight: 2, fillOpacity: 0.18 }))
-        l.on("mouseout",  () => this.uatLayer.resetStyle(l))
-      }
+      properties: { name: "uat" }
     })
 
-    this.parcelLayer = L.geoJSON(null, {
+    this.parcelLayer = new ol.layer.Vector({
+      source: new ol.source.Vector(),
       style: this._parcelStyle.bind(this),
-      onEachFeature: this._bindParcelPopup.bind(this)
+      properties: { name: "parcele" }
     })
 
-    this.cladiriLayer = L.geoJSON(null, {
-      style: () => ({ color: "#b45309", weight: 1.5, fillColor: "#fbbf24", fillOpacity: 0.3 }),
-      onEachFeature: (f, l) => {
-        const p = f.properties || {}
-        l.bindPopup(`
-          <div class="map-popup">
-            <strong>${p.numar_cadastral || "—"}</strong>
-            <dl>
-              <dt>Destinație</dt><dd>${p.destinatie || "—"}</dd>
-              <dt>Regim înălțime</dt><dd>${p.regim_inaltime || "—"}</dd>
-              <dt>Suprafață</dt><dd>${p.suprafata_construita_mp ? Number(p.suprafata_construita_mp).toLocaleString("ro") + " mp" : "—"}</dd>
-              <dt>Județ</dt><dd>${p.judet || "—"}</dd>
-              <dt>Localitate</dt><dd>${p.localitate || "—"}</dd>
-              <dt>Proprietar</dt><dd>${p.proprietar || "—"}</dd>
-            </dl>
-          </div>
-        `, { maxWidth: 240 })
-        l.on("mouseover", () => l.setStyle({ weight: 2.5, fillOpacity: 0.55 }))
-        l.on("mouseout",  () => this.cladiriLayer.resetStyle(l))
-      }
+    this.cladiriLayer = new ol.layer.Vector({
+      source: new ol.source.Vector(),
+      style: () => new ol.style.Style({
+        stroke: new ol.style.Stroke({ color: "#b45309", width: 1.5 }),
+        fill:   new ol.style.Fill({ color: "rgba(251, 191, 36, 0.3)" })
+      }),
+      properties: { name: "cladiri" }
     })
 
-    this.cgxmlLayer = L.geoJSON(null, {
+    this.cgxmlLayer = new ol.layer.Vector({
+      source: new ol.source.Vector(),
       style: this._cgxmlStyle.bind(this),
-      onEachFeature: this._bindCgxmlPopup.bind(this)
+      properties: { name: "cgxml" }
     })
 
     this._overlays = {
@@ -97,36 +132,166 @@ export default class extends Controller {
       cgxml:   this.cgxmlLayer
     }
 
-    this.uatLayer.addTo(this.map)
-    this.parcelLayer.addTo(this.map)
-    this.cladiriLayer.addTo(this.map)
-    this.cgxmlLayer.addTo(this.map)
+    this.map.addLayer(this.uatLayer)
+    this.map.addLayer(this.parcelLayer)
+    this.map.addLayer(this.cladiriLayer)
+    this.map.addLayer(this.cgxmlLayer)
   }
+
+  // ── API public (folosit de layer-switcher prin Stimulus outlet) ──────────
 
   setBaseLayer(name) {
     if (!this._baseLayers) return
     Object.values(this._baseLayers).forEach(l => this.map.removeLayer(l))
     const layer = this._baseLayers[name]
-    if (layer) layer.addTo(this.map)
+    if (layer) this.map.getLayers().insertAt(0, layer)
   }
 
   toggleOverlay(name, visible) {
-    const layer = this._overlays?.[name]
-    if (!layer) return
-    if (visible) layer.addTo(this.map)
-    else this.map.removeLayer(layer)
+    this._overlays?.[name]?.setVisible(visible)
   }
+
+  // ── Stiluri ──────────────────────────────────────────────────────────────
+
+  _parcelStyle(feature) {
+    const status = feature.get("status")
+    const cat    = feature.get("categoria_folosinta")
+    const fill   = PARCEL_COLORS[cat] || "#6b7280"
+    return new ol.style.Style({
+      stroke: new ol.style.Stroke({
+        color:    status === "litigiu" ? "#dc2626" : "#1d4ed8",
+        width:    status === "litigiu" ? 2.5 : 1.5,
+        lineDash: status === "inactiv" ? [6, 4] : null
+      }),
+      fill: new ol.style.Fill({ color: hexToRgba(fill, 0.35) })
+    })
+  }
+
+  _cgxmlStyle(feature) {
+    const isBuilding = feature.get("entity_type") === "building"
+    return new ol.style.Style({
+      stroke: new ol.style.Stroke({
+        color: isBuilding ? "#b91c1c" : "#92400e",
+        width: isBuilding ? 1.5 : 2
+      }),
+      fill: new ol.style.Fill({
+        color: isBuilding ? "rgba(252, 165, 165, 0.45)" : "rgba(252, 211, 77, 0.45)"
+      })
+    })
+  }
+
+  // ── Popup overlay (echivalent Leaflet bindPopup) ─────────────────────────
+
+  _setupPopup() {
+    const el = document.createElement("div")
+    el.className = "ol-popup-content"
+    this._popupEl = el
+
+    this._popup = new ol.Overlay({
+      element: el,
+      autoPan: { animation: { duration: 200 } },
+      positioning: "bottom-center",
+      offset: [0, -12],
+      stopEvent: true
+    })
+    this.map.addOverlay(this._popup)
+
+    this.map.on("singleclick", (evt) => {
+      let html = null
+      this.map.forEachFeatureAtPixel(evt.pixel, (feature, layer) => {
+        const layerName = layer?.get("name")
+        if (layerName === "parcele")  html = this._parcelPopupHtml(feature)
+        if (layerName === "cladiri")  html = this._cladirePopupHtml(feature)
+        if (layerName === "cgxml")    html = this._cgxmlPopupHtml(feature)
+        if (layerName === "uat")      html = this._uatPopupHtml(feature)
+        return html ? true : undefined
+      }, { hitTolerance: 3 })
+
+      if (html) {
+        el.innerHTML = html
+        this._popup.setPosition(evt.coordinate)
+      } else {
+        this._popup.setPosition(undefined)
+      }
+    })
+
+    this.map.on("pointermove", (evt) => {
+      if (evt.dragging) return
+      const hit = this.map.hasFeatureAtPixel(evt.pixel)
+      this.map.getTargetElement().style.cursor = hit ? "pointer" : ""
+    })
+  }
+
+  _parcelPopupHtml(f) {
+    const supraf = f.get("suprafata_mp") ? `${Number(f.get("suprafata_mp")).toLocaleString("ro")} mp` : "—"
+    return `
+      <div class="map-popup">
+        <strong>${f.get("numar_cadastral") || "—"}</strong>
+        <dl>
+          <dt>Categorie</dt><dd>${f.get("categoria_folosinta") || "—"}</dd>
+          <dt>Suprafață</dt><dd>${supraf}</dd>
+          <dt>Județ</dt><dd>${f.get("judet") || "—"}</dd>
+          <dt>Localitate</dt><dd>${f.get("localitate") || "—"}</dd>
+          <dt>Proprietar</dt><dd>${f.get("proprietar") || "—"}</dd>
+          <dt>Status</dt><dd><span class="badge badge-${f.get("status")}">${f.get("status")}</span></dd>
+        </dl>
+        <a href="/parcele_cadastrale/${f.get("id")}" class="btn btn-sm btn-primary" style="margin-top:6px">Detalii</a>
+      </div>
+    `
+  }
+
+  _cladirePopupHtml(f) {
+    const supraf = f.get("suprafata_construita_mp")
+      ? `${Number(f.get("suprafata_construita_mp")).toLocaleString("ro")} mp` : "—"
+    return `
+      <div class="map-popup">
+        <strong>${f.get("numar_cadastral") || "—"}</strong>
+        <dl>
+          <dt>Destinație</dt><dd>${f.get("destinatie") || "—"}</dd>
+          <dt>Regim înălțime</dt><dd>${f.get("regim_inaltime") || "—"}</dd>
+          <dt>Suprafață</dt><dd>${supraf}</dd>
+          <dt>Județ</dt><dd>${f.get("judet") || "—"}</dd>
+          <dt>Localitate</dt><dd>${f.get("localitate") || "—"}</dd>
+          <dt>Proprietar</dt><dd>${f.get("proprietar") || "—"}</dd>
+        </dl>
+        <a href="/cladiri_cadastrale/${f.get("id")}" class="btn btn-sm btn-primary" style="margin-top:6px">Detalii</a>
+      </div>
+    `
+  }
+
+  _cgxmlPopupHtml(f) {
+    const isBuilding = f.get("entity_type") === "building"
+    const title      = isBuilding ? `Construcție #${f.get("buildno") ?? f.get("id")}` : "Imobil"
+    const filename   = f.get("filename") || "—"
+    const fileLink   = f.get("file_description_id")
+      ? `<a href="/cgxml_files/${f.get("file_description_id")}" target="_blank">${filename}</a>` : filename
+    const mp = (v) => v != null ? `${Number(v).toLocaleString("ro-RO", { maximumFractionDigits: 2 })} mp` : "—"
+    return `
+      <div class="map-popup cgxml-popup">
+        <div class="popup-title">${title}</div>
+        <table class="popup-table">
+          <tr><th>Fișier</th><td>${fileLink}</td></tr>
+          <tr><th>Versiune</th><td>${f.get("fileversion") || "—"}</td></tr>
+          <tr><th>Suprafață</th><td>${mp(f.get("measuredarea"))}</td></tr>
+          ${f.get("cadgenno") ? `<tr><th>Nr. cadastral</th><td>${f.get("cadgenno")}</td></tr>` : ""}
+        </table>
+      </div>
+    `
+  }
+
+  _uatPopupHtml(f) {
+    return `<div class="map-popup"><strong>${f.get("name") || f.get("nat_code") || "UAT"}</strong></div>`
+  }
+
+  // ── Încărcare date GeoJSON ───────────────────────────────────────────────
 
   async _loadParcele() {
     try {
       const res  = await fetch(this.geojsonUrlValue)
       const data = await res.json()
-      this.parcelLayer.addData(data)
-
-      if (this.parcelLayer.getLayers().length > 0) {
-        this.map.fitBounds(this.parcelLayer.getBounds(), { padding: [40, 40] })
-        this._loadUatLayer(this.parcelLayer.getBounds().getCenter())
-      }
+      this._addGeoJSON(this.parcelLayer, data)
+      this._fitToLayer(this.parcelLayer)
+      this._loadUatForCenter(this.parcelLayer)
     } catch (e) {
       console.warn("Nu s-au putut încărca parcelele:", e)
     }
@@ -137,11 +302,10 @@ export default class extends Controller {
     try {
       const res  = await fetch(this.cgxmlGeojsonUrlValue)
       const data = await res.json()
-      this.cgxmlLayer.addData(data)
-
-      if (this.parcelLayer.getLayers().length === 0 && this.cgxmlLayer.getLayers().length > 0) {
-        this.map.fitBounds(this.cgxmlLayer.getBounds(), { padding: [40, 40] })
-        this._loadUatLayer(this.cgxmlLayer.getBounds().getCenter())
+      this._addGeoJSON(this.cgxmlLayer, data)
+      if (this.parcelLayer.getSource().getFeatures().length === 0) {
+        this._fitToLayer(this.cgxmlLayer)
+        this._loadUatForCenter(this.cgxmlLayer)
       }
     } catch (e) {
       console.warn("Nu s-au putut încărca imobilele CGXML:", e)
@@ -153,146 +317,44 @@ export default class extends Controller {
     try {
       const res  = await fetch(this.cladiriUrlValue)
       const data = await res.json()
-      this.cladiriLayer.addData(data)
+      this._addGeoJSON(this.cladiriLayer, data)
     } catch (e) {
       console.warn("Nu s-au putut încărca clădirile:", e)
     }
   }
 
-  async _loadUatLayer(center) {
-    if (!this.uatUrlValue || !center) return
+  async _loadUatForCenter(layer) {
+    if (!this.uatUrlValue) return
+    const features = layer.getSource().getFeatures()
+    if (features.length === 0) return
+    const extent = layer.getSource().getExtent()
+    const cx = (extent[0] + extent[2]) / 2
+    const cy = (extent[1] + extent[3]) / 2
+    const [lng, lat] = ol.proj.toLonLat([cx, cy])
     try {
-      const url  = `${this.uatUrlValue}?lat=${center.lat}&lng=${center.lng}`
-      const res  = await fetch(url)
+      const res  = await fetch(`${this.uatUrlValue}?lat=${lat}&lng=${lng}`)
       const data = await res.json()
-      this.uatLayer.clearLayers()
-      this.uatLayer.addData(data)
+      this.uatLayer.getSource().clear()
+      this._addGeoJSON(this.uatLayer, data)
     } catch (e) {
       console.warn("Nu s-a putut încărca limita UAT:", e)
     }
   }
 
-  _parcelStyle(feature) {
-    const culori = {
-      arabil:            "#22c55e",
-      pasune:            "#84cc16",
-      faneata:           "#a3e635",
-      vie:               "#a855f7",
-      livada:            "#f97316",
-      padure:            "#15803d",
-      curti_constructii: "#f59e0b",
-      ape:               "#38bdf8",
-      neproductiv:       "#9ca3af"
-    }
-    const status = feature.properties.status
-    return {
-      color:       status === "litigiu" ? "#dc2626" : "#1d4ed8",
-      weight:      status === "litigiu" ? 2.5 : 1.5,
-      fillColor:   culori[feature.properties.categoria_folosinta] || "#6b7280",
-      fillOpacity: 0.35,
-      dashArray:   status === "inactiv" ? "6 4" : null
-    }
+  // ── Utilitare ─────────────────────────────────────────────────────────────
+
+  _addGeoJSON(layer, data) {
+    const features = new ol.format.GeoJSON().readFeatures(data, {
+      dataProjection:    "EPSG:4326",
+      featureProjection: "EPSG:3857"
+    })
+    layer.getSource().addFeatures(features)
   }
 
-  _cgxmlStyle(feature) {
-    const isBuilding = feature.properties.entity_type === "building"
-    return {
-      color:       isBuilding ? "#b91c1c" : "#92400e",
-      weight:      isBuilding ? 1.5 : 2,
-      fillColor:   isBuilding ? "#fca5a5" : "#fcd34d",
-      fillOpacity: 0.45
-    }
-  }
-
-  _bindParcelPopup(feature, layer) {
-    const p = feature.properties
-    layer.bindPopup(`
-      <div class="map-popup">
-        <strong>${p.numar_cadastral}</strong>
-        <dl>
-          <dt>Categorie</dt><dd>${p.categoria_folosinta || "—"}</dd>
-          <dt>Suprafață</dt><dd>${p.suprafata_mp ? Number(p.suprafata_mp).toLocaleString("ro") + " mp" : "—"}</dd>
-          <dt>Județ</dt><dd>${p.judet || "—"}</dd>
-          <dt>Localitate</dt><dd>${p.localitate || "—"}</dd>
-          <dt>Proprietar</dt><dd>${p.proprietar || "—"}</dd>
-          <dt>Status</dt><dd><span class="badge badge-${p.status}">${p.status}</span></dd>
-        </dl>
-        <a href="/parcele_cadastrale/${p.id}" class="btn btn-sm btn-primary" style="margin-top:6px">Detalii</a>
-      </div>
-    `, { maxWidth: 260 })
-
-    layer.on("mouseover", () => layer.setStyle({ weight: 3, fillOpacity: 0.55 }))
-    layer.on("mouseout",  () => this.parcelLayer.resetStyle(layer))
-  }
-
-  _bindCgxmlPopup(feature, layer) {
-    const p   = feature.properties
-    const isBuilding = p.entity_type === "building"
-    const title      = isBuilding ? `Construcție #${p.buildno ?? p.id}` : `Imobil`
-
-    const fileLink = p.file_description_id
-      ? `<a href="/cgxml_files/${p.file_description_id}" target="_blank">${p.filename || "—"}</a>`
-      : (p.filename || "—")
-
-    const vsClass = { valid: "badge-valid", errors: "badge-error", pending: "badge-secondary", in_progress: "badge-info" }
-    const vsLabel = { valid: "Valid", errors: "Erori", pending: "În așteptare", in_progress: "În curs" }
-    const errBadge = p.validation_status
-      ? `<span class="badge ${vsClass[p.validation_status] || "badge-secondary"}">${vsLabel[p.validation_status] || p.validation_status}</span>`
-        + (p.validation_errors_count   > 0 ? ` <span class="badge badge-error">${p.validation_errors_count} erori</span>` : "")
-        + (p.validation_warnings_count > 0 ? ` <span class="badge badge-warning">${p.validation_warnings_count} avert.</span>` : "")
-      : "—"
-
-    const opLabel = {
-      GENERAL_CADASTRE:     "Cadastru general",
-      FIRST_REGISTRATION:   "Prima înscriere",
-      UPDATE:               "Actualizare",
-      CORRECTION:           "Corecție"
-    }
-
-    const destLabel = {
-      CL: "Clădire locuință", IL: "Imobil locuință", CA: "Construcție auxiliară",
-      CI: "Construcție industrială", IS: "Instituție/servicii", AN: "Anexă"
-    }
-
-    const mp  = (v) => v != null ? Number(v).toLocaleString("ro-RO", { maximumFractionDigits: 2 }) + " mp" : "—"
-    const txt = (v) => v || "—"
-
-    const entityRows = isBuilding ? `
-      <tr><th>Nr. corp</th><td>${txt(p.buildno)}</td></tr>
-      <tr><th>Destinație</th><td>${destLabel[p.buildingdestination] || txt(p.buildingdestination)}</td></tr>
-      <tr><th>Niveluri</th><td>${txt(p.levelsno)}</td></tr>
-      <tr><th>Suprafață măsurată</th><td>${mp(p.measuredarea)}</td></tr>
-      <tr><th>Suprafață legală</th><td>${mp(p.parcellegalarea)}</td></tr>
-      ${p.cadgenno ? `<tr><th>Nr. cadastral</th><td>${p.cadgenno}</td></tr>` : ""}
-      ${p.e2identifier ? `<tr><th>Identificator E2</th><td>${p.e2identifier}</td></tr>` : ""}
-      ${p.notes ? `<tr><th>Observații</th><td style="white-space:normal;max-width:200px">${p.notes}</td></tr>` : ""}
-    ` : `
-      <tr><th>Suprafață măsurată</th><td>${mp(p.measuredarea)}</td></tr>
-      <tr><th>Suprafață legală parcelă</th><td>${mp(p.parcellegalarea)}</td></tr>
-      ${p.cadgenno ? `<tr><th>Nr. cadastral general</th><td>${p.cadgenno}</td></tr>` : ""}
-      ${p.cadsector ? `<tr><th>Sector cadastral</th><td>${p.cadsector}</td></tr>` : ""}
-      ${p.e2identifier ? `<tr><th>Identificator E2</th><td>${p.e2identifier}</td></tr>` : ""}
-      ${p.isnew != null ? `<tr><th>Imobil nou</th><td>${p.isnew ? "Da" : "Nu"}</td></tr>` : ""}
-    `
-
-    layer.bindPopup(`
-      <div class="map-popup cgxml-popup">
-        <div class="popup-title">${title}</div>
-        <div class="popup-section-label">Fișier CGXML</div>
-        <table class="popup-table">
-          <tr><th>Fișier</th><td>${fileLink}</td></tr>
-          <tr><th>Versiune</th><td>${txt(p.fileversion)}</td></tr>
-          <tr><th>Tip operație</th><td>${opLabel[p.operationtype] || txt(p.operationtype)}</td></tr>
-          <tr><th>Validare</th><td>${errBadge}</td></tr>
-        </table>
-        <div class="popup-section-label">${isBuilding ? "Construcție" : "Imobil"}</div>
-        <table class="popup-table">
-          ${entityRows}
-        </table>
-      </div>
-    `, { maxWidth: 300 })
-
-    layer.on("mouseover", () => layer.setStyle({ weight: 3, fillOpacity: 0.65 }))
-    layer.on("mouseout",  () => this.cgxmlLayer.resetStyle(layer))
+  _fitToLayer(layer) {
+    const features = layer.getSource().getFeatures()
+    if (features.length === 0) return
+    const extent = layer.getSource().getExtent()
+    this.map.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 18, duration: 300 })
   }
 }
