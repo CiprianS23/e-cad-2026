@@ -216,6 +216,106 @@ class DigitizareController < ApplicationController
     render json: { issues: [], error: e.message }, status: :unprocessable_entity
   end
 
+  # Audit topologie global: scanează toate parcele/clădiri și returnează
+  # toate issues (overlap parcele, overlap clădiri, clădire multi-parcela)
+  # cu geometriile și etichetele necesare pentru afișare + zoom în client.
+  def audit_topologie
+    issues = []
+
+    # 1. Overlaps parcele-parcele
+    sql = <<~SQL
+      SELECT p1.id AS id_a, p1.numar_cadastral AS label_a,
+             p2.id AS id_b, p2.numar_cadastral AS label_b,
+             ROUND(ST_Area(ST_Intersection(p1.geom, p2.geom))::numeric, 2) AS area,
+             ST_AsGeoJSON(ST_Intersection(p1.geom, p2.geom), 6) AS geojson
+      FROM parcele_cadastrale p1
+      JOIN parcele_cadastrale p2 ON p1.id < p2.id
+      WHERE p1.geom IS NOT NULL AND p2.geom IS NOT NULL
+        AND ST_Intersects(p1.geom, p2.geom)
+        AND ST_Area(ST_Intersection(p1.geom, p2.geom)) > 0.10
+      ORDER BY ST_Area(ST_Intersection(p1.geom, p2.geom)) DESC
+      LIMIT 200
+    SQL
+    ActiveRecord::Base.connection.select_all(sql).each do |row|
+      issues << {
+        category: "Suprapuneri parcele",
+        type: "overlap_parcele", severity: "error",
+        message: "Parcela #{row['label_a']} ⇄ #{row['label_b']}: #{row['area']} mp",
+        area: row['area'].to_f,
+        geojson: row['geojson']
+      }
+    end
+
+    # 2. Overlaps clădiri-clădiri
+    sql = <<~SQL
+      SELECT c1.id AS id_a, c1.numar_cadastral AS label_a,
+             c2.id AS id_b, c2.numar_cadastral AS label_b,
+             ROUND(ST_Area(ST_Intersection(c1.geom, c2.geom))::numeric, 2) AS area,
+             ST_AsGeoJSON(ST_Intersection(c1.geom, c2.geom), 6) AS geojson
+      FROM cladiri_cadastrale c1
+      JOIN cladiri_cadastrale c2 ON c1.id < c2.id
+      WHERE c1.geom IS NOT NULL AND c2.geom IS NOT NULL
+        AND ST_Intersects(c1.geom, c2.geom)
+        AND ST_Area(ST_Intersection(c1.geom, c2.geom)) > 0.10
+      ORDER BY ST_Area(ST_Intersection(c1.geom, c2.geom)) DESC
+      LIMIT 200
+    SQL
+    ActiveRecord::Base.connection.select_all(sql).each do |row|
+      issues << {
+        category: "Suprapuneri clădiri",
+        type: "overlap_cladiri", severity: "error",
+        message: "Clădirea #{row['label_a']} ⇄ #{row['label_b']}: #{row['area']} mp",
+        area: row['area'].to_f,
+        geojson: row['geojson']
+      }
+    end
+
+    # 3. Clădiri ce traversează mai multe parcele
+    sql = <<~SQL
+      WITH cladiri_verts AS (
+        SELECT c.id AS cladire_id, c.numar_cadastral AS cladire_label, c.geom AS cladire_geom,
+               (ST_DumpPoints(c.geom)).geom AS pt
+        FROM cladiri_cadastrale c WHERE c.geom IS NOT NULL
+      ),
+      mapped AS (
+        SELECT cv.cladire_id, cv.cladire_label, cv.cladire_geom,
+               COUNT(DISTINCT p.id) AS parcele_count,
+               string_agg(DISTINCT p.numar_cadastral, ', ') AS parcele_labels
+        FROM cladiri_verts cv
+        JOIN parcele_cadastrale p ON ST_Intersects(p.geom, cv.pt)
+        WHERE p.geom IS NOT NULL
+        GROUP BY cv.cladire_id, cv.cladire_label, cv.cladire_geom
+        HAVING COUNT(DISTINCT p.id) > 1
+      )
+      SELECT cladire_id, cladire_label, parcele_count, parcele_labels,
+             ST_AsGeoJSON(cladire_geom, 6) AS geojson
+      FROM mapped
+      LIMIT 100
+    SQL
+    ActiveRecord::Base.connection.select_all(sql).each do |row|
+      issues << {
+        category: "Clădiri în multiple parcele",
+        type: "cladire_multi_parcela", severity: "error",
+        message: "Clădirea #{row['cladire_label']} traversează #{row['parcele_count']} parcele (#{row['parcele_labels']})",
+        geojson: row['geojson']
+      }
+    end
+
+    # Grupare pe categorii
+    by_cat = issues.group_by { |i| i[:category] }
+    categories = by_cat.map do |name, items|
+      { name: name, count: items.size, severity: items.first[:severity] }
+    end
+
+    render json: {
+      total: issues.size,
+      categories: categories,
+      issues: issues
+    }
+  rescue => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   # Salvare topology-aware în 2 faze:
   #   Faza 1: scriem toate geometriile în DB cu save(validate: false). Astfel
   #           DB reflectă starea finală a tuturor poligoanelor înainte de

@@ -20,7 +20,7 @@ export default class extends Controller {
   static targets = [
     "panel", "panelBody", "editTopoMirror",
     "snapSlider", "snapToleranceVal", "snapModes",
-    "btnStart", "btnEdit", "btnClose", "btnUndo",
+    "btnStart", "btnEdit", "btnClose", "btnUndo", "btnAudit", "auditList",
     "statusBar",
     "inputX", "inputY",
     "areaCalc", "areaAct", "areaDiff",
@@ -64,6 +64,28 @@ export default class extends Controller {
       style:  this._topoStyle.bind(this),
       properties: { name: "topologie-issues" },
       zIndex: 1000
+    })
+
+    // Layer dedicat pentru audit topologic global — geometriile issue-urilor
+    // de pe întreaga hartă (overlap-uri, clădiri multi-parcela, etc.)
+    this._auditSource = new ol.source.Vector()
+    this._auditLayer  = new ol.layer.Vector({
+      source: this._auditSource,
+      style:  (feat) => {
+        const sev = feat.get("severity") || "error"
+        return new ol.style.Style({
+          stroke: new ol.style.Stroke({
+            color: sev === "error" ? "#dc2626" : "#d97706",
+            width: 3,
+            lineDash: sev === "warning" ? [6, 3] : null
+          }),
+          fill: new ol.style.Fill({
+            color: sev === "error" ? "rgba(220, 38, 38, 0.35)" : "rgba(217, 119, 6, 0.25)"
+          })
+        })
+      },
+      properties: { name: "audit-topologie" },
+      zIndex: 1050
     })
 
     // Layer cu cerculețe la fiecare vertex (vizibile pentru a identifica
@@ -113,6 +135,7 @@ export default class extends Controller {
     this.map.addLayer(this._drawLayer)
     this.map.addLayer(this._topoLayer)
     this.map.addLayer(this._editVertexLayer)  // cerculețele roșii la vertecși — pentru ambele moduri
+    this.map.addLayer(this._auditLayer)       // layer audit topologic global
     this._mouseMoveKey = this.map.on("pointermove", (evt) => this._onPointerMove(evt))
     this._moveEndKey   = this.map.on("moveend",     ()    => this._updateScale())
     this._updateScale()
@@ -922,6 +945,107 @@ export default class extends Controller {
     if (evt.key === "F3") { evt.preventDefault(); this.toggleSnap() }
     if (evt.key === "F8") { evt.preventDefault(); this.toggleOrtho() }
     if (evt.key === "Escape" && this._draw) { evt.preventDefault(); this.clearAll() }
+  }
+
+  // ── Audit topologie global ─────────────────────────────────────────────
+
+  async runAuditTopologie(evt) {
+    const url = evt?.params?.url || "/digitizare/audit_topologie"
+    if (this.hasBtnAuditTarget) {
+      this.btnAuditTarget.disabled = true
+      this.btnAuditTarget.textContent = "🔄 Scanare…"
+    }
+    try {
+      const res = await fetch(url, { headers: { "Accept": "application/json" } })
+      const data = await res.json()
+      this._renderAuditResults(data)
+    } catch (e) {
+      this._setStatus(`Eroare audit: ${e.message}`, "warn")
+    } finally {
+      if (this.hasBtnAuditTarget) {
+        this.btnAuditTarget.disabled = false
+        this.btnAuditTarget.textContent = "🔍 Scanează erori"
+      }
+    }
+  }
+
+  clearAudit() {
+    this._auditSource?.clear()
+    if (this.hasAuditListTarget) this.auditListTarget.innerHTML = ""
+  }
+
+  // Apelat din onclick inline pe items din lista audit
+  zoomToAuditIssue(idx) {
+    const features = this._auditSource?.getFeatures() || []
+    const feat = features[idx]
+    if (!feat || !this.map) return
+    const ext = feat.getGeometry().getExtent()
+    this.map.getView().fit(ext, { padding: [80, 80, 80, 80], maxZoom: 19, duration: 350 })
+  }
+
+  _renderAuditResults(data) {
+    this._auditSource.clear()
+    if (!this.hasAuditListTarget) return
+    if (!data.issues || data.issues.length === 0) {
+      this.auditListTarget.innerHTML = `<div class="topo-ok">✓ Niciuna erori topologice (${data.total || 0} verificate)</div>`
+      return
+    }
+
+    // Add features to map source
+    const fmt = new ol.format.GeoJSON()
+    data.issues.forEach((issue, idx) => {
+      if (!issue.geojson) return
+      try {
+        const feat = fmt.readFeature(issue.geojson, {
+          dataProjection:    "EPSG:3844",
+          featureProjection: "EPSG:3844"
+        })
+        feat.set("severity", issue.severity)
+        feat.set("auditIdx",  idx)
+        this._auditSource.addFeature(feat)
+      } catch (e) { /* skip un-parseable */ }
+    })
+
+    // Render list grouped by category
+    const byCat = {}
+    data.issues.forEach((iss, idx) => {
+      const cat = iss.category || "Altele"
+      if (!byCat[cat]) byCat[cat] = []
+      byCat[cat].push({ ...iss, _idx: idx })
+    })
+
+    const sections = Object.entries(byCat).map(([cat, items]) => {
+      const itemsHtml = items.map(i => `
+        <li class="digi-audit-item digi-audit-item--${i.severity || 'error'}">
+          <button type="button" class="digi-audit-zoom-btn"
+                  onclick="event.stopPropagation();
+                           document.querySelector('[data-controller~=digitizare]').dispatchEvent(
+                             new CustomEvent('audit-zoom', { detail: ${i._idx} }))">
+            🔎
+          </button>
+          <span>${i.message}</span>
+        </li>
+      `).join("")
+      return `
+        <div class="digi-audit-category">
+          <div class="digi-audit-category-header">${cat} <span class="badge badge-error">${items.length}</span></div>
+          <ul class="digi-audit-items">${itemsHtml}</ul>
+        </div>
+      `
+    }).join("")
+
+    this.auditListTarget.innerHTML = `
+      <div class="digi-audit-summary">
+        <strong>${data.total} probleme</strong> în ${data.categories?.length || 0} categorii
+      </div>
+      ${sections}
+    `
+
+    // Listener pentru zoom (delegated)
+    if (!this._auditZoomBound) {
+      this.element.addEventListener("audit-zoom", (e) => this.zoomToAuditIssue(e.detail))
+      this._auditZoomBound = true
+    }
   }
 
   // ── Selecție feature (pentru intrare în edit mode) ────────────────────────

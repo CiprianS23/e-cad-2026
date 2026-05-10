@@ -203,6 +203,24 @@
 
       <!-- (Coordonate cursor + OSnap + Toleranță au fost mutate în status bar-ul de jos) -->
 
+      <!-- 1. Audit topologie global -->
+      <section class="digi-section">
+        <div class="digi-section-label">Audit topologie</div>
+        <div class="digi-btn-row">
+          <button type="button" class="btn btn-secondary btn-sm"
+                  data-action="click->digitizare#runAuditTopologie"
+                  data-digitizare-target="btnAudit"
+                  data-digitizare-url-param="<%= digitizare_audit_topologie_path %>">
+            🔍 Scanează erori
+          </button>
+          <button type="button" class="btn btn-outline btn-sm"
+                  data-action="click->digitizare#clearAudit">
+            ✕ Curăță
+          </button>
+        </div>
+        <div class="digi-audit-list" data-digitizare-target="auditList"></div>
+      </section>
+
       <!-- 2. Acțiuni -->
       <section class="digi-section">
         <div class="digi-section-label">Acțiuni</div>
