@@ -34,7 +34,7 @@ class CladiriCadastraleController < ApplicationController
                                 .select(:id, :numar_cadastral, :destinatie, :regim_inaltime,
                                         :suprafata_construita_mp, :judet, :localitate,
                                         :proprietar, :status,
-                                        "ST_AsGeoJSON(ST_Transform(geom, 4326), 6) AS geojson_wgs84")
+                                        "ST_AsGeoJSON(geom, 6) AS geojson_wgs84")
                                 .to_sql
 
     sql = <<~SQL

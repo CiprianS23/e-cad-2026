@@ -769,7 +769,7 @@ export default class extends Controller {
       if (!issue.geojson) return
       try {
         const feat = fmt.readFeature(issue.geojson, {
-          dataProjection:    "EPSG:4326",
+          dataProjection:    "EPSG:3844",
           featureProjection: "EPSG:3844"
         })
         feat.set("severity", issue.severity)
@@ -879,7 +879,9 @@ export default class extends Controller {
   _buildWkt(type = "POLYGON") {
     if (this._verts.length < 3) return ""
     const pts = [...this._verts, this._verts[0]]
-    const ring = pts.map(v => `${v.x.toFixed(4)} ${v.y.toFixed(4)}`).join(", ")
+    // 6 decimale = precizie µm în metri Stereo70 — elimină drift-ul de
+    // rotunjire care cauza overlap micrometric la poligoane adiacente.
+    const ring = pts.map(v => `${v.x.toFixed(6)} ${v.y.toFixed(6)}`).join(", ")
     return type === "MULTIPOLYGON" ? `MULTIPOLYGON(((${ring})))` : `POLYGON((${ring}))`
   }
 
@@ -1215,7 +1217,7 @@ export default class extends Controller {
         const closed = ring.length > 0 && (ring[0][0] !== ring[ring.length-1][0] || ring[0][1] !== ring[ring.length-1][1])
           ? [...ring, ring[0]]
           : ring
-        return "(" + closed.map(c => `${c[0].toFixed(4)} ${c[1].toFixed(4)}`).join(", ") + ")"
+        return "(" + closed.map(c => `${c[0].toFixed(6)} ${c[1].toFixed(6)}`).join(", ") + ")"
       })
       return "(" + ringStrs.join(", ") + ")"
     })

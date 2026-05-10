@@ -23,7 +23,7 @@ class DigitizareController < ApplicationController
     # alinieri reale a vertecșilor → posibili sliveri. Detecția se face la
     # 0.01 mp (= 1 cm²) — sub asta e doar floating-point în PostGIS.
     snap_tol      = 0.0   # m  — fără fuzzy snap, alinierea TREBUIE să vină din client
-    overlap_min   = 0.01  # mp — 1 cm², strict
+    overlap_min   = 0.10  # mp — 10 cm², toleranță pentru drift floating-point
     sliver_max_mp = 1.00  # mp
     sliver_dist   = 1.00  # m
 
@@ -39,7 +39,7 @@ class DigitizareController < ApplicationController
       WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom)
       SELECT t.id, t.numar_cadastral AS label,
         ST_Area(ST_Intersection(t.geom, np.geom)) AS area,
-        ST_AsGeoJSON(ST_Transform(ST_Intersection(t.geom, np.geom), 4326), 6) AS geojson
+        ST_AsGeoJSON(ST_Intersection(t.geom, np.geom), 6) AS geojson
       FROM #{table} t, np
       WHERE t.geom IS NOT NULL
         AND t.id NOT IN (?)
@@ -86,7 +86,7 @@ class DigitizareController < ApplicationController
            )
       SELECT id AS neighbor_id, label AS neighbor_label,
         ROUND(ST_Area(gap_geom)::numeric, 3) AS gap_area,
-        ST_AsGeoJSON(ST_Transform(gap_geom, 4326), 6) AS geojson
+        ST_AsGeoJSON(gap_geom, 6) AS geojson
       FROM gaps
       WHERE gap_geom IS NOT NULL
         AND NOT ST_IsEmpty(gap_geom)
@@ -117,7 +117,7 @@ class DigitizareController < ApplicationController
                AND p.id NOT IN (#{excluded_ids.join(',')})
            )
       SELECT n.id AS neighbor_id, n.label AS neighbor_label,
-        ST_AsGeoJSON(ST_Transform(v.pt, 4326), 6) AS geojson,
+        ST_AsGeoJSON(v.pt, 6) AS geojson,
         ST_X(v.pt) AS x, ST_Y(v.pt) AS y
       FROM new_verts v, neighbors n
       WHERE ST_DWithin(v.pt, ST_Boundary(n.geom), 0.05)
@@ -155,7 +155,7 @@ class DigitizareController < ApplicationController
              FROM neighbors n
            )
       SELECT nv.neighbor_id, nv.neighbor_label,
-        ST_AsGeoJSON(ST_Transform(nv.pt, 4326), 6) AS geojson,
+        ST_AsGeoJSON(nv.pt, 6) AS geojson,
         ST_X(nv.pt) AS x, ST_Y(nv.pt) AS y
       FROM neighbor_verts nv, np
       WHERE ST_DWithin(nv.pt, ST_Boundary(np.geom), 0.05)
@@ -179,7 +179,7 @@ class DigitizareController < ApplicationController
         WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom),
              vts AS (SELECT (ST_DumpPoints(np.geom)).geom AS pt FROM np)
         SELECT DISTINCT p.id, p.numar_cadastral AS label,
-          ST_AsGeoJSON(ST_Transform(p.geom, 4326), 6) AS geojson
+          ST_AsGeoJSON(p.geom, 6) AS geojson
         FROM parcele_cadastrale p, vts
         WHERE p.geom IS NOT NULL
           AND ST_Intersects(p.geom, vts.pt)

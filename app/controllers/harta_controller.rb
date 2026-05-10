@@ -92,7 +92,7 @@ class HartaController < ApplicationController
         'features', COALESCE(json_agg(
           json_build_object(
             'type',       'Feature',
-            'geometry',   ST_AsGeoJSON(ST_Transform(ap.geom, 4326), 6)::json,
+            'geometry',   ST_AsGeoJSON(ap.geom, 6)::json,
             'properties', json_build_object(
               'entity_type',              ap.entity_type,
               'id',                       ap.id,

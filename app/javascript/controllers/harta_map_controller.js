@@ -419,10 +419,12 @@ export default class extends Controller {
   // ── Utilitare ─────────────────────────────────────────────────────────────
 
   _addGeoJSON(layer, data) {
-    // GeoJSON din server vine în EPSG:4326; îl convertim la projection-ul
-    // view-ului (EPSG:3844) ca features-urile să fie nativ în Stereo 70.
+    // GeoJSON din server vine NATIV în EPSG:3844 (Stereo 70). Niciun transform
+    // necesar — coordonatele sunt cele exacte din DB. Asta elimină pierderile
+    // de precizie de la round-trip 3844→4326→3844 care cauzau false-overlap-uri
+    // micrometrice la digitizarea poligoanelor adiacente.
     const features = new ol.format.GeoJSON().readFeatures(data, {
-      dataProjection:    "EPSG:4326",
+      dataProjection:    "EPSG:3844",
       featureProjection: "EPSG:3844"
     })
     layer.getSource().addFeatures(features)
