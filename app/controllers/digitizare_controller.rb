@@ -60,7 +60,12 @@ class DigitizareController < ApplicationController
     # poligoanele se ating într-un punct dar au goluri pe muchii.
     # Tehnica: zone aflate ÎN AMBELE buffer-uri (0.5m) DAR neacoperite
     # nici de poligonul curent, nici de vecin = gap real.
-    sliver_sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt, sliver_dist, excluded_ids, sliver_max_mp])
+    # Pragul gap_min trebuie ridicat suficient ca să distingem GAP REAL de
+    # zgomot numeric din ST_Buffer (aproximare poligonală 8 segmente/sfert).
+    # Buffer-uri de 0.5m → noise tipic ≤ 0.5 mp pe boundary perfect aliniat.
+    # Setăm gap_min = 0.50 mp: orice sub asta = artefact, peste asta = real gap.
+    gap_min = 0.50  # mp
+    sliver_sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt, sliver_dist, excluded_ids, gap_min, sliver_max_mp])
       WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom),
            pairs AS (
              SELECT p.id, p.numar_cadastral AS label, p.geom
@@ -69,6 +74,7 @@ class DigitizareController < ApplicationController
                AND ST_DWithin(p.geom, np.geom, ?)
                AND p.id NOT IN (?)
                AND NOT ST_Overlaps(p.geom, np.geom)
+               AND NOT ST_Touches(p.geom, np.geom)  -- skip dacă deja se ating perfect
            ),
            gaps AS (
              SELECT
@@ -90,7 +96,7 @@ class DigitizareController < ApplicationController
       FROM gaps
       WHERE gap_geom IS NOT NULL
         AND NOT ST_IsEmpty(gap_geom)
-        AND ST_Area(gap_geom) > 0.01
+        AND ST_Area(gap_geom) > ?
         AND ST_Area(gap_geom) < ?
     SQL
     ActiveRecord::Base.connection.select_all(sliver_sql).each do |row|
