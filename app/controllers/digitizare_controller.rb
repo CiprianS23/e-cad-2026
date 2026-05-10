@@ -71,7 +71,7 @@ class DigitizareController < ApplicationController
       }
     end
 
-    # ── Vertex-on-vertex — vertex nou aflat pe muchia unui vecin, dar NU pe un vertex al vecinului
+    # ── Vertex-on-vertex (asimetric A→B): vertex NOU pe muchia vecinului, dar NU pe vertex vecin
     vov_sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt, wkt])
       WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom),
            new_verts AS (
@@ -97,7 +97,42 @@ class DigitizareController < ApplicationController
         type: "vertex_off", severity: "warning", neighbor_kind: "parcela",
         neighbor_id: row["neighbor_id"], neighbor_label: row["neighbor_label"],
         x: row["x"].to_f.round(3), y: row["y"].to_f.round(3),
-        message: "Vertex (#{row['x'].to_f.round(2)}, #{row['y'].to_f.round(2)}) pe muchia parcelei #{row['neighbor_label']} fără vertex corespondent",
+        message: "Vertex nou (#{row['x'].to_f.round(2)}, #{row['y'].to_f.round(2)}) pe muchia parcelei #{row['neighbor_label']} fără vertex corespondent",
+        geojson: row["geojson"]
+      }
+    end
+
+    # ── Vertex-on-vertex (asimetric B→A): vertex VECIN pe muchia poligonului nou, dar NU vertex nou
+    vov_rev_sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt, wkt])
+      WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom),
+           new_verts AS (
+             SELECT (ST_DumpPoints(ST_GeomFromText(?, 3844))).geom AS pt
+           ),
+           neighbors AS (
+             SELECT p.id, p.numar_cadastral AS label, p.geom
+             FROM parcele_cadastrale p, np
+             WHERE p.geom IS NOT NULL AND ST_Touches(p.geom, np.geom)
+           ),
+           neighbor_verts AS (
+             SELECT n.id AS neighbor_id, n.label AS neighbor_label,
+                    (ST_DumpPoints(n.geom)).geom AS pt
+             FROM neighbors n
+           )
+      SELECT nv.neighbor_id, nv.neighbor_label,
+        ST_AsGeoJSON(ST_Transform(nv.pt, 4326), 6) AS geojson,
+        ST_X(nv.pt) AS x, ST_Y(nv.pt) AS y
+      FROM neighbor_verts nv, np
+      WHERE ST_DWithin(nv.pt, ST_Boundary(np.geom), 0.05)
+        AND NOT EXISTS (
+          SELECT 1 FROM new_verts WHERE ST_DWithin(nv.pt, new_verts.pt, 0.05)
+        )
+    SQL
+    ActiveRecord::Base.connection.select_all(vov_rev_sql).each do |row|
+      issues << {
+        type: "neighbor_vertex_off", severity: "warning", neighbor_kind: "parcela",
+        neighbor_id: row["neighbor_id"], neighbor_label: row["neighbor_label"],
+        x: row["x"].to_f.round(3), y: row["y"].to_f.round(3),
+        message: "Vertex vecin (#{row['x'].to_f.round(2)}, #{row['y'].to_f.round(2)}) al parcelei #{row['neighbor_label']} pe muchia ta — adaugă-l ca vertex (Click pe muchie + drag)",
         geojson: row["geojson"]
       }
     end

@@ -778,10 +778,21 @@ export default class extends Controller {
       })
     }
     if (type === "vertex_off") {
+      // Vertex NOU pe muchia vecinului — portocaliu (problema noului poligon)
       return new ol.style.Style({
         image: new ol.style.Circle({
           radius: 7,
           fill:   new ol.style.Fill({ color: "#d97706" }),
+          stroke: new ol.style.Stroke({ color: "#fff", width: 2 })
+        })
+      })
+    }
+    if (type === "neighbor_vertex_off") {
+      // Vertex VECIN pe muchia ta — albastru (trebuie adăugat ca vertex propriu)
+      return new ol.style.Style({
+        image: new ol.style.Circle({
+          radius: 7,
+          fill:   new ol.style.Fill({ color: "#2563eb" }),
           stroke: new ol.style.Stroke({ color: "#fff", width: 2 })
         })
       })
