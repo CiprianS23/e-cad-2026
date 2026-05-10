@@ -49,24 +49,48 @@ class DigitizareController < ApplicationController
       }
     end
 
-    # ── Slivers (gap-uri mici) — vecini la distanță < sliver_dist dar NEadiacenți
-    sliver_sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt, sliver_dist])
-      WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom)
-      SELECT 'parcela' AS kind, p.id, p.numar_cadastral AS label,
-        ST_AsGeoJSON(ST_Transform(p.geom, 4326), 6) AS geojson,
-        ST_Distance(p.geom, np.geom) AS dist
-      FROM parcele_cadastrale p, np
-      WHERE p.geom IS NOT NULL
-        AND ST_DWithin(p.geom, np.geom, ?)
-        AND NOT ST_Touches(p.geom, np.geom)
-        AND NOT ST_Intersects(p.geom, np.geom)
+    # ── Slivers (gap-uri mici) — calcul real al gap area chiar și când
+    # poligoanele se ating într-un punct dar au goluri pe muchii.
+    # Tehnica: zone aflate ÎN AMBELE buffer-uri (0.5m) DAR neacoperite
+    # nici de poligonul curent, nici de vecin = gap real.
+    sliver_sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt, sliver_dist, sliver_max_mp])
+      WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom),
+           pairs AS (
+             SELECT p.id, p.numar_cadastral AS label, p.geom
+             FROM parcele_cadastrale p, np
+             WHERE p.geom IS NOT NULL
+               AND ST_DWithin(p.geom, np.geom, ?)
+               AND NOT ST_Overlaps(p.geom, np.geom)
+           ),
+           gaps AS (
+             SELECT
+               pairs.id, pairs.label,
+               ST_CollectionExtract(
+                 ST_MakeValid(
+                   ST_Difference(
+                     ST_Intersection(ST_Buffer(np.geom, 0.5), ST_Buffer(pairs.geom, 0.5)),
+                     ST_Union(np.geom, pairs.geom)
+                   )
+                 ),
+                 3
+               ) AS gap_geom
+             FROM pairs, np
+           )
+      SELECT id AS neighbor_id, label AS neighbor_label,
+        ROUND(ST_Area(gap_geom)::numeric, 3) AS gap_area,
+        ST_AsGeoJSON(ST_Transform(gap_geom, 4326), 6) AS geojson
+      FROM gaps
+      WHERE gap_geom IS NOT NULL
+        AND NOT ST_IsEmpty(gap_geom)
+        AND ST_Area(gap_geom) > 0.01
+        AND ST_Area(gap_geom) < ?
     SQL
     ActiveRecord::Base.connection.select_all(sliver_sql).each do |row|
       issues << {
-        type: "sliver", severity: "warning", neighbor_kind: row["kind"],
-        neighbor_id: row["id"], neighbor_label: row["label"],
-        dist: row["dist"].to_f.round(3),
-        message: "Sliver: #{row['kind']} #{row['label']} la #{row['dist'].to_f.round(2)} m (gap < 1 mp posibil)",
+        type: "sliver", severity: "warning", neighbor_kind: "parcela",
+        neighbor_id: row["neighbor_id"], neighbor_label: row["neighbor_label"],
+        area: row["gap_area"].to_f,
+        message: "Gap între tine și parcela #{row['neighbor_label']}: #{row['gap_area']} mp",
         geojson: row["geojson"]
       }
     end
@@ -80,7 +104,7 @@ class DigitizareController < ApplicationController
            neighbors AS (
              SELECT p.id, p.numar_cadastral AS label, p.geom
              FROM parcele_cadastrale p, np
-             WHERE p.geom IS NOT NULL AND ST_Touches(p.geom, np.geom)
+             WHERE p.geom IS NOT NULL AND ST_DWithin(p.geom, np.geom, 0.5)
            )
       SELECT n.id AS neighbor_id, n.label AS neighbor_label,
         ST_AsGeoJSON(ST_Transform(v.pt, 4326), 6) AS geojson,
@@ -111,7 +135,7 @@ class DigitizareController < ApplicationController
            neighbors AS (
              SELECT p.id, p.numar_cadastral AS label, p.geom
              FROM parcele_cadastrale p, np
-             WHERE p.geom IS NOT NULL AND ST_Touches(p.geom, np.geom)
+             WHERE p.geom IS NOT NULL AND ST_DWithin(p.geom, np.geom, 0.5)
            ),
            neighbor_verts AS (
              SELECT n.id AS neighbor_id, n.label AS neighbor_label,

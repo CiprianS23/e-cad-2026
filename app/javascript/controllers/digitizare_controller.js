@@ -437,6 +437,9 @@ export default class extends Controller {
     const m    = this._snapModes
     refs.forEach(layer => {
       layer.getSource().getFeatures().forEach(f => {
+        // În edit mode, NU includem feature-ul editat ca țintă de snap
+        // (cauza erorilor OSnap când Modify încerca să snap-uie pe el însuși)
+        if (this._editing && this._editFeature && f === this._editFeature) return
         if (m.has("endpoint") || m.has("nearest")) out.push(f)
         if (m.has("midpoint")) this._addMidpoints(f, out)
         if (m.has("centroid")) this._addCentroid(f, out)
