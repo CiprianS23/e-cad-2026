@@ -43,6 +43,12 @@ export default class extends Controller {
     this._loadParcele()
     this._loadCgxml()
     this._loadCladiri()
+    // Re-render etichete la fiecare pan/zoom — recalculează poziția să
+    // rămână în viewport chiar și când poligonul iese parțial din vedere.
+    this.map.on("moveend", () => {
+      this.parcelLabelsLayer?.changed()
+      this.cladiriLabelsLayer?.changed()
+    })
     // Notifică alte controllere (digitizare, layer-switcher) că harta e gata
     this.dispatch("ready", { detail: { map: this.map }, bubbles: true })
   }
@@ -259,10 +265,14 @@ export default class extends Controller {
   _parcelLabelStyle(feature) {
     const nrCad = feature.get("numar_cadastral") || ""
     const geom  = feature.getGeometry()
-    const area  = geom ? Math.round(geom.getArea()) : null
+    if (!geom) return null
+    const area  = Math.round(geom.getArea())
     const label = nrCad && area != null ? `${nrCad}\n${area} mp` : (nrCad || (area != null ? `${area} mp` : ""))
     if (!label) return null
+    const labelPos = this._computeLabelPosition(geom)
+    if (!labelPos) return null  // geometria nu intersectează viewport-ul
     return new ol.style.Style({
+      geometry: new ol.geom.Point(labelPos),
       text: new ol.style.Text({
         text:      label,
         font:      "600 12px system-ui, sans-serif",
@@ -272,6 +282,33 @@ export default class extends Controller {
         overflow:  true
       })
     })
+  }
+
+  // Calculează poziția optimă pentru etichetă astfel încât să rămână în
+  // viewport chiar și când poligonul se extinde dincolo de zona vizibilă
+  // (la zoom-in puternic). Strategie:
+  //   1. Dacă poligonul nu intersectează deloc viewport-ul → null (nu randăm)
+  //   2. Dacă interior point-ul natural e în viewport → folosim-l (label
+  //      apare în interior, exact ca standard)
+  //   3. Altfel → folosim centrul intersecției bbox(geom) ∩ bbox(viewport),
+  //      apoi îl proiectăm înapoi pe poligon dacă pică în afara lui
+  _computeLabelPosition(geom) {
+    if (!this.map) return geom.getInteriorPoint().getCoordinates()
+    const viewExt = this.map.getView().calculateExtent(this.map.getSize())
+    const polyExt = geom.getExtent()
+    if (!ol.extent.intersects(polyExt, viewExt)) return null
+
+    const interior = geom.getInteriorPoint().getCoordinates()
+    if (ol.extent.containsCoordinate(viewExt, interior)) return interior
+
+    // Centrul intersecției bbox-urilor — în general în viewport
+    const inter = ol.extent.getIntersection(polyExt, viewExt)
+    if (ol.extent.isEmpty(inter)) return null
+    const c = ol.extent.getCenter(inter)
+    // Dacă centrul nu e în poligon, aproximăm cu cel mai apropiat punct de pe boundary
+    if (geom.intersectsCoordinate(c)) return c
+    const closest = geom.getClosestPoint(c)
+    return closest
   }
 
   _cladireStyle(feature) {
@@ -284,10 +321,14 @@ export default class extends Controller {
   _cladireLabelStyle(feature) {
     const nrCad = feature.get("numar_cadastral") || ""
     const geom  = feature.getGeometry()
-    const area  = geom ? Math.round(geom.getArea()) : null
+    if (!geom) return null
+    const area  = Math.round(geom.getArea())
     const label = nrCad && area != null ? `${nrCad}\n${area} mp` : (nrCad || (area != null ? `${area} mp` : ""))
     if (!label) return null
+    const labelPos = this._computeLabelPosition(geom)
+    if (!labelPos) return null
     return new ol.style.Style({
+      geometry: new ol.geom.Point(labelPos),
       text: new ol.style.Text({
         text:      label,
         font:      "600 11px system-ui, sans-serif",
