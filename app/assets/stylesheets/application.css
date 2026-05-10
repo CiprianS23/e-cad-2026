@@ -761,10 +761,28 @@ nav.pagination a:hover  { background: #f3f4f6; }
 
 /* Secțiuni */
 .digi-section {
-  border-bottom: 1px solid #e5e7eb;
-  padding: 10px 14px;
+  border-bottom: 6px solid #e5e7eb;
+  padding: 12px 14px;
+  position: relative;
 }
+.digi-section + .digi-section { border-top: 1px solid #d1d5db; }
 .digi-section-flex { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* Label-ul direct al secțiunii — bara de header proeminentă */
+.digi-section > .digi-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: #1a1a2e;
+  background: linear-gradient(90deg, #e0e7ff 0%, #f3f4f6 100%);
+  padding: 5px 10px;
+  border-left: 3px solid #1d4ed8;
+  margin: -12px -14px 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Variantă simplă pentru sub-labels în interiorul secțiunilor (dxf, etc.) */
 .digi-section-label {
   font-size: 10px;
   font-weight: 700;

@@ -206,7 +206,10 @@
       <!-- 1. Topologie -->
       <section class="digi-section">
         <div class="digi-section-label">Topologie</div>
-        <div class="digi-btn-row">
+        <!-- Mesaje LIVE — apare în timpul digitizare/edit; arată ✓ OK sau erori -->
+        <div class="digi-topology" data-digitizare-target="topologyMsg"></div>
+        <!-- Audit GLOBAL pe toată baza de date -->
+        <div class="digi-btn-row" style="margin-top:6px">
           <button type="button" class="btn btn-secondary btn-sm"
                   data-action="click->digitizare#runAuditTopologie"
                   data-digitizare-target="btnAudit"
@@ -408,7 +411,6 @@
           <span class="digi-area-label">Diferență</span>
           <span class="digi-area-diff" data-digitizare-target="areaDiff">—</span>
         </div>
-        <div class="digi-topology" data-digitizare-target="topologyMsg"></div>
       </section>
 
       <!-- 5. Import (DXF + manual XY + TXT stație totală) -->
