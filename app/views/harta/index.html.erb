@@ -203,24 +203,9 @@
 
       <!-- (Coordonate cursor + OSnap + Toleranță au fost mutate în status bar-ul de jos) -->
 
-      <!-- 0. Import DXF -->
+      <!-- 1. Topologie -->
       <section class="digi-section">
-        <div class="digi-section-label">Import DXF</div>
-        <div class="digi-btn-row">
-          <label class="btn btn-secondary btn-sm" style="cursor:pointer;flex:1">
-            📥 Selectează fișier
-            <input type="file" accept=".dxf" style="display:none"
-                   data-action="change->digitizare#onDxfFileSelected"
-                   data-digitizare-target="dxfFileInput"
-                   data-digitizare-url-param="<%= digitizare_import_dxf_path %>">
-          </label>
-        </div>
-        <div class="digi-dxf-mapping" data-digitizare-target="dxfMapping" style="display:none"></div>
-      </section>
-
-      <!-- 1. Audit topologie global -->
-      <section class="digi-section">
-        <div class="digi-section-label">Audit topologie</div>
+        <div class="digi-section-label">Topologie</div>
         <div class="digi-btn-row">
           <button type="button" class="btn btn-secondary btn-sm"
                   data-action="click->digitizare#runAuditTopologie"
@@ -281,62 +266,9 @@
         </div>
       </section>
 
-      <!-- (Lista vertecșilor scoasă — neutilizată în flow-ul tipic) -->
-
-      <!-- 4. Input manual / import TXT -->
+      <!-- 3. Parcelă / Clădire (toggle + atribute + salvare) -->
       <section class="digi-section">
-        <div class="digi-section-label">Adaugă coordonate</div>
-        <div class="digi-manual-row">
-          <input type="number" step="0.001" placeholder="X (E)" class="input input-sm digi-coord-input"
-                 data-digitizare-target="inputX">
-          <input type="number" step="0.001" placeholder="Y (N)" class="input input-sm digi-coord-input"
-                 data-digitizare-target="inputY">
-          <button class="btn btn-secondary btn-sm"
-                  data-action="click->digitizare#addManualPoint">+ Adaugă</button>
-        </div>
-        <label class="digi-import-label">
-          <input type="file" accept=".txt,.csv" class="digi-file-input"
-                 data-action="change->digitizare#importTxt">
-          📄 Import TXT stație totală
-        </label>
-      </section>
-
-      <!-- 5. Suprafață -->
-      <section class="digi-section">
-        <div class="digi-section-label">Suprafață</div>
-        <div class="digi-area-grid">
-          <span class="digi-area-label">Calculată (PostGIS)</span>
-          <span class="digi-area-val" data-digitizare-target="areaCalc">—</span>
-
-          <span class="digi-area-label">Din act (mp)</span>
-          <input type="number" step="0.01" class="input input-sm digi-area-input"
-                 placeholder="0.00"
-                 data-digitizare-target="areaAct"
-                 data-action="input->digitizare#updateDiff">
-
-          <span class="digi-area-label">Diferență</span>
-          <span class="digi-area-diff" data-digitizare-target="areaDiff">—</span>
-        </div>
-        <div class="digi-topology" data-digitizare-target="topologyMsg"></div>
-      </section>
-
-      <!-- 6. Export -->
-      <section class="digi-section">
-        <div class="digi-section-label">Export</div>
-        <div class="digi-btn-row">
-          <button class="btn btn-secondary btn-sm"
-                  data-action="click->digitizare#exportDxf">
-            ⬇ DXF
-          </button>
-          <button class="btn btn-secondary btn-sm"
-                  data-action="click->digitizare#showRaport">
-            📋 Raport
-          </button>
-        </div>
-      </section>
-
-      <!-- 7. Salvare -->
-      <section class="digi-section">
+        <div class="digi-section-label">Parcelă / Clădire</div>
 
         <!-- Toggle entitate -->
         <div class="digi-entity-toggle">
@@ -458,6 +390,75 @@
           <% end %>
         </div>
 
+      </section>
+
+      <!-- 4. Suprafață -->
+      <section class="digi-section">
+        <div class="digi-section-label">Suprafață</div>
+        <div class="digi-area-grid">
+          <span class="digi-area-label">Calculată (PostGIS)</span>
+          <span class="digi-area-val" data-digitizare-target="areaCalc">—</span>
+
+          <span class="digi-area-label">Din act (mp)</span>
+          <input type="number" step="0.01" class="input input-sm digi-area-input"
+                 placeholder="0.00"
+                 data-digitizare-target="areaAct"
+                 data-action="input->digitizare#updateDiff">
+
+          <span class="digi-area-label">Diferență</span>
+          <span class="digi-area-diff" data-digitizare-target="areaDiff">—</span>
+        </div>
+        <div class="digi-topology" data-digitizare-target="topologyMsg"></div>
+      </section>
+
+      <!-- 5. Import (DXF + manual XY + TXT stație totală) -->
+      <section class="digi-section">
+        <div class="digi-section-label">Import</div>
+
+        <!-- DXF -->
+        <div class="digi-btn-row">
+          <label class="btn btn-secondary btn-sm" style="cursor:pointer;flex:1">
+            📥 Import DXF
+            <input type="file" accept=".dxf" style="display:none"
+                   data-action="change->digitizare#onDxfFileSelected"
+                   data-digitizare-target="dxfFileInput"
+                   data-digitizare-url-param="<%= digitizare_import_dxf_path %>">
+          </label>
+        </div>
+        <div class="digi-dxf-mapping" data-digitizare-target="dxfMapping" style="display:none"></div>
+
+        <!-- Manual X/Y -->
+        <div class="digi-section-label" style="margin-top:8px">Adaugă punct manual</div>
+        <div class="digi-manual-row">
+          <input type="number" step="0.001" placeholder="X (E)" class="input input-sm digi-coord-input"
+                 data-digitizare-target="inputX">
+          <input type="number" step="0.001" placeholder="Y (N)" class="input input-sm digi-coord-input"
+                 data-digitizare-target="inputY">
+          <button class="btn btn-secondary btn-sm"
+                  data-action="click->digitizare#addManualPoint">+ Adaugă</button>
+        </div>
+
+        <!-- TXT stație totală -->
+        <label class="digi-import-label">
+          <input type="file" accept=".txt,.csv" class="digi-file-input"
+                 data-action="change->digitizare#importTxt">
+          📄 Import TXT stație totală
+        </label>
+      </section>
+
+      <!-- 6. Export -->
+      <section class="digi-section">
+        <div class="digi-section-label">Export</div>
+        <div class="digi-btn-row">
+          <button class="btn btn-secondary btn-sm"
+                  data-action="click->digitizare#exportDxf">
+            ⬇ DXF
+          </button>
+          <button class="btn btn-secondary btn-sm"
+                  data-action="click->digitizare#showRaport">
+            📋 Raport
+          </button>
+        </div>
       </section>
 
     </div>
