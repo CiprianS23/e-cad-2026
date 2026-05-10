@@ -156,6 +156,22 @@ export default class extends Controller {
       properties: { name: "cgxml" }
     })
 
+    // Layere dedicate pentru ETICHETE (nr cadastral + suprafață) — share source
+    // cu layer-ele de bază dar randate la zIndex 1200 ca să fie DEASUPRA
+    // overlay-urilor (audit, topology, edit-vertices) care altfel acoperă textul.
+    this.parcelLabelsLayer = new ol.layer.Vector({
+      source:     this.parcelLayer.getSource(),
+      style:      this._parcelLabelStyle.bind(this),
+      zIndex:     1200,
+      properties: { name: "parcele-labels" }
+    })
+    this.cladiriLabelsLayer = new ol.layer.Vector({
+      source:     this.cladiriLayer.getSource(),
+      style:      this._cladireLabelStyle.bind(this),
+      zIndex:     1200,
+      properties: { name: "cladiri-labels" }
+    })
+
     this._overlays = {
       uat:     this.uatLayer,
       parcele: this.parcelLayer,
@@ -167,6 +183,8 @@ export default class extends Controller {
     this.map.addLayer(this.parcelLayer)
     this.map.addLayer(this.cladiriLayer)
     this.map.addLayer(this.cgxmlLayer)
+    this.map.addLayer(this.parcelLabelsLayer)
+    this.map.addLayer(this.cladiriLabelsLayer)
   }
 
   // ── API public (folosit de layer-switcher prin Stimulus outlet) ──────────
@@ -180,6 +198,9 @@ export default class extends Controller {
 
   toggleOverlay(name, visible) {
     this._overlays?.[name]?.setVisible(visible)
+    // Sincronizăm vizibilitatea label-urilor cu cea a layer-ului
+    if (name === "parcele") this.parcelLabelsLayer?.setVisible(visible)
+    if (name === "cladiri") this.cladiriLabelsLayer?.setVisible(visible)
   }
 
   setDigitizing(active) {
@@ -222,45 +243,59 @@ export default class extends Controller {
     const status = feature.get("status")
     const cat    = feature.get("categoria_folosinta")
     const fill   = PARCEL_COLORS[cat] || "#6b7280"
-    const nrCad  = feature.get("numar_cadastral") || ""
-    const geom   = feature.getGeometry()
-    // Suprafața recalculată din geometry curentă — actualizare dinamică în edit
-    const area   = geom ? Math.round(geom.getArea()) : null
-    const label  = nrCad && area != null ? `${nrCad}\n${area} mp` : (nrCad || (area != null ? `${area} mp` : ""))
     return new ol.style.Style({
       stroke: new ol.style.Stroke({
         color:    status === "litigiu" ? "#dc2626" : "#1d4ed8",
         width:    status === "litigiu" ? 2.5 : 1.5,
         lineDash: status === "inactiv" ? [6, 4] : null
       }),
-      fill: new ol.style.Fill({ color: hexToRgba(fill, 0.35) }),
-      text: label ? new ol.style.Text({
-        text:        label,
-        font:        "600 11px system-ui, sans-serif",
-        fill:        new ol.style.Fill({ color: "#1a1a2e" }),
-        stroke:      new ol.style.Stroke({ color: "#fff", width: 3 }),
-        textAlign:   "center",
-        overflow:    true
-      }) : null
+      fill: new ol.style.Fill({ color: hexToRgba(fill, 0.35) })
     })
   }
 
-  _cladireStyle(feature) {
+  // Style pentru layer-ul de etichete (separat ca să fie deasupra
+  // overlay-urilor de audit/topology/edit-vertices). Suprafața recalculată
+  // din geom curentă → update dinamic la edit.
+  _parcelLabelStyle(feature) {
     const nrCad = feature.get("numar_cadastral") || ""
     const geom  = feature.getGeometry()
     const area  = geom ? Math.round(geom.getArea()) : null
     const label = nrCad && area != null ? `${nrCad}\n${area} mp` : (nrCad || (area != null ? `${area} mp` : ""))
+    if (!label) return null
+    return new ol.style.Style({
+      text: new ol.style.Text({
+        text:      label,
+        font:      "600 12px system-ui, sans-serif",
+        fill:      new ol.style.Fill({ color: "#1a1a2e" }),
+        stroke:    new ol.style.Stroke({ color: "#fff", width: 4 }),
+        textAlign: "center",
+        overflow:  true
+      })
+    })
+  }
+
+  _cladireStyle(feature) {
     return new ol.style.Style({
       stroke: new ol.style.Stroke({ color: "#b45309", width: 1.5 }),
-      fill:   new ol.style.Fill({ color: "rgba(251, 191, 36, 0.3)" }),
-      text: label ? new ol.style.Text({
+      fill:   new ol.style.Fill({ color: "rgba(251, 191, 36, 0.3)" })
+    })
+  }
+
+  _cladireLabelStyle(feature) {
+    const nrCad = feature.get("numar_cadastral") || ""
+    const geom  = feature.getGeometry()
+    const area  = geom ? Math.round(geom.getArea()) : null
+    const label = nrCad && area != null ? `${nrCad}\n${area} mp` : (nrCad || (area != null ? `${area} mp` : ""))
+    if (!label) return null
+    return new ol.style.Style({
+      text: new ol.style.Text({
         text:      label,
-        font:      "600 10px system-ui, sans-serif",
+        font:      "600 11px system-ui, sans-serif",
         fill:      new ol.style.Fill({ color: "#7c2d12" }),
         stroke:    new ol.style.Stroke({ color: "#fff", width: 3 }),
         textAlign: "center",
         overflow:  true
-      }) : null
+      })
     })
   }
 
