@@ -18,6 +18,7 @@ class CladireCadastrala < ApplicationRecord
     message: "nu a fost găsită — poligonul clădirii nu se suprapune cu nicio parcelă cadastrală"
   }
   validate  :geom_wkt_parsabil, if: -> { @geom_wkt.present? }
+  validate  :geom_topologic_valid, if: -> { geom.present? }
 
   before_validation :atribuie_geom_din_wkt,     if: -> { @geom_wkt.present? }
   before_validation :atribuie_parcela_din_geom,  if: -> { geom.present? && parcela_cadastrala_id.blank? }
@@ -53,6 +54,18 @@ class CladireCadastrala < ApplicationRecord
     FACTORY.parse_wkt(@geom_wkt)
   rescue RGeo::Error::ParseError
     errors.add(:geom, "WKT invalid — verificați formatul și SRID-ul (Stereo 70 / 3844)")
+  end
+
+  def geom_topologic_valid
+    wkt = geom.as_text
+    row = self.class.connection.select_one(
+      ApplicationRecord.sanitize_sql_array([
+        "SELECT ST_IsValid(ST_GeomFromText(?, 3844)) AS is_valid, ST_IsValidReason(ST_GeomFromText(?, 3844)) AS reason",
+        wkt, wkt
+      ])
+    )
+    return if row["is_valid"]
+    errors.add(:geom, "geometrie invalidă topologic: #{row['reason']}")
   end
 
   def calculeaza_centroid

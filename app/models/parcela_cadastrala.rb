@@ -13,6 +13,7 @@ class ParcelaCadastrala < ApplicationRecord
   validates :localitate,          presence: true
   validates :status,              inclusion: { in: STATUSURI }
   validate  :geom_wkt_parsabil,   if: -> { @geom_wkt.present? }
+  validate  :geom_topologic_valid, if: -> { geom.present? }
 
   before_validation :atribuie_geom_din_wkt, if: -> { @geom_wkt.present? }
   before_save       :calculeaza_centroid,    if: :geom_changed?
@@ -54,6 +55,18 @@ class ParcelaCadastrala < ApplicationRecord
     FACTORY.parse_wkt(@geom_wkt)
   rescue RGeo::Error::ParseError
     errors.add(:geom, "WKT invalid — verificați formatul și SRID-ul (Stereo 70 / 3844)")
+  end
+
+  def geom_topologic_valid
+    wkt = geom.as_text
+    row = self.class.connection.select_one(
+      ApplicationRecord.sanitize_sql_array([
+        "SELECT ST_IsValid(ST_GeomFromText(?, 3844)) AS is_valid, ST_IsValidReason(ST_GeomFromText(?, 3844)) AS reason",
+        wkt, wkt
+      ])
+    )
+    return if row["is_valid"]
+    errors.add(:geom, "geometrie invalidă topologic: #{row['reason']}")
   end
 
   def calculeaza_centroid

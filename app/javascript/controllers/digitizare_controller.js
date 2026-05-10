@@ -33,13 +33,15 @@ export default class extends Controller {
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
   connect() {
-    this._verts        = []
-    this._areaCalc     = 0
-    this._areaDebounce = null
-    this._entityType   = "parcela"
-    this._snapEnabled  = true
-    this._orthoEnabled = false
-    this._snapModes    = new Set(["endpoint", "midpoint"])
+    this._verts          = []
+    this._areaCalc       = 0
+    this._areaDebounce   = null
+    this._entityType     = "parcela"
+    this._snapEnabled    = true
+    this._orthoEnabled   = false
+    this._snapModes      = new Set(["endpoint", "midpoint"])
+    this._polygonValid   = false
+    this._polygonSimple  = false
 
     this._drawSource = new ol.source.Vector()
     this._drawLayer  = new ol.layer.Vector({
@@ -75,6 +77,7 @@ export default class extends Controller {
     this._mouseMoveKey = this.map.on("pointermove", (evt) => this._onPointerMove(evt))
     this._moveEndKey   = this.map.on("moveend",     ()    => this._updateScale())
     this._updateScale()
+    this._updateSaveAvailability()  // butoanele Salvează încep dezactivate
   }
 
   _teardown() {
@@ -229,6 +232,8 @@ export default class extends Controller {
   clearAll() {
     this._verts    = []
     this._areaCalc = 0
+    this._polygonValid = false
+    this._polygonSimple = false
     if (this._draw && this.map) { this.map.removeInteraction(this._draw); this._draw = null }
     if (this._snap && this.map) { this.map.removeInteraction(this._snap); this._snap = null }
     this._hartaMap?.setDigitizing(false)
@@ -236,6 +241,7 @@ export default class extends Controller {
     this.btnStartTarget.classList.remove("btn-active")
     this.btnCloseTarget.disabled = true
     this.btnUndoTarget.disabled  = true
+    this._updateSaveAvailability()
     this._updateVertexList()
     this.areaCalcTarget.textContent  = "—"
     this.areaDiffTarget.textContent  = "—"
@@ -303,17 +309,33 @@ export default class extends Controller {
   }
 
   saveParcel() {
-    if (this._verts.length < 3) { this._setStatus("Niciun poligon pentru salvare.", "warn"); return }
+    if (!this._guardSavable()) return
     this.wktFieldTarget.value      = this._buildWkt("MULTIPOLYGON")
     this.saveAreaFieldTarget.value = this._areaCalc > 0 ? this._areaCalc.toFixed(4) : ""
     this.saveFormTarget.submit()
   }
 
   saveBuilding() {
-    if (this._verts.length < 3) { this._setStatus("Niciun poligon pentru salvare.", "warn"); return }
+    if (!this._guardSavable()) return
     this.wktFieldCladireTarget.value      = this._buildWkt("MULTIPOLYGON")
     this.saveAreaFieldCladireTarget.value = this._areaCalc > 0 ? this._areaCalc.toFixed(4) : ""
     this.saveFormCladireTarget.submit()
+  }
+
+  _guardSavable() {
+    if (this._verts.length < 3) {
+      this._setStatus("Niciun poligon pentru salvare (minim 3 vertecși).", "warn")
+      return false
+    }
+    if (!this._polygonValid) {
+      this._setStatus("Poligon INVALID (auto-intersecție / topologie eronată) — corectează vertecșii înainte de salvare.", "warn")
+      return false
+    }
+    if (!this._polygonSimple) {
+      this._setStatus("Poligon NON-SIMPLU — corectează vertecșii înainte de salvare.", "warn")
+      return false
+    }
+    return true
   }
 
   switchToParcel() {
@@ -599,14 +621,30 @@ export default class extends Controller {
         body:    JSON.stringify({ coords: this._verts.map(v => [v.x, v.y]) })
       })
       const data = await res.json()
-      this._areaCalc = data.suprafata || 0
+      this._areaCalc      = data.suprafata || 0
+      this._polygonValid  = data.is_valid  !== false
+      this._polygonSimple = data.is_simple !== false
       this.areaCalcTarget.textContent = this._areaCalc > 0 ? `${FMT2(this._areaCalc)} mp` : "—"
       const msgs = []
       if (data.is_valid  === false) msgs.push("⚠ Poligon invalid (auto-intersecție)")
       if (data.is_simple === false) msgs.push("⚠ Poligon non-simplu")
       this.topologyMsgTarget.innerHTML = msgs.map(m => `<span class="topo-warn">${m}</span>`).join("")
+      this._updateSaveAvailability()
       this._updateDiffDisplay()
     } catch (e) { console.warn("Eroare calcul suprafață:", e) }
+  }
+
+  _isPolygonSavable() {
+    return this._verts.length >= 3 && this._polygonValid && this._polygonSimple
+  }
+
+  _updateSaveAvailability() {
+    const ok = this._isPolygonSavable()
+    this.element.querySelectorAll('[data-action*="digitizare#saveParcel"], [data-action*="digitizare#saveBuilding"]')
+      .forEach(btn => {
+        btn.disabled = !ok
+        btn.title = ok ? "" : "Poligon invalid topologic — nu se poate salva"
+      })
   }
 
   _updateDiffDisplay() {
