@@ -2,7 +2,13 @@
 <% content_for :map, true %>
 <% content_for :fullpage, true %>
 
-<div class="harta-page">
+<div class="harta-page"
+     data-controller="digitizare"
+     data-digitizare-harta-map-outlet="#harta-map"
+     data-digitizare-calc-url-value="<%= digitizare_calculeaza_path %>"
+     data-digitizare-export-dxf-url-value="<%= digitizare_export_dxf_path %>"
+     data-digitizare-locate-uat-url-value="<%= digitizare_locate_uat_path %>"
+     data-digitizare-snap-tolerance-value="15">
   <!-- ── Sidebar stânga: filtre + legendă ────────────────────────────────── -->
   <aside class="harta-sidebar">
     <div class="sidebar-header">
@@ -173,12 +179,7 @@
 
   <!-- ── Panou Digitizare (dreapta, pliabil) ─────────────────────────────── -->
   <aside class="digi-panel digi-panel--collapsed"
-         data-controller="digitizare"
-         data-digitizare-harta-map-outlet="#harta-map"
-         data-digitizare-calc-url-value="<%= digitizare_calculeaza_path %>"
-         data-digitizare-export-dxf-url-value="<%= digitizare_export_dxf_path %>"
-         data-digitizare-locate-uat-url-value="<%= digitizare_locate_uat_path %>"
-         data-digitizare-snap-tolerance-value="15">
+         data-digitizare-target="panel">
 
     <!-- Toggle bar (vizibil mereu) -->
     <button type="button" class="digi-panel-toggle"

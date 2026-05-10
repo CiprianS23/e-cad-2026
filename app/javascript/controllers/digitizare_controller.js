@@ -14,12 +14,10 @@ export default class extends Controller {
   }
 
   static targets = [
-    "cursorX", "cursorY",
-    "snapDot", "snapLabel", "snapSlider", "snapToleranceVal",
-    "snapModes",
+    "panel", "panelBody",
+    "snapSlider", "snapToleranceVal", "snapModes",
     "btnStart", "btnClose", "btnUndo",
     "statusBar",
-    "vertexTbody", "vertexCount",
     "inputX", "inputY",
     "areaCalc", "areaAct", "areaDiff",
     "topologyMsg",
@@ -27,7 +25,6 @@ export default class extends Controller {
     "wktFieldCladire", "saveFormCladire", "saveAreaFieldCladire",
     "formParcela", "formCladire",
     "btnEntityParcela", "btnEntityCladire",
-    "panelBody",
     "cmdInput", "cmdHint",
     "snapToggle", "orthoToggle",
     "statusX", "statusY", "statusScale", "statusArea"
@@ -91,7 +88,9 @@ export default class extends Controller {
 
   // ── Public actions ───────────────────────────────────────────────────────
 
-  togglePanel() { this.element.classList.toggle("digi-panel--collapsed") }
+  togglePanel() {
+    if (this.hasPanelTarget) this.panelTarget.classList.toggle("digi-panel--collapsed")
+  }
 
   toggleSnap() {
     this._snapEnabled = !this._snapEnabled
@@ -389,8 +388,6 @@ export default class extends Controller {
 
   _onPointerMove(evt) {
     const [x, y] = ol.proj.transform(evt.coordinate, "EPSG:3857", "EPSG:3844")
-    if (this.hasCursorXTarget) this.cursorXTarget.textContent = FMT(x)
-    if (this.hasCursorYTarget) this.cursorYTarget.textContent = FMT(y)
     if (this.hasStatusXTarget) this.statusXTarget.textContent = FMT(x)
     if (this.hasStatusYTarget) this.statusYTarget.textContent = FMT(y)
   }
