@@ -417,14 +417,15 @@
       <section class="digi-section">
         <div class="digi-section-label">Import</div>
 
-        <!-- DXF -->
+        <!-- DXF / KML / GPKG -->
         <div class="digi-btn-row">
           <label class="btn btn-secondary btn-sm" style="cursor:pointer;flex:1">
-            📥 Import DXF
-            <input type="file" accept=".dxf" style="display:none"
+            📥 Import fișier (DXF / KML / GPKG)
+            <input type="file" accept=".dxf,.kml,.gpkg" style="display:none"
                    data-action="change->digitizare#onDxfFileSelected"
                    data-digitizare-target="dxfFileInput"
-                   data-digitizare-url-param="<%= digitizare_import_dxf_path %>">
+                   data-digitizare-url-param="<%= digitizare_import_dxf_path %>"
+                   data-digitizare-parse-url-param="<%= digitizare_parse_geo_file_path %>">
           </label>
         </div>
         <div class="digi-dxf-mapping" data-digitizare-target="dxfMapping" style="display:none"></div>
@@ -451,14 +452,54 @@
       <!-- 6. Export -->
       <section class="digi-section">
         <div class="digi-section-label">Export</div>
+
+        <!-- Pas 1: selectează zona pe hartă (dreptunghi sau poligon) -->
         <div class="digi-btn-row">
-          <button class="btn btn-secondary btn-sm"
-                  data-action="click->digitizare#exportDxf">
-            ⬇ DXF
+          <button type="button" class="btn btn-secondary btn-sm"
+                  data-action="click->digitizare#startExportZoneSelect"
+                  data-digitizare-shape-param="rect"
+                  data-digitizare-target="btnExportZone">
+            ▭ Dreptunghi
           </button>
-          <button class="btn btn-secondary btn-sm"
+          <button type="button" class="btn btn-secondary btn-sm"
+                  data-action="click->digitizare#startExportZoneSelect"
+                  data-digitizare-shape-param="polygon"
+                  data-digitizare-target="btnExportZonePoly">
+            ✏️ Poligon
+          </button>
+          <button type="button" class="btn btn-outline btn-sm"
+                  data-action="click->digitizare#clearExportZone">
+            ✕ Curăță
+          </button>
+        </div>
+        <div class="digi-export-status" data-digitizare-target="exportStatus"
+             style="margin-top:6px;font-size:11px;color:#6b7280">
+          Niciuna zonă selectată
+        </div>
+
+        <!-- Pas 2: format + layere + buton export -->
+        <div class="digi-save-grid" style="margin-top:8px">
+          <select class="input input-sm" data-digitizare-target="exportFormat">
+            <option value="dxf" selected>DXF (AutoCAD)</option>
+            <option value="kml">KML (Google Earth)</option>
+            <option value="gpkg">GPKG (GeoPackage)</option>
+          </select>
+        </div>
+        <div class="digi-export-layers" style="display:flex;gap:10px;font-size:11px;margin-top:4px">
+          <label><input type="checkbox" data-digitizare-target="exportLayerParcele" checked> Parcele</label>
+          <label><input type="checkbox" data-digitizare-target="exportLayerCladiri" checked> Clădiri</label>
+        </div>
+        <div class="digi-btn-row" style="margin-top:8px">
+          <button type="button" class="btn btn-primary btn-sm"
+                  data-action="click->digitizare#exportZone"
+                  data-digitizare-target="btnExportZoneSubmit"
+                  data-digitizare-url-param="<%= digitizare_export_zone_path %>"
+                  disabled>
+            ⬇ Exportă
+          </button>
+          <button type="button" class="btn btn-outline btn-sm"
                   data-action="click->digitizare#showRaport">
-            📋 Raport
+            📋 Raport poligon
           </button>
         </div>
       </section>

@@ -22,6 +22,8 @@ export default class extends Controller {
     "snapSlider", "snapToleranceVal", "snapModes",
     "btnStart", "btnEdit", "btnDelete", "btnClose", "btnUndo", "btnAudit", "auditList",
     "dxfFileInput", "dxfMapping",
+    "btnExportZone", "btnExportZonePoly", "btnExportZoneSubmit", "exportFormat",
+    "exportLayerParcele", "exportLayerCladiri", "exportStatus",
     "statusBar",
     "inputX", "inputY",
     "areaCalc", "areaAct", "areaDiff",
@@ -948,33 +950,173 @@ export default class extends Controller {
     if (evt.key === "Escape" && this._draw) { evt.preventDefault(); this.clearAll() }
   }
 
+  // ── Export zonă (DXF / KML / GPKG cu selecție dreptunghi sau poligon) ─
+
+  startExportZoneSelect(evt) {
+    if (!this.map) return
+    const shape = evt?.params?.shape || "rect"
+    // Curățăm orice zonă anterioară
+    this.clearExportZone()
+    // Dacă există o digitizare/edit activă, evităm conflict
+    if (this._draw || this._editing) {
+      this._setStatus("Termină digitizarea/editarea înainte de selecția zonei de export.", "warn")
+      return
+    }
+    if (!this._exportZoneSource) {
+      this._exportZoneSource = new ol.source.Vector()
+      this._exportZoneLayer = new ol.layer.Vector({
+        source: this._exportZoneSource,
+        style: new ol.style.Style({
+          stroke: new ol.style.Stroke({ color: "#16a34a", width: 2, lineDash: [6, 4] }),
+          fill:   new ol.style.Fill({ color: "rgba(34, 197, 94, 0.10)" })
+        }),
+        zIndex: 950
+      })
+      this.map.addLayer(this._exportZoneLayer)
+    }
+    const drawOpts = { source: this._exportZoneSource }
+    if (shape === "polygon") {
+      drawOpts.type = "Polygon"
+    } else {
+      drawOpts.type = "Circle"
+      drawOpts.geometryFunction = ol.interaction.Draw.createBox()
+    }
+    this._exportDraw = new ol.interaction.Draw(drawOpts)
+    this.map.addInteraction(this._exportDraw)
+    this._exportDraw.on("drawend", (e) => {
+      this.map.removeInteraction(this._exportDraw)
+      this._exportDraw = null
+      this._exportZoneFeature = e.feature
+      this._updateExportStatus()
+    })
+    if (this.hasExportStatusTarget) {
+      this.exportStatusTarget.textContent = (shape === "polygon")
+        ? "Click pentru fiecare vertex, dublu-click pentru a închide poligonul…"
+        : "Click + drag pe hartă pentru a desena dreptunghiul…"
+    }
+  }
+
+  clearExportZone() {
+    if (this._exportDraw && this.map) { this.map.removeInteraction(this._exportDraw); this._exportDraw = null }
+    this._exportZoneSource?.clear()
+    this._exportZoneFeature = null
+    this._updateExportStatus()
+  }
+
+  _updateExportStatus() {
+    const has = !!this._exportZoneFeature
+    if (this.hasBtnExportZoneSubmitTarget) this.btnExportZoneSubmitTarget.disabled = !has
+    if (!this.hasExportStatusTarget) return
+    if (!has) {
+      this.exportStatusTarget.textContent = "Niciuna zonă selectată"
+      return
+    }
+    const geom  = this._exportZoneFeature.getGeometry()
+    const ring  = geom.getCoordinates()[0]
+    const nVtx  = ring ? Math.max(0, ring.length - 1) : 0
+    const area  = Math.round(geom.getArea())
+    const isRect = nVtx === 4 && this._isRectangle(ring)
+    const ext   = geom.getExtent()
+    const w     = Math.round(ext[2] - ext[0])
+    const h     = Math.round(ext[3] - ext[1])
+    this.exportStatusTarget.textContent = isRect
+      ? `Zonă (dreptunghi): ${w} × ${h} m, ${area} mp`
+      : `Zonă (poligon): ${nVtx} vertecși, ${area} mp`
+  }
+
+  _isRectangle(ring) {
+    if (!ring || ring.length !== 5) return false
+    const [a, b, c, d] = ring
+    return Math.abs(a[0] - d[0]) < 0.001 && Math.abs(a[1] - b[1]) < 0.001 &&
+           Math.abs(b[0] - c[0]) < 0.001 && Math.abs(c[1] - d[1]) < 0.001
+  }
+
+  async exportZone(evt) {
+    if (!this._exportZoneFeature) {
+      this._setStatus("Selectează mai întâi o zonă cu butonul „Selectează zonă pe hartă\".", "warn")
+      return
+    }
+    const url    = evt.params?.url || "/digitizare/export_zone"
+    const format = this.hasExportFormatTarget ? this.exportFormatTarget.value : "dxf"
+    const layers = []
+    if (this.hasExportLayerParceleTarget && this.exportLayerParceleTarget.checked) layers.push("parcele")
+    if (this.hasExportLayerCladiriTarget && this.exportLayerCladiriTarget.checked) layers.push("cladiri")
+    if (layers.length === 0) { alert("Selectează cel puțin un layer (Parcele sau Clădiri)."); return }
+
+    // WKT al dreptunghiului în Stereo70 (view nativ)
+    const ring = this._exportZoneFeature.getGeometry().getCoordinates()[0]
+    const wkt  = `POLYGON((${ring.map(c => `${c[0].toFixed(4)} ${c[1].toFixed(4)}`).join(", ")}))`
+
+    const formData = new FormData()
+    formData.append("authenticity_token", this._csrf())
+    formData.append("area_wkt", wkt)
+    formData.append("format", format)
+    layers.forEach(l => formData.append("layers[]", l))
+
+    if (this.hasExportStatusTarget) this.exportStatusTarget.textContent = "⏳ Se generează fișierul…"
+    try {
+      const res = await fetch(url, { method: "POST", body: formData })
+      if (!res.ok) {
+        const text = await res.text()
+        if (this.hasExportStatusTarget) this.exportStatusTarget.textContent = `Eroare ${res.status}: ${text.slice(0, 100)}`
+        return
+      }
+      const blob = await res.blob()
+      const dl   = URL.createObjectURL(blob)
+      const a    = Object.assign(document.createElement("a"), {
+        href: dl,
+        download: `export.${format}`
+      })
+      a.click()
+      URL.revokeObjectURL(dl)
+      if (this.hasExportStatusTarget) this.exportStatusTarget.textContent = `✓ Export ${format.toUpperCase()} finalizat`
+    } catch (e) {
+      if (this.hasExportStatusTarget) this.exportStatusTarget.textContent = `Eroare rețea: ${e.message}`
+    }
+  }
+
   // ── Import DXF ────────────────────────────────────────────────────────
 
   async onDxfFileSelected(evt) {
     const file = evt.target.files[0]
     if (!file) return
-    if (typeof DxfParser === "undefined") {
-      alert("dxf-parser nu e încărcat (verifică conexiunea sau reîncarcă pagina)")
-      return
-    }
-    const url = evt.params?.url || "/digitizare/import_dxf"
+    const importUrl = evt.params?.url      || "/digitizare/import_dxf"
+    const parseUrl  = evt.params?.parseUrl || "/digitizare/parse_geo_file"
+    const ext = (file.name.split(".").pop() || "").toLowerCase()
+
     try {
-      const text = await file.text()
-      const parser = new DxfParser()
-      const dxf = parser.parseSync(text)
-      const layers = this._extractDxfPolygons(dxf)
-      if (Object.keys(layers).length === 0) {
-        this._renderDxfMapping(null, "Niciun poligon închis găsit în fișier (LWPOLYLINE/POLYLINE cu shape=true).")
+      let layers = null
+      if (ext === "dxf" && typeof DxfParser !== "undefined") {
+        // DXF parsat în client (mai rapid, fără upload).
+        const text = await file.text()
+        layers = this._extractDxfPolygons(new DxfParser().parseSync(text))
+      } else {
+        // KML / GPKG / DXF (fallback) — parsare server-side prin GDAL.
+        layers = await this._parseGeoFileServer(file, parseUrl)
+      }
+
+      if (!layers || Object.keys(layers).length === 0) {
+        this._renderDxfMapping(null, "Niciun poligon închis găsit în fișier.")
         return
       }
-      this._dxfLayers = layers
-      this._dxfImportUrl = url
+      this._dxfLayers    = layers
+      this._dxfImportUrl = importUrl
       this._renderDxfMapping(layers, file.name)
     } catch (e) {
-      this._renderDxfMapping(null, `Eroare parsare DXF: ${e.message}`)
+      this._renderDxfMapping(null, `Eroare parsare fișier: ${e.message}`)
     } finally {
       evt.target.value = ""  // reset ca user să poată reîncărca același fișier
     }
+  }
+
+  async _parseGeoFileServer(file, url) {
+    const fd = new FormData()
+    fd.append("authenticity_token", this._csrf())
+    fd.append("file", file)
+    const res = await fetch(url, { method: "POST", body: fd, headers: { "Accept": "application/json" } })
+    const data = await res.json()
+    if (!data.ok) throw new Error(data.error || "parsare eșuată")
+    return data.layers
   }
 
   _extractDxfPolygons(dxf) {
@@ -1168,7 +1310,14 @@ export default class extends Controller {
 
   clearAudit() {
     this._auditSource?.clear()
+    this._auditIssues       = []
+    this._auditIssueExtents = []
     if (this.hasAuditListTarget) this.auditListTarget.innerHTML = ""
+    if (this._auditMoveBound && this._auditMoveKey && this.map) {
+      ol.Observable.unByKey(this._auditMoveKey)
+      this._auditMoveKey   = null
+      this._auditMoveBound = false
+    }
   }
 
   // Apelat din onclick inline pe items din lista audit
@@ -1182,16 +1331,19 @@ export default class extends Controller {
 
   _renderAuditResults(data) {
     this._auditSource.clear()
+    this._auditIssues       = []   // [{ ...issue, _idx }, ...]
+    this._auditIssueExtents = []   // [extent, ...] aliniat cu _auditIssues
     if (!this.hasAuditListTarget) return
     if (!data.issues || data.issues.length === 0) {
       this.auditListTarget.innerHTML = `<div class="topo-ok">✓ Niciuna erori topologice (${data.total || 0} verificate)</div>`
       return
     }
 
-    // Add features to map source
+    // Adaugă features în source + cache la extent pentru filtrare pe viewport
     const fmt = new ol.format.GeoJSON()
     data.issues.forEach((issue, idx) => {
-      if (!issue.geojson) return
+      this._auditIssues.push({ ...issue, _idx: idx })
+      if (!issue.geojson) { this._auditIssueExtents.push(null); return }
       try {
         const feat = fmt.readFeature(issue.geojson, {
           dataProjection:    "EPSG:3844",
@@ -1200,19 +1352,66 @@ export default class extends Controller {
         feat.set("severity", issue.severity)
         feat.set("auditIdx",  idx)
         this._auditSource.addFeature(feat)
-      } catch (e) { /* skip un-parseable */ }
+        this._auditIssueExtents.push(feat.getGeometry().getExtent())
+      } catch (e) {
+        this._auditIssueExtents.push(null)
+      }
     })
 
-    // Render list grouped by category
+    // Listener pentru zoom-pe-item (delegated)
+    if (!this._auditZoomBound) {
+      this.element.addEventListener("audit-zoom", (e) => this.zoomToAuditIssue(e.detail))
+      this._auditZoomBound = true
+    }
+
+    // Listener pentru filtrare dinamică la pan/zoom
+    if (!this._auditMoveBound && this.map) {
+      this._auditMoveKey = this.map.on("moveend", () => this._filterAndRenderAuditByViewport())
+      this._auditMoveBound = true
+    }
+
+    this._filterAndRenderAuditByViewport()
+  }
+
+  _filterAndRenderAuditByViewport() {
+    if (!this.hasAuditListTarget) return
+    if (!this._auditIssues || this._auditIssues.length === 0) return
+
+    const all = this._auditIssues
+    let visible
+    if (this.map) {
+      const vp = this.map.getView().calculateExtent(this.map.getSize())
+      visible = all.filter((iss) => {
+        const ext = this._auditIssueExtents[iss._idx]
+        return ext && ol.extent.intersects(vp, ext)
+      })
+    } else {
+      visible = all.slice()
+    }
+    this._renderAuditList(visible, all.length)
+  }
+
+  _renderAuditList(items, totalCount) {
+    if (!this.hasAuditListTarget) return
+    if (items.length === 0) {
+      this.auditListTarget.innerHTML = `
+        <div class="digi-audit-summary">
+          <strong>0 probleme în viewport</strong> (din ${totalCount} total)
+          <div style="font-size:11px;color:#6b7280">Dă zoom-out sau pan pentru a vedea alte erori.</div>
+        </div>
+      `
+      return
+    }
+
     const byCat = {}
-    data.issues.forEach((iss, idx) => {
+    items.forEach((iss) => {
       const cat = iss.category || "Altele"
       if (!byCat[cat]) byCat[cat] = []
-      byCat[cat].push({ ...iss, _idx: idx })
+      byCat[cat].push(iss)
     })
 
-    const sections = Object.entries(byCat).map(([cat, items]) => {
-      const itemsHtml = items.map(i => `
+    const sections = Object.entries(byCat).map(([cat, list]) => {
+      const itemsHtml = list.map(i => `
         <li class="digi-audit-item digi-audit-item--${i.severity || 'error'}">
           <button type="button" class="digi-audit-zoom-btn"
                   onclick="event.stopPropagation();
@@ -1225,24 +1424,21 @@ export default class extends Controller {
       `).join("")
       return `
         <div class="digi-audit-category">
-          <div class="digi-audit-category-header">${cat} <span class="badge badge-error">${items.length}</span></div>
+          <div class="digi-audit-category-header">${cat} <span class="badge badge-error">${list.length}</span></div>
           <ul class="digi-audit-items">${itemsHtml}</ul>
         </div>
       `
     }).join("")
 
+    const filterHint = items.length < totalCount
+      ? `<span style="font-size:11px;color:#6b7280">(${totalCount - items.length} ascunse — în afara viewport)</span>`
+      : ""
     this.auditListTarget.innerHTML = `
       <div class="digi-audit-summary">
-        <strong>${data.total} probleme</strong> în ${data.categories?.length || 0} categorii
+        <strong>${items.length} probleme vizibile</strong> ${filterHint}
       </div>
       ${sections}
     `
-
-    // Listener pentru zoom (delegated)
-    if (!this._auditZoomBound) {
-      this.element.addEventListener("audit-zoom", (e) => this.zoomToAuditIssue(e.detail))
-      this._auditZoomBound = true
-    }
   }
 
   // ── Selecție feature (pentru intrare în edit mode) ────────────────────────

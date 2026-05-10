@@ -45,6 +45,8 @@ Rails.application.routes.draw do
     post "/save_batch",         to: "digitizare#save_batch",         as: :digitizare_save_batch
     get  "/audit_topologie",    to: "digitizare#audit_topologie",    as: :digitizare_audit_topologie
     post "/import_dxf",         to: "digitizare#import_dxf",         as: :digitizare_import_dxf
+    post "/parse_geo_file",     to: "digitizare#parse_geo_file",     as: :digitizare_parse_geo_file
+    post "/export_zone",        to: "digitizare#export_zone",        as: :digitizare_export_zone
     post "/export_dxf",       to: "digitizare#export_dxf",         as: :digitizare_export_dxf
     post "/locate_uat",       to: "digitizare#locate_uat",         as: :digitizare_locate_uat
     post "/locate_parcela",   to: "digitizare#locate_parcela",     as: :digitizare_locate_parcela

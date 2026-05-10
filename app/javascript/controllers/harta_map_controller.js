@@ -5,6 +5,12 @@ import { Controller } from "@hotwired/stimulus"
 // compatibilitate cu OSM/Ortofotoplan; conversia se face on-the-fly.
 const STEREO70 = "+proj=sterea +lat_0=46 +lon_0=25 +k=0.99975 +x_0=500000 +y_0=500000 +ellps=krass +towgs84=33.4,-146.6,-76.3,-0.359,-0.053,0.844,-0.84 +units=m +no_defs"
 
+// Prag rezoluție (metri/pixel) peste care etichetele se ascund.
+// Convenție: scale = resolution × 96 dpi × 39.37 inch/m ≈ resolution × 3779.5
+// Deci pragul 1:10000 corespunde la ~2.645 m/px.
+const LABEL_MAX_RESOLUTION         = 2.645   // ≈ scara 1:10 000
+const LABEL_MAX_RESOLUTION_CLADIRI = 2.645   // ≈ scara 1:10 000
+
 const PARCEL_COLORS = {
   arabil:            "#22c55e",
   pasune:            "#84cc16",
@@ -103,34 +109,46 @@ export default class extends Controller {
 
     this._baseLayers = {}
 
+    // Fallback OSM 3857 (reproject OL) — folosit dacă MapProxy nu răspunde
+    const osmFallback = () => new ol.layer.Tile({
+      source: new ol.source.OSM(),
+      properties: { name: "OpenStreetMap (3857 reproject)" }
+    })
+
     if (this.mapproxyUrlValue) {
-      // OSM via MapProxy în 3844 nativ (cache stereo70)
+      const osmSrc = new ol.source.XYZ({
+        url:          `${this.mapproxyUrlValue}/tms/1.0.0/osm/stereo70/{z}/{x}/{-y}.png`,
+        projection:   "EPSG:3844",
+        tileGrid:     stereoGrid,
+        attributions: "© OpenStreetMap contributors (via MapProxy / Stereo70)"
+      })
       this._baseLayers.osm = new ol.layer.Tile({
-        source: new ol.source.XYZ({
-          url:          `${this.mapproxyUrlValue}/tms/1.0.0/osm/stereo70/{z}/{x}/{-y}.png`,
-          projection:   "EPSG:3844",
-          tileGrid:     stereoGrid,
-          attributions: "© OpenStreetMap contributors (via MapProxy / Stereo70)"
-        }),
+        source: osmSrc,
         properties: { name: "OpenStreetMap (Stereo70)" }
       })
+      // La prima eroare de tile (MapProxy offline) → comutăm pe OSM 3857
+      const onErr = () => {
+        osmSrc.un("tileloaderror", onErr)
+        const isActive = this.map.getLayers().getArray().includes(this._baseLayers.osm)
+        if (isActive) this.map.removeLayer(this._baseLayers.osm)
+        this._baseLayers.osm = osmFallback()
+        if (isActive) this.map.getLayers().insertAt(0, this._baseLayers.osm)
+        console.warn("MapProxy indisponibil — fallback OSM 3857 (reproject).")
+      }
+      osmSrc.on("tileloaderror", onErr)
 
-      // Ortofotoplan ANCPI în 3844 nativ
+      const ortoSrc = new ol.source.XYZ({
+        url:          `${this.mapproxyUrlValue}/tms/1.0.0/ortoplan/stereo70/{z}/{x}/{-y}.jpeg`,
+        projection:   "EPSG:3844",
+        tileGrid:     stereoGrid,
+        attributions: "© ANCPI – Ortofotoplan (Stereo70)"
+      })
       this._baseLayers.ortofotoplan = new ol.layer.Tile({
-        source: new ol.source.XYZ({
-          url:          `${this.mapproxyUrlValue}/tms/1.0.0/ortoplan/stereo70/{z}/{x}/{-y}.jpeg`,
-          projection:   "EPSG:3844",
-          tileGrid:     stereoGrid,
-          attributions: "© ANCPI – Ortofotoplan (Stereo70)"
-        }),
+        source: ortoSrc,
         properties: { name: "Ortofotoplan (Stereo70)" }
       })
     } else {
-      // Fallback fără MapProxy: OSM 3857 cu reproject OL (calitate redusă)
-      this._baseLayers.osm = new ol.layer.Tile({
-        source: new ol.source.OSM(),
-        properties: { name: "OpenStreetMap (3857 reproject)" }
-      })
+      this._baseLayers.osm = osmFallback()
     }
 
     this.map.addLayer(this._baseLayers.osm)
@@ -252,6 +270,22 @@ export default class extends Controller {
 
   clearSelection() { this._setSelectedFeature(null) }
 
+  // Zoom contextual: extinde extent-ul ×3.5 pentru a păstra zona vecină
+  // vizibilă în jurul poligonului selectat.
+  _zoomToFeature(feature) {
+    const geom = feature.getGeometry?.()
+    if (!geom) return
+    const e = geom.getExtent()
+    if (!e || !isFinite(e[0])) return
+    const cx = (e[0] + e[2]) / 2
+    const cy = (e[1] + e[3]) / 2
+    const halfW = Math.max((e[2] - e[0]) / 2, 5)  // min 5 m pentru entități mici
+    const halfH = Math.max((e[3] - e[1]) / 2, 5)
+    const k = 5
+    const padded = [cx - halfW * k, cy - halfH * k, cx + halfW * k, cy + halfH * k]
+    this.map.getView().fit(padded, { duration: 400 })
+  }
+
   // ── Stiluri ──────────────────────────────────────────────────────────────
 
   _parcelStyle(feature) {
@@ -271,7 +305,8 @@ export default class extends Controller {
   // Style pentru layer-ul de etichete (separat ca să fie deasupra
   // overlay-urilor de audit/topology/edit-vertices). Suprafața recalculată
   // din geom curentă → update dinamic la edit.
-  _parcelLabelStyle(feature) {
+  _parcelLabelStyle(feature, resolution) {
+    if (resolution > LABEL_MAX_RESOLUTION) return null
     const nrCad = feature.get("numar_cadastral") || ""
     const geom  = feature.getGeometry()
     if (!geom) return null
@@ -335,7 +370,8 @@ export default class extends Controller {
     })
   }
 
-  _cladireLabelStyle(feature) {
+  _cladireLabelStyle(feature, resolution) {
+    if (resolution > LABEL_MAX_RESOLUTION_CLADIRI) return null
     const nrCad = feature.get("numar_cadastral") || ""
     const geom  = feature.getGeometry()
     if (!geom) return null
@@ -357,8 +393,10 @@ export default class extends Controller {
     })
   }
 
-  _cgxmlLabelStyle(feature) {
+  _cgxmlLabelStyle(feature, resolution) {
     const isBld   = feature.get("entity_type") === "building"
+    const maxRes  = isBld ? LABEL_MAX_RESOLUTION_CLADIRI : LABEL_MAX_RESOLUTION
+    if (resolution > maxRes) return null
     const idLabel = feature.get("cadgenno") || feature.get("e2identifier") || `#${feature.get("id")}`
     const geom    = feature.getGeometry()
     if (!geom) return null
@@ -430,6 +468,11 @@ export default class extends Controller {
 
       // Highlight selecție și notificăm controllerele care ascultă (digitizare)
       this._setSelectedFeature(selected)
+
+      // Zoom pe poligonul selectat (parcelă sau clădire)
+      if (selected?.feature?.getGeometry) {
+        this._zoomToFeature(selected.feature)
+      }
     })
 
     this.map.on("pointermove", (evt) => {
@@ -542,16 +585,9 @@ export default class extends Controller {
 
   async _loadUatForCenter(layer) {
     if (!this.uatUrlValue) return
-    const features = layer.getSource().getFeatures()
-    if (features.length === 0) return
-    const extent = layer.getSource().getExtent()
-    const cx = (extent[0] + extent[2]) / 2
-    const cy = (extent[1] + extent[3]) / 2
-    // Centroid e în EPSG:3844 (Stereo 70). Transform doar pentru parametrii
-    // endpoint-ului UAT care lucrează în lat/lng.
-    const [lng, lat] = ol.proj.transform([cx, cy], "EPSG:3844", "EPSG:4326")
+    // Default: server întoarce DOAR UAT-urile care conțin parcele/clădiri.
     try {
-      const res  = await fetch(`${this.uatUrlValue}?lat=${lat}&lng=${lng}`)
+      const res  = await fetch(this.uatUrlValue)
       const data = await res.json()
       this.uatLayer.getSource().clear()
       this._addGeoJSON(this.uatLayer, data)
