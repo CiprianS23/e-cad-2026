@@ -65,6 +65,22 @@ export default class extends Controller {
       zIndex: 1000
     })
 
+    // Layer cu cerculețe roșii la fiecare vertex (vizibile în edit mode pentru
+    // a identifica vertecșii coliniari care altfel nu se văd).
+    this._editVertexSource = new ol.source.Vector()
+    this._editVertexLayer  = new ol.layer.Vector({
+      source: this._editVertexSource,
+      style:  () => new ol.style.Style({
+        image: new ol.style.Circle({
+          radius: 5,
+          fill:   new ol.style.Fill({ color: "#dc2626" }),
+          stroke: new ol.style.Stroke({ color: "#fff", width: 2 })
+        })
+      }),
+      properties: { name: "edit-vertices" },
+      zIndex: 1100
+    })
+
     this._onKeyDown = (evt) => this._handleGlobalKey(evt)
     document.addEventListener("keydown", this._onKeyDown)
   }
@@ -111,6 +127,7 @@ export default class extends Controller {
     if (this._snap && this.map) this.map.removeInteraction(this._snap)
     if (this._drawLayer && this.map) this.map.removeLayer(this._drawLayer)
     if (this._topoLayer && this.map) this.map.removeLayer(this._topoLayer)
+    if (this._editVertexLayer && this.map) this.map.removeLayer(this._editVertexLayer)
     this._draw = this._snap = this.map = this._hartaMap = null
   }
 
@@ -894,6 +911,22 @@ export default class extends Controller {
     this._enterEditMode(sel.feature, sel.layer)
   }
 
+  _renderEditVertices(geom) {
+    if (!this._editVertexSource) return
+    this._editVertexSource.clear()
+    const type = geom.getType()
+    let rings = []
+    if (type === "Polygon")           rings = geom.getCoordinates()
+    else if (type === "MultiPolygon") rings = geom.getCoordinates().flat()
+    rings.forEach(ring => {
+      // Eliminăm closing duplicate (ultimul = primul vertex)
+      const verts = ring.length > 1 ? ring.slice(0, -1) : ring
+      verts.forEach(coord => {
+        this._editVertexSource.addFeature(new ol.Feature(new ol.geom.Point(coord)))
+      })
+    })
+  }
+
   // ── EDIT MODE: modify geometrie poligon existent ─────────────────────────
 
   _waitForFeatureAndEdit() {
@@ -944,10 +977,15 @@ export default class extends Controller {
     this._snapModes = new Set(["endpoint"])
     this._refreshSnap()
 
+    // Adaugă layer-ul cu cerculețe vertex pe hartă
+    this.map.addLayer(this._editVertexLayer)
+    this._renderEditVertices(feature.getGeometry())
+
     // Extract verts inițial + on change
     this._extractVerts(feature.getGeometry())
     this._geomChangeKey = feature.getGeometry().on("change", (e) => {
       this._extractVerts(e.target)
+      this._renderEditVertices(e.target)
       clearTimeout(this._areaDebounce); clearTimeout(this._topoDebounce)
       this._areaDebounce = setTimeout(() => this._calcArea(), 400)
       this._topoDebounce = setTimeout(() => this._verifyTopology(), 700)
