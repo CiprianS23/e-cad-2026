@@ -928,9 +928,15 @@ export default class extends Controller {
 
     // Modify direct pe feature, fără să-l mut între source-uri — parcelLayer
     // rămâne vizibil și Modify identifică vertecșii poligonului direct.
+    // deleteCondition: Shift+click pe vertex îl șterge (mai descoperibil
+    // decât Alt+click default; Alt+click e păstrat ca alternativă).
     this._modify = new ol.interaction.Modify({
       features:       new ol.Collection([feature]),
-      pixelTolerance: 12
+      pixelTolerance: 12,
+      deleteCondition: (evt) => {
+        const oe = evt.originalEvent
+        return evt.type === "singleclick" && (oe?.shiftKey || oe?.altKey)
+      }
     })
     this.map.addInteraction(this._modify)
 
@@ -972,7 +978,11 @@ export default class extends Controller {
     panel.className = "digi-edit-panel"
     panel.innerHTML = `
       <div class="digi-edit-header">Modificare ${this.editKindValue} #${this.editIdValue}</div>
-      <p class="digi-parcela-hint">Drag pe orice vertex pentru a-l muta. Ctrl+drag pe muchie adaugă vertex nou.</p>
+      <ul class="digi-parcela-hint" style="margin:6px 0;padding-left:18px;line-height:1.6">
+        <li><b>Drag</b> pe vertex → mută vertex</li>
+        <li><b>Click pe muchie + drag</b> → adaugă vertex nou</li>
+        <li><b>Shift+Click</b> pe vertex → șterge vertex</li>
+      </ul>
       <button type="button" class="btn btn-primary btn-sm digi-edit-save"
               data-action="click->digitizare#saveEdit"
               style="width:100%;margin-top:8px">💾 Salvează modificări</button>
@@ -988,34 +998,37 @@ export default class extends Controller {
 
   async saveEdit() {
     if (!await this._validateBeforeSave()) return
+
     const url = this.editKindValue === "cladire"
       ? `/cladiri_cadastrale/${this.editIdValue}`
       : `/parcele_cadastrale/${this.editIdValue}`
-    const param = this.editKindValue === "cladire" ? "cladire_cadastrala" : "parcela_cadastrala"
-    const wkt = this._buildWkt("MULTIPOLYGON")
-    try {
-      const res = await fetch(url, {
-        method:  "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRF-Token": this._csrf(),
-          "Accept":       "text/html"
-        },
-        body: JSON.stringify({
-          [param]: { geom_wkt: wkt, suprafata_mp: this._areaCalc > 0 ? this._areaCalc.toFixed(4) : null }
-        }),
-        redirect: "follow"
-      })
-      if (res.ok || res.redirected) {
-        window.location.href = res.url || url
-      } else {
-        const text = await res.text()
-        this._setStatus(`Eroare la salvare: ${res.status}`, "warn")
-        console.warn("Save edit failed:", text.slice(0, 500))
-      }
-    } catch (e) {
-      this._setStatus(`Eroare rețea: ${e.message}`, "warn")
+    const param      = this.editKindValue === "cladire" ? "cladire_cadastrala" : "parcela_cadastrala"
+    const supraField = this.editKindValue === "cladire" ? "suprafata_construita_mp" : "suprafata_mp"
+    const wkt        = this._buildWkt("MULTIPOLYGON")
+
+    // Folosim form submission (Rails standard) — evită CSRF/CORS issues și
+    // permite redirect natural către pagina de detalii sau revenire cu erori.
+    const form  = document.createElement("form")
+    form.method = "POST"
+    form.action = url
+    form.style.display = "none"
+
+    const addInput = (name, value) => {
+      const input = document.createElement("input")
+      input.type  = "hidden"
+      input.name  = name
+      input.value = value
+      form.appendChild(input)
     }
+    addInput("_method",            "patch")
+    addInput("authenticity_token", this._csrf())
+    addInput(`${param}[geom_wkt]`, wkt)
+    if (this._areaCalc > 0) {
+      addInput(`${param}[${supraField}]`, this._areaCalc.toFixed(4))
+    }
+
+    document.body.appendChild(form)
+    form.submit()
   }
 
   // În edit mode, suprapunerea se verifică EXCLUDÂND poligonul curent
