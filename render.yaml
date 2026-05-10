@@ -1,0 +1,33 @@
+databases:
+  - name: e-cad-2026-db
+    databaseName: e_cad_2026_production
+    user: e_cad_2026
+    plan: starter
+    postgresMajorVersion: 16
+
+services:
+  - type: web
+    name: e-cad-2026
+    runtime: ruby
+    plan: starter
+    buildCommand: >-
+      bundle install &&
+      bundle exec rails assets:precompile &&
+      bundle exec rails db:migrate
+    startCommand: bundle exec rails server -b 0.0.0.0 -p $PORT
+    envVars:
+      - key: RAILS_ENV
+        value: production
+      - key: RAILS_LOG_TO_STDOUT
+        value: "true"
+      - key: RAILS_SERVE_STATIC_FILES
+        value: "true"
+      - key: SECRET_KEY_BASE
+        generateValue: true
+      # IMPORTANT: Render furnizează URL cu schema postgres://, dar activerecord-postgis-adapter
+      # necesită postgis://. Înlocuiți manual în dashboard-ul Render schema URL-ului, de ex.:
+      #   postgres://user:pass@host/db  →  postgis://user:pass@host/db
+      - key: DATABASE_URL
+        fromDatabase:
+          name: e-cad-2026-db
+          property: connectionString
