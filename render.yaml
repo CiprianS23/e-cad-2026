@@ -8,13 +8,8 @@ databases:
 services:
   - type: web
     name: e-cad-2026
-    runtime: ruby
+    runtime: docker
     plan: starter
-    buildCommand: >-
-      bundle install &&
-      bundle exec rails assets:precompile &&
-      bundle exec rails db:migrate
-    startCommand: bundle exec rails server -b 0.0.0.0 -p $PORT
     envVars:
       - key: RAILS_ENV
         value: production
