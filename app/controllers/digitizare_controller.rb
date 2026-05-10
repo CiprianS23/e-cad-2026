@@ -1,8 +1,14 @@
 class DigitizareController < ApplicationController
   def verifica_topologie
-    coords    = params[:coords]
+    coords     = params[:coords]
     exclude_id = params[:exclude_id].presence&.to_i
     entity     = params[:entity_type].presence || "parcela"
+    # Vecinii editați în memorie (modificați client-side dar nesalvați încă);
+    # geometriile lor server sunt vechi → trebuie excluși din toate verificările
+    # ca să nu genereze fals-pozitive de overlap/sliver.
+    exclude_neighbor_ids = Array(params[:exclude_neighbor_ids]).map(&:to_i)
+    excluded_ids = [exclude_id, *exclude_neighbor_ids].compact
+    excluded_ids = [0] if excluded_ids.empty?  # placeholder ca NOT IN (...) să fie valid SQL
     return render json: { issues: [] } if coords.blank? || coords.length < 3
 
     pts  = coords.map { |c| [c[0].to_f, c[1].to_f] }
@@ -27,15 +33,14 @@ class DigitizareController < ApplicationController
     # cu cm/dm după conversia 3857 ↔ 3844).
     overlap_target = entity == "cladire" ? ["cladire", "cladiri_cadastrale"] : ["parcela", "parcele_cadastrale"]
     kind, table = overlap_target
-    excl = exclude_id || 0
-    overlap_sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt, excl, overlap_min])
+    overlap_sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt, excluded_ids, overlap_min])
       WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom)
       SELECT t.id, t.numar_cadastral AS label,
         ST_Area(ST_Intersection(t.geom, np.geom)) AS area,
         ST_AsGeoJSON(ST_Transform(ST_Intersection(t.geom, np.geom), 4326), 6) AS geojson
       FROM #{table} t, np
       WHERE t.geom IS NOT NULL
-        AND t.id != ?
+        AND t.id NOT IN (?)
         AND ST_Intersects(t.geom, np.geom)
         AND ST_Area(ST_Intersection(t.geom, np.geom)) > ?
     SQL
@@ -53,13 +58,14 @@ class DigitizareController < ApplicationController
     # poligoanele se ating într-un punct dar au goluri pe muchii.
     # Tehnica: zone aflate ÎN AMBELE buffer-uri (0.5m) DAR neacoperite
     # nici de poligonul curent, nici de vecin = gap real.
-    sliver_sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt, sliver_dist, sliver_max_mp])
+    sliver_sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt, sliver_dist, excluded_ids, sliver_max_mp])
       WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom),
            pairs AS (
              SELECT p.id, p.numar_cadastral AS label, p.geom
              FROM parcele_cadastrale p, np
              WHERE p.geom IS NOT NULL
                AND ST_DWithin(p.geom, np.geom, ?)
+               AND p.id NOT IN (?)
                AND NOT ST_Overlaps(p.geom, np.geom)
            ),
            gaps AS (
@@ -104,7 +110,9 @@ class DigitizareController < ApplicationController
            neighbors AS (
              SELECT p.id, p.numar_cadastral AS label, p.geom
              FROM parcele_cadastrale p, np
-             WHERE p.geom IS NOT NULL AND ST_DWithin(p.geom, np.geom, 0.5)
+             WHERE p.geom IS NOT NULL
+               AND ST_DWithin(p.geom, np.geom, 0.5)
+               AND p.id NOT IN (#{excluded_ids.join(',')})
            )
       SELECT n.id AS neighbor_id, n.label AS neighbor_label,
         ST_AsGeoJSON(ST_Transform(v.pt, 4326), 6) AS geojson,
@@ -135,7 +143,9 @@ class DigitizareController < ApplicationController
            neighbors AS (
              SELECT p.id, p.numar_cadastral AS label, p.geom
              FROM parcele_cadastrale p, np
-             WHERE p.geom IS NOT NULL AND ST_DWithin(p.geom, np.geom, 0.5)
+             WHERE p.geom IS NOT NULL
+               AND ST_DWithin(p.geom, np.geom, 0.5)
+               AND p.id NOT IN (#{excluded_ids.join(',')})
            ),
            neighbor_verts AS (
              SELECT n.id AS neighbor_id, n.label AS neighbor_label,

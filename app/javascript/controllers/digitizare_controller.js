@@ -1206,13 +1206,23 @@ export default class extends Controller {
     return "MULTIPOLYGON(" + polyStrs.join(", ") + ")"
   }
 
-  // În edit mode, suprapunerea se verifică EXCLUDÂND poligonul curent
+  // În edit mode, suprapunerea se verifică EXCLUDÂND poligonul curent ȘI
+  // toți vecinii care au fost modificați în memorie (geometriile lor server
+  // sunt încă cele vechi și ar genera fals-pozitive de overlap).
   _verifyTopologyParams() {
     const params = {
       coords:      this._verts.map(v => [v.x, v.y]),
       entity_type: this._editing ? this.editKindValue : this._entityType
     }
     if (this._editing) params.exclude_id = this.editIdValue
+    if (this._editing && this._modifiedFeatures) {
+      const ids = []
+      this._modifiedFeatures.forEach(f => {
+        if (f === this._editFeature) return
+        ids.push(String(f.get("id")))
+      })
+      if (ids.length) params.exclude_neighbor_ids = ids
+    }
     return params
   }
 
