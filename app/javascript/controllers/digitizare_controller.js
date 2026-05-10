@@ -119,14 +119,48 @@ export default class extends Controller {
     if (!raw) return
     this.cmdInputTarget.value = ""
 
-    if (!this._draw) { this._setStatus("Pornește digitizarea înainte să adaugi puncte.", "warn"); return }
+    const isRelativeOrPolar = raw.startsWith("@")
+
+    // Pornește digitizarea automat dacă utilizatorul intră coords absolute
+    // și nu a apăsat încă butonul „Digitizare"
+    if (!this._draw) {
+      if (isRelativeOrPolar) {
+        this._cmdHint(`Eroare: ${raw} cere un punct anterior. Începe cu coords absolute (X,Y).`, true)
+        return
+      }
+      this.startDrawing()
+    }
 
     const pt = this._parseCmd(raw)
-    if (!pt) { this._setStatus(`Format invalid: ${raw}`, "warn"); return }
+    if (!pt) {
+      this._cmdHint(`Format invalid: ${raw}`, true)
+      return
+    }
 
     const mapCoord = ol.proj.transform([pt.x, pt.y], "EPSG:3844", "EPSG:3857")
-    this._draw.appendCoordinates([mapCoord])
-    this._setStatus(`Punct: X=${FMT(pt.x)}  Y=${FMT(pt.y)}`, "ok")
+    try {
+      this._draw.appendCoordinates([mapCoord])
+      // Pan automat dacă punctul cade în afara viewport-ului (frecvent la primul
+      // vertex când utilizatorul tastează coords absolute fără să zoom-eze pe zonă)
+      const view = this.map.getView()
+      if (!ol.extent.containsCoordinate(view.calculateExtent(this.map.getSize()), mapCoord)) {
+        view.animate({ center: mapCoord, zoom: Math.max(view.getZoom() || 0, 17), duration: 250 })
+      }
+      this._cmdHint(`✓ Punct: X=${FMT(pt.x)}  Y=${FMT(pt.y)}`, false)
+    } catch (e) {
+      this._cmdHint(`Eroare appendCoordinates: ${e.message}`, true)
+    }
+  }
+
+  _cmdHint(msg, isError) {
+    if (!this.hasCmdHintTarget) return
+    this.cmdHintTarget.textContent = msg
+    this.cmdHintTarget.style.color = isError ? "#ef4444" : "#22c55e"
+    clearTimeout(this._cmdHintTimer)
+    this._cmdHintTimer = setTimeout(() => {
+      this.cmdHintTarget.textContent = "Stereo70 (EPSG:3844)"
+      this.cmdHintTarget.style.color = ""
+    }, 3500)
   }
 
   startDrawing() {
