@@ -12,7 +12,7 @@ Rails.application.routes.draw do
     end
   end
 
-  resources :cladiri_cadastrale, only: [:show, :create, :update] do
+  resources :cladiri_cadastrale, only: [:show, :create, :update, :destroy] do
     collection do
       get :geojson
     end

@@ -1,14 +1,29 @@
 class CladiriCadastraleController < ApplicationController
-  before_action :set_cladire, only: [:show, :update]
+  before_action :set_cladire, only: [:show, :update, :destroy]
 
   def show; end
 
   def update
     if @cladire.update(cladire_params)
-      redirect_to cladiri_cadastrale_path(@cladire), notice: "Clădirea a fost actualizată."
+      respond_to do |fmt|
+        fmt.html { redirect_to cladiri_cadastrale_path(@cladire), notice: "Clădirea a fost actualizată." }
+        fmt.json { render json: { ok: true, redirect: cladiri_cadastrale_path(@cladire) } }
+      end
     else
-      redirect_to harta_path(edit_kind: "cladire", edit_id: @cladire.id),
-                  alert: @cladire.errors.full_messages.to_sentence
+      respond_to do |fmt|
+        fmt.html { redirect_to harta_path(edit_kind: "cladire", edit_id: @cladire.id),
+                               alert: @cladire.errors.full_messages.to_sentence }
+        fmt.json { render json: { ok: false, errors: @cladire.errors.full_messages }, status: :unprocessable_entity }
+      end
+    end
+  end
+
+  def destroy
+    label = @cladire.numar_cadastral
+    @cladire.destroy
+    respond_to do |fmt|
+      fmt.html { redirect_to harta_path, notice: "Clădirea #{label} a fost ștearsă.", status: :see_other }
+      fmt.json { render json: { ok: true } }
     end
   end
 

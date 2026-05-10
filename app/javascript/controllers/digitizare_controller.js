@@ -20,7 +20,7 @@ export default class extends Controller {
   static targets = [
     "panel", "panelBody", "editTopoMirror",
     "snapSlider", "snapToleranceVal", "snapModes",
-    "btnStart", "btnEdit", "btnClose", "btnUndo", "btnAudit", "auditList",
+    "btnStart", "btnEdit", "btnDelete", "btnClose", "btnUndo", "btnAudit", "auditList",
     "dxfFileInput", "dxfMapping",
     "statusBar",
     "inputX", "inputY",
@@ -1254,16 +1254,65 @@ export default class extends Controller {
   }
 
   _updateEditButton() {
-    if (!this.hasBtnEditTarget) return
     const sel = this._selected
-    this.btnEditTarget.disabled = !sel
-    if (sel) {
-      const label = sel.feature.get("numar_cadastral") || `#${sel.feature.get("id")}`
-      this.btnEditTarget.title = `Editează ${sel.kind} ${label}`
-      this.btnEditTarget.textContent = `✎ Editează ${sel.kind} ${label}`
-    } else {
-      this.btnEditTarget.title = "Click pe un poligon de pe hartă pentru a-l selecta"
-      this.btnEditTarget.textContent = "✎ Editează"
+    if (this.hasBtnEditTarget) {
+      this.btnEditTarget.disabled = !sel
+      if (sel) {
+        const label = sel.feature.get("numar_cadastral") || `#${sel.feature.get("id")}`
+        this.btnEditTarget.title = `Editează ${sel.kind} ${label}`
+        this.btnEditTarget.textContent = `✎ Editează ${sel.kind} ${label}`
+      } else {
+        this.btnEditTarget.title = "Click pe un poligon de pe hartă pentru a-l selecta"
+        this.btnEditTarget.textContent = "✎ Editează"
+      }
+    }
+    if (this.hasBtnDeleteTarget) {
+      this.btnDeleteTarget.disabled = !sel
+      if (sel) {
+        const label = sel.feature.get("numar_cadastral") || `#${sel.feature.get("id")}`
+        this.btnDeleteTarget.title = `Șterge ${sel.kind} ${label}`
+      } else {
+        this.btnDeleteTarget.title = "Click pe un poligon de pe hartă pentru a-l selecta"
+      }
+    }
+  }
+
+  async deleteSelected() {
+    const sel = this._selected
+    if (!sel) {
+      this._setStatus("Selectează un poligon pe hartă (click pe el) înainte de Șterge.", "warn")
+      return
+    }
+    const label = sel.feature.get("numar_cadastral") || `#${sel.feature.get("id")}`
+    if (!confirm(`Ștergi ${sel.kind} ${label}?\n\nAceastă acțiune e ireversibilă.`)) return
+
+    const url = sel.kind === "cladire"
+      ? `/cladiri_cadastrale/${sel.feature.get("id")}`
+      : `/parcele_cadastrale/${sel.feature.get("id")}`
+
+    try {
+      const res = await fetch(url, {
+        method:  "DELETE",
+        headers: {
+          "X-CSRF-Token": this._csrf(),
+          "Accept":       "application/json"
+        }
+      })
+      if (res.ok) {
+        this._setStatus(`${sel.kind} ${label} ștearsă.`, "ok")
+        // Curăț selecția vizual + state
+        this._hartaMap?.clearSelection?.()
+        this._selected = null
+        this._updateEditButton()
+        // Reload layer-ul potrivit
+        if (sel.kind === "cladire") this._hartaMap?._loadCladiri()
+        else                         this._hartaMap?._loadParcele()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        this._setStatus(`Eroare la ștergere: ${data.error || res.status}`, "warn")
+      }
+    } catch (e) {
+      this._setStatus(`Eroare rețea: ${e.message}`, "warn")
     }
   }
 

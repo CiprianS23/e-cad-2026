@@ -48,8 +48,12 @@ class ParceleCadastraleController < ApplicationController
   end
 
   def destroy
+    label = @parcela.numar_cadastral
     @parcela.destroy
-    redirect_to parcele_cadastrale_path, notice: "Parcela a fost ștearsă.", status: :see_other
+    respond_to do |fmt|
+      fmt.html { redirect_to parcele_cadastrale_path, notice: "Parcela #{label} a fost ștearsă.", status: :see_other }
+      fmt.json { render json: { ok: true } }
+    end
   end
 
   private
