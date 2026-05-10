@@ -198,6 +198,39 @@ class DigitizareController < ApplicationController
     render json: { issues: [], error: e.message }, status: :unprocessable_entity
   end
 
+  # Salvare topology-aware: actualizează simultan poligonul primar + vecinii
+  # care au fost modificați în edit mode (toate într-o tranzacție).
+  def save_batch
+    primary   = params[:primary]
+    neighbors = params[:neighbors] || []
+    return render json: { ok: false, errors: ["primary lipsește"] }, status: :unprocessable_entity if primary.blank?
+
+    errors = []
+    redirect_url = nil
+
+    ActiveRecord::Base.transaction do
+      saved = update_one(primary, errors)
+      raise ActiveRecord::Rollback if errors.any?
+
+      neighbors.each do |n|
+        update_one(n, errors)
+        raise ActiveRecord::Rollback if errors.any?
+      end
+
+      kind = primary[:kind] || primary["kind"]
+      id   = primary[:id]   || primary["id"]
+      redirect_url = kind == "cladire" ? "/cladiri_cadastrale/#{id}" : "/parcele_cadastrale/#{id}"
+    end
+
+    if errors.any?
+      render json: { ok: false, errors: errors }, status: :unprocessable_entity
+    else
+      render json: { ok: true, redirect: redirect_url }
+    end
+  rescue => e
+    render json: { ok: false, errors: ["Eroare server: #{e.message}"] }, status: :unprocessable_entity
+  end
+
   def calculeaza_suprafata
     coords = params[:coords]
     return render json: { suprafata: 0 } if coords.blank? || coords.length < 3
@@ -303,6 +336,31 @@ class DigitizareController < ApplicationController
   end
 
   private
+
+  # Helper pentru save_batch — actualizează un poligon (parcelă sau clădire)
+  # cu noul WKT + suprafață. Adaugă mesajele de eroare la array-ul `errors`.
+  def update_one(payload, errors)
+    kind = payload[:kind] || payload["kind"]
+    id   = payload[:id]   || payload["id"]
+    wkt  = payload[:geom_wkt] || payload["geom_wkt"]
+    area = payload[:suprafata_mp] || payload["suprafata_mp"]
+
+    klass = kind == "cladire" ? CladireCadastrala : ParcelaCadastrala
+    record = klass.find_by(id: id)
+    unless record
+      errors << "#{kind} ##{id}: nu există"
+      return nil
+    end
+    attrs = { geom_wkt: wkt }
+    if area.present?
+      attrs[kind == "cladire" ? :suprafata_construita_mp : :suprafata_mp] = area
+    end
+    unless record.update(attrs)
+      label = record.respond_to?(:numar_cadastral) ? record.numar_cadastral : id
+      record.errors.full_messages.each { |m| errors << "#{kind} #{label}: #{m}" }
+    end
+    record
+  end
 
   def build_dxf(pts, layer)
     verts = pts.map { |x, y| "10\n#{format('%.4f', x)}\n20\n#{format('%.4f', y)}\n30\n0.0000" }.join("\n")

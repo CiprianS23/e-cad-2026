@@ -13,7 +13,8 @@ export default class extends Controller {
     locateUatUrl:  String,
     snapTolerance: { type: Number, default: 15 },
     editKind:      String,
-    editId:        String
+    editId:        String,
+    saveBatchUrl:  String
   }
 
   static targets = [
@@ -65,15 +66,17 @@ export default class extends Controller {
       zIndex: 1000
     })
 
-    // Layer cu cerculețe roșii la fiecare vertex (vizibile în edit mode pentru
-    // a identifica vertecșii coliniari care altfel nu se văd).
+    // Layer cu cerculețe la fiecare vertex (vizibile pentru a identifica
+    // vertecșii coliniari care altfel nu se văd).
+    // - Roșu (#dc2626): vertecși ai poligonului propriu (digitizare sau edit primar)
+    // - Portocaliu (#f59e0b): vertecși ai vecinilor editabili (în edit mode topology-aware)
     this._editVertexSource = new ol.source.Vector()
     this._editVertexLayer  = new ol.layer.Vector({
       source: this._editVertexSource,
-      style:  () => new ol.style.Style({
+      style:  (feat) => new ol.style.Style({
         image: new ol.style.Circle({
-          radius: 5,
-          fill:   new ol.style.Fill({ color: "#dc2626" }),
+          radius: feat.get("neighborVertex") ? 4 : 5,
+          fill:   new ol.style.Fill({ color: feat.get("neighborVertex") ? "#f59e0b" : "#dc2626" }),
           stroke: new ol.style.Stroke({ color: "#fff", width: 2 })
         })
       }),
@@ -947,6 +950,70 @@ export default class extends Controller {
     this._verts.forEach(v => {
       this._editVertexSource.addFeature(new ol.Feature(new ol.geom.Point([v.x, v.y])))
     })
+    // Re-randăm și vecinii editabili (geometriile lor pot fi modificate)
+    if (this._editing && this._editFeatureKindMap) {
+      this._editFeatureKindMap.forEach((kind, feat) => {
+        if (feat === this._editFeature) return
+        this._addAllVertexesAsPoints(feat, this._editVertexSource, true)
+      })
+    }
+  }
+
+  _addAllVertexesAsPoints(feat, source, isNeighbor = false) {
+    const geom = feat.getGeometry()
+    if (!geom) return
+    const type = geom.getType()
+    let rings = []
+    if (type === "Polygon")           rings = geom.getCoordinates()
+    else if (type === "MultiPolygon") rings = geom.getCoordinates().flat()
+    rings.forEach(ring => {
+      const verts = ring.length > 1 ? ring.slice(0, -1) : ring
+      verts.forEach(coord => {
+        const f = new ol.Feature(new ol.geom.Point(coord))
+        if (isNeighbor) f.set("neighborVertex", true)
+        source.addFeature(f)
+      })
+    })
+  }
+
+  _renderNeighborVertices(neighbors) {
+    if (!this._editVertexSource) return
+    neighbors.forEach(feat => {
+      this._addAllVertexesAsPoints(feat, this._editVertexSource, true)
+      // Track changes la geometria vecinului ca să marcăm ca modified
+      const onChange = () => {
+        this._modifiedFeatures.add(feat)
+        // Re-render cerculețele când se modifică
+        this._renderEditVertices()
+      }
+      const key = feat.getGeometry().on("change", onChange)
+      this._editFeatureKindMap.set(feat, this._editFeatureKindMap.get(feat) || "parcela")
+      // Stash key for cleanup
+      if (!this._neighborChangeKeys) this._neighborChangeKeys = []
+      this._neighborChangeKeys.push(key)
+    })
+  }
+
+  _findEditableNeighbors(feature, distMeters = 1.0) {
+    if (!this._hartaMap) return []
+    const editGeom = feature.getGeometry()
+    const editExt  = editGeom.getExtent()
+    const buffered = ol.extent.buffer(editExt, distMeters)
+    const out = []
+    const sources = [
+      [this._hartaMap.parcelLayer.getSource(),  "parcela"],
+      [this._hartaMap.cladiriLayer.getSource(), "cladire"]
+    ]
+    sources.forEach(([src, kind]) => {
+      src?.forEachFeatureInExtent(buffered, (f) => {
+        if (f === feature) return
+        // Doar vecini de același tip cu poligonul editat (parcele cu parcele,
+        // clădiri cu clădiri); evităm să tragem clădiri când edităm parcele.
+        if (kind !== this.editKindValue) return
+        out.push({ feature: f, kind })
+      })
+    })
+    return out
   }
 
   // ── EDIT MODE: modify geometrie poligon existent ─────────────────────────
@@ -981,12 +1048,18 @@ export default class extends Controller {
     this._hartaMap?._popup?.setPosition(undefined)
     this._hartaMap?.clearSelection?.()
 
-    // Modify direct pe feature, fără să-l mut între source-uri — parcelLayer
-    // rămâne vizibil și Modify identifică vertecșii poligonului direct.
-    // deleteCondition: Shift+click pe vertex îl șterge (mai descoperibil
-    // decât Alt+click default; Alt+click e păstrat ca alternativă).
+    // Detectează vecinii (parcele/clădiri în limita 1m) și le include în
+    // Modify ca să poți edita simultan vertecșii partajati. Topology-aware
+    // editing: drag pe un vertex partajat mută în ambele poligoane.
+    this._editFeatureKindMap = new Map()
+    this._editFeatureKindMap.set(feature, this.editKindValue)
+    const neighbors = this._findEditableNeighbors(feature, 1.0)
+    neighbors.forEach(n => this._editFeatureKindMap.set(n.feature, n.kind))
+
+    const allEditFeatures = [feature, ...neighbors.map(n => n.feature)]
+    const editColl = new ol.Collection(allEditFeatures)
     this._modify = new ol.interaction.Modify({
-      features:       new ol.Collection([feature]),
+      features:       editColl,
       pixelTolerance: 12,
       deleteCondition: (evt) => {
         const oe = evt.originalEvent
@@ -994,6 +1067,16 @@ export default class extends Controller {
       }
     })
     this.map.addInteraction(this._modify)
+
+    // Tracking modificări — set de features modificate (pentru save batch)
+    this._modifiedFeatures = new Set([feature])  // primary always considered modified
+    this._modify.on("modifyend", (evt) => {
+      evt.features.forEach(f => this._modifiedFeatures.add(f))
+    })
+
+    // Render cerculețe albastre la fiecare vertex al fiecărui vecin editabil
+    // (pe lângă cerculețele roșii ale poligonului primar din _renderEditVertices)
+    this._renderNeighborVertices(neighbors.map(n => n.feature))
 
     // Snap la celelalte features
     this._snapModes = new Set(["endpoint"])
@@ -1059,36 +1142,68 @@ export default class extends Controller {
   async saveEdit() {
     if (!await this._validateBeforeSave()) return
 
-    const url = this.editKindValue === "cladire"
-      ? `/cladiri_cadastrale/${this.editIdValue}`
-      : `/parcele_cadastrale/${this.editIdValue}`
-    const param      = this.editKindValue === "cladire" ? "cladire_cadastrala" : "parcela_cadastrala"
-    const supraField = this.editKindValue === "cladire" ? "suprafata_construita_mp" : "suprafata_mp"
-    const wkt        = this._buildWkt("MULTIPOLYGON")
-
-    // Folosim form submission (Rails standard) — evită CSRF/CORS issues și
-    // permite redirect natural către pagina de detalii sau revenire cu erori.
-    const form  = document.createElement("form")
-    form.method = "POST"
-    form.action = url
-    form.style.display = "none"
-
-    const addInput = (name, value) => {
-      const input = document.createElement("input")
-      input.type  = "hidden"
-      input.name  = name
-      input.value = value
-      form.appendChild(input)
+    // Construim payload pentru save_batch: primary + vecini modificați
+    const primary = {
+      kind:         this.editKindValue,
+      id:           this.editIdValue,
+      geom_wkt:     this._buildWktFromGeom(this._editFeature.getGeometry()),
+      suprafata_mp: this._areaCalc > 0 ? this._areaCalc.toFixed(4) : null
     }
-    addInput("_method",            "patch")
-    addInput("authenticity_token", this._csrf())
-    addInput(`${param}[geom_wkt]`, wkt)
-    if (this._areaCalc > 0) {
-      addInput(`${param}[${supraField}]`, this._areaCalc.toFixed(4))
+    const neighbors = []
+    if (this._modifiedFeatures && this._editFeatureKindMap) {
+      this._modifiedFeatures.forEach(f => {
+        if (f === this._editFeature) return
+        const kind = this._editFeatureKindMap.get(f)
+        if (!kind) return
+        neighbors.push({
+          kind:     kind,
+          id:       String(f.get("id")),
+          geom_wkt: this._buildWktFromGeom(f.getGeometry()),
+          suprafata_mp: null  // recalcularea suprafeței la vecini se face server-side la save
+        })
+      })
     }
 
-    document.body.appendChild(form)
-    form.submit()
+    this._setStatus(`Salvare: ${1 + neighbors.length} poligon(e)…`)
+    try {
+      const res = await fetch(this.saveBatchUrlValue, {
+        method:  "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": this._csrf(),
+          "Accept":       "application/json"
+        },
+        body: JSON.stringify({ primary, neighbors })
+      })
+      const data = await res.json()
+      if (data.ok) {
+        window.location.href = data.redirect
+      } else {
+        this._setStatus("Erori la save: " + (data.errors || []).join(" | "), "warn")
+      }
+    } catch (e) {
+      this._setStatus(`Eroare rețea: ${e.message}`, "warn")
+    }
+  }
+
+  // Serializează geometry (Polygon sau MultiPolygon) în WKT MULTIPOLYGON
+  // direct din coordonatele OL (Stereo 70 nativ).
+  _buildWktFromGeom(geom) {
+    const type = geom.getType()
+    let polygons = []
+    if (type === "Polygon")           polygons = [geom.getCoordinates()]
+    else if (type === "MultiPolygon") polygons = geom.getCoordinates()
+    const polyStrs = polygons.map(rings => {
+      const ringStrs = rings.map(ring => {
+        // Asigură ring închis
+        const closed = ring.length > 0 && (ring[0][0] !== ring[ring.length-1][0] || ring[0][1] !== ring[ring.length-1][1])
+          ? [...ring, ring[0]]
+          : ring
+        return "(" + closed.map(c => `${c[0].toFixed(4)} ${c[1].toFixed(4)}`).join(", ") + ")"
+      })
+      return "(" + ringStrs.join(", ") + ")"
+    })
+    return "MULTIPOLYGON(" + polyStrs.join(", ") + ")"
   }
 
   // În edit mode, suprapunerea se verifică EXCLUDÂND poligonul curent
