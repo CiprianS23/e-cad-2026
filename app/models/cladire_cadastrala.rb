@@ -21,6 +21,7 @@ class CladireCadastrala < ApplicationRecord
   validate  :geom_topologic_valid,                  if: -> { geom.present? }
   validate  :nu_se_suprapune_cu_alte_cladiri,       if: -> { geom.present? }
   validate  :nu_traverseaza_mai_multe_parcele,      if: -> { geom.present? }
+  validate  :geom_nu_e_duplicat,                    if: -> { geom.present? }
 
   before_validation :atribuie_geom_din_wkt,     if: -> { @geom_wkt.present? }
   before_validation :atribuie_parcela_din_geom,  if: -> { geom.present? && parcela_cadastrala_id.blank? }
@@ -105,6 +106,23 @@ class CladireCadastrala < ApplicationRecord
     return if rows.size <= 1
     labels = rows.map { |r| r["numar_cadastral"] }.join(", ")
     errors.add(:geom, "vertecșii clădirii sunt în #{rows.size} parcele diferite (#{labels}) — clădirea trebuie încadrată într-o singură parcelă")
+  end
+
+  def geom_nu_e_duplicat
+    excl = id || 0
+    wkt  = geom.as_text
+    dup_id = self.class.connection.select_value(
+      ApplicationRecord.sanitize_sql_array([<<~SQL, excl, wkt])
+        SELECT c.id FROM cladiri_cadastrale c
+        WHERE c.geom IS NOT NULL
+          AND c.id != ?
+          AND ST_Equals(c.geom, ST_GeomFromText(?, 3844))
+        LIMIT 1
+      SQL
+    )
+    errors.add(:geom, "geometrie identică cu clădirea ##{dup_id} există deja — duplicat respins") if dup_id
+  rescue ActiveRecord::StatementInvalid
+    # tabel inexistent — ignorăm
   end
 
   def calculeaza_centroid

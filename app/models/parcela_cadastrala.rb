@@ -15,6 +15,7 @@ class ParcelaCadastrala < ApplicationRecord
   validate  :geom_wkt_parsabil,   if: -> { @geom_wkt.present? }
   validate  :geom_topologic_valid, if: -> { geom.present? }
   validate  :nu_se_suprapune_cu_alte_parcele, if: -> { geom.present? }
+  validate  :geom_nu_e_duplicat, if: -> { geom.present? }
 
   before_validation :atribuie_geom_din_wkt, if: -> { @geom_wkt.present? }
   before_save       :calculeaza_centroid,    if: :geom_changed?
@@ -89,6 +90,23 @@ class ParcelaCadastrala < ApplicationRecord
     overlaps.each do |o|
       errors.add(:geom, "se suprapune cu parcela #{o['numar_cadastral']} (#{o['area']} mp)")
     end
+  end
+
+  def geom_nu_e_duplicat
+    excl = id || 0
+    wkt  = geom.as_text
+    dup_id = self.class.connection.select_value(
+      ApplicationRecord.sanitize_sql_array([<<~SQL, excl, wkt])
+        SELECT p.id FROM parcele_cadastrale p
+        WHERE p.geom IS NOT NULL
+          AND p.id != ?
+          AND ST_Equals(p.geom, ST_GeomFromText(?, 3844))
+        LIMIT 1
+      SQL
+    )
+    errors.add(:geom, "geometrie identică cu parcela ##{dup_id} există deja — duplicat respins") if dup_id
+  rescue ActiveRecord::StatementInvalid
+    # tabel inexistent în alt context — ignorăm
   end
 
   def calculeaza_centroid

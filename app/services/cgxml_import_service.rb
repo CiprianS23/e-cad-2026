@@ -33,6 +33,7 @@ class CgxmlImportService
     import_persons
     import_contesteds
     import_contested_x_entities
+    dedupe_by_identifier
 
     finalize_file_description
 
@@ -444,6 +445,50 @@ class CgxmlImportService
           building_id:        mapped("Building",       int_val(n, "BUILDINGID")),
           individual_unit_id: mapped("IndividualUnit", int_val(n, "IUID"))
         )
+      end
+    end
+  end
+
+  # Dedup post-import: pentru fiecare Land/Building tocmai importat, găsim
+  # rândurile MAI VECHI cu același cadgenno SAU e2identifier (identificatori
+  # business) și le ȘTERGEM (împreună cu Points-urile lor). Astfel ultima
+  # versiune importată ia locul vechii.
+  def dedupe_by_identifier
+    fd_id = @file_description&.id
+    return unless fd_id
+
+    # Lands
+    Land.where(file_description_id: fd_id).find_each do |new_land|
+      cad = new_land.cadgenno.presence
+      e2  = new_land.e2identifier.presence
+      next if cad.nil? && e2.nil?
+
+      old_lands = Land.where.not(id: new_land.id)
+                       .where("(cadgenno IS NOT NULL AND cadgenno = ?) OR (e2identifier IS NOT NULL AND e2identifier = ?)",
+                              cad, e2)
+      old_lands.find_each do |old|
+        # Cascade: ștergem clădirile asociate vechiului land + punctele lor
+        Building.where(land_id: old.id).find_each do |b|
+          Point.where(building_id: b.id).delete_all
+          b.delete
+        end
+        Point.where(land_id: old.id).delete_all
+        old.delete
+      end
+    end
+
+    # Buildings (independent — pot avea identificatori distincti)
+    Building.joins(:land).where(lands: { file_description_id: fd_id }).find_each do |new_b|
+      cad = new_b.cadgenno.presence
+      e2  = new_b.e2identifier.presence
+      next if cad.nil? && e2.nil?
+
+      old_b = Building.where.not(id: new_b.id)
+                       .where("(cadgenno IS NOT NULL AND cadgenno = ?) OR (e2identifier IS NOT NULL AND e2identifier = ?)",
+                              cad, e2)
+      old_b.find_each do |old|
+        Point.where(building_id: old.id).delete_all
+        old.delete
       end
     end
   end
