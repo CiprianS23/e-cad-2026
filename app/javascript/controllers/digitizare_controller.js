@@ -308,18 +308,30 @@ export default class extends Controller {
     win.document.close()
   }
 
-  saveParcel() {
-    if (!this._guardSavable()) return
+  async saveParcel() {
+    if (!await this._validateBeforeSave()) return
     this.wktFieldTarget.value      = this._buildWkt("MULTIPOLYGON")
     this.saveAreaFieldTarget.value = this._areaCalc > 0 ? this._areaCalc.toFixed(4) : ""
     this.saveFormTarget.submit()
   }
 
-  saveBuilding() {
-    if (!this._guardSavable()) return
+  async saveBuilding() {
+    if (!await this._validateBeforeSave()) return
     this.wktFieldCladireTarget.value      = this._buildWkt("MULTIPOLYGON")
     this.saveAreaFieldCladireTarget.value = this._areaCalc > 0 ? this._areaCalc.toFixed(4) : ""
     this.saveFormCladireTarget.submit()
+  }
+
+  // Forțează o validare sincronă proaspătă înainte să accepte save (anti-race)
+  async _validateBeforeSave() {
+    if (this._verts.length < 3) {
+      this._setStatus("Niciun poligon pentru salvare (minim 3 vertecși).", "warn")
+      return false
+    }
+    clearTimeout(this._areaDebounce)
+    this._setStatus("Verificare topologie…")
+    await this._calcArea()
+    return this._guardSavable()
   }
 
   _guardSavable() {
@@ -536,6 +548,11 @@ export default class extends Controller {
       const [x, y] = ol.proj.transform(c, "EPSG:3857", "EPSG:3844")
       return { x, y }
     })
+    // Pesimist: fiecare modificare geometrică invalidează rezultatul anterior
+    // de validare. _calcArea va seta din nou true/false la răspunsul PostGIS.
+    this._polygonValid  = false
+    this._polygonSimple = false
+    this._updateSaveAvailability()
     this._updateVertexList()
     this._updateLiveArea()
   }
