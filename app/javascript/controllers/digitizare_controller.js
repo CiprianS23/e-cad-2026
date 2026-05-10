@@ -360,18 +360,25 @@ export default class extends Controller {
 
   // ── Ortho mode (constrânge desenul la 90°) ───────────────────────────────
 
+  // Pentru type 'Polygon', OL trimite `coordinates = [openRing]` unde openRing
+  // este array de [x, y] (vertecși confirmați + cursor). Funcția implicită
+  // închide ring-ul prin append la primul vertex.
   _buildGeometryFunction() {
-    return (coords, geom) => {
-      if (this._orthoEnabled && coords.length >= 2) {
-        const last = coords[coords.length - 1]
-        const prev = coords[coords.length - 2]
+    return (coordinates, geometry) => {
+      let ring = coordinates[0]
+      if (this._orthoEnabled && ring.length >= 2) {
+        const last = ring[ring.length - 1]
+        const prev = ring[ring.length - 2]
         const dx = Math.abs(last[0] - prev[0])
         const dy = Math.abs(last[1] - prev[1])
-        coords[coords.length - 1] = dx > dy ? [last[0], prev[1]] : [prev[0], last[1]]
+        const fixed = dx > dy ? [last[0], prev[1]] : [prev[0], last[1]]
+        ring = [...ring.slice(0, -1), fixed]
       }
-      if (!geom) geom = new ol.geom.Polygon([coords])
-      else geom.setCoordinates([coords])
-      return geom
+      // Închide ring-ul (append primul vertex la final)
+      const closed = ring.length > 0 ? [...ring, ring[0]] : ring
+      if (!geometry) geometry = new ol.geom.Polygon([closed])
+      else geometry.setCoordinates([closed])
+      return geometry
     }
   }
 
