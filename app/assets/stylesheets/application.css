@@ -63,6 +63,24 @@ nav.topnav a:hover { color: #fff; }
 .btn:hover { background: #d1d5db; }
 .btn-primary { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
 .btn-primary:hover { background: #1e40af; }
+
+/* Stare dezactivată — vizibilă pentru utilizator (gri + cursor not-allowed) */
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: grayscale(0.4);
+}
+.btn:disabled:hover,
+.btn[disabled]:hover {
+  background: inherit;
+}
+.btn-primary:disabled,
+.btn-primary[disabled] {
+  background: #93c5fd;
+  border-color: #93c5fd;
+  color: #f1f5f9;
+}
 .btn-secondary { background: #fff; color: #374151; border-color: #d1d5db; }
 .btn-secondary:hover { background: #f9fafb; }
 .btn-danger { background: #dc2626; color: #fff; border-color: #dc2626; }
