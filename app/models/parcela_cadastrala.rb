@@ -74,15 +74,15 @@ class ParcelaCadastrala < ApplicationRecord
     wkt = geom.as_text
     excl = id || 0
     overlaps = self.class.connection.select_all(
-      ApplicationRecord.sanitize_sql_array([<<~SQL, wkt, excl, 0.01])
+      ApplicationRecord.sanitize_sql_array([<<~SQL, wkt, excl, 0.10])
         WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom)
-        SELECT id, numar_cadastral,
-          ROUND(ST_Area(ST_Intersection(geom, np.geom))::numeric, 2) AS area
-        FROM parcele_cadastrale, np
-        WHERE geom IS NOT NULL
-          AND id != ?
-          AND ST_Intersects(geom, np.geom)
-          AND ST_Area(ST_Intersection(geom, np.geom)) > ?
+        SELECT p.id, p.numar_cadastral,
+          ROUND(ST_Area(ST_Intersection(p.geom, np.geom))::numeric, 2) AS area
+        FROM parcele_cadastrale p, np
+        WHERE p.geom IS NOT NULL
+          AND p.id != ?
+          AND ST_Intersects(p.geom, np.geom)
+          AND ST_Area(ST_Intersection(p.geom, np.geom)) > ?
       SQL
     )
     overlaps.each do |o|

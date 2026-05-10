@@ -12,16 +12,42 @@ services:
     versions: ['1.1.1', '1.3.0']
 
 layers:
+  # Layere native în EPSG:3844 (Stereo 70) — folosite de OL view 3844 fără reproject
   - name: ortoplan
-    title: Ortofotoplan Romania (ANCPI)
-    sources: [ortoplan_cache]
+    title: Ortofotoplan Romania (ANCPI) — Stereo 70
+    sources: [ortoplan_stereo70_cache]
 
   - name: osm
-    title: OpenStreetMap
-    sources: [osm_cache]
+    title: OpenStreetMap — Stereo 70
+    sources: [osm_stereo70_cache]
+
+  # Variante webmercator (legacy, pentru clienți care lucrează în 3857)
+  - name: ortoplan_3857
+    title: Ortofotoplan Romania (ANCPI) — Web Mercator
+    sources: [ortoplan_3857_cache]
+
+  - name: osm_3857
+    title: OpenStreetMap — Web Mercator
+    sources: [osm_3857_cache]
 
 caches:
-  ortoplan_cache:
+  ortoplan_stereo70_cache:
+    grids: [stereo70]
+    sources: [ortoplan_wms]
+    format: image/jpeg
+    cache:
+      type: file
+      directory: ./mapproxy/cache_data/ortoplan_stereo70
+
+  osm_stereo70_cache:
+    grids: [stereo70]
+    sources: [osm_tiles]
+    format: image/png
+    cache:
+      type: file
+      directory: ./mapproxy/cache_data/osm_stereo70
+
+  ortoplan_3857_cache:
     grids: [webmercator]
     sources: [ortoplan_wms]
     format: image/jpeg
@@ -29,7 +55,7 @@ caches:
       type: file
       directory: ./mapproxy/cache_data/ortoplan
 
-  osm_cache:
+  osm_3857_cache:
     grids: [webmercator]
     sources: [osm_tiles]
     format: image/png
@@ -63,6 +89,16 @@ sources:
 grids:
   webmercator:
     base: GLOBAL_WEBMERCATOR
+
+  # Grid custom Stereo 70 (EPSG:3844) — acoperă teritoriul României
+  # Origin NW: (120000 E, 800000 N); resoluții descendente la fiecare zoom level
+  stereo70:
+    srs: EPSG:3844
+    bbox: [120000, 250000, 900000, 800000]
+    bbox_srs: EPSG:3844
+    origin: nw
+    tile_size: [256, 256]
+    res: [3072, 1536, 768, 384, 192, 96, 48, 24, 12, 6, 3, 1.5, 0.75, 0.375, 0.1875]
 
 globals:
   cache:

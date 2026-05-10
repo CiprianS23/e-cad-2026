@@ -85,26 +85,48 @@ export default class extends Controller {
   }
 
   _buildLayers() {
-    // ── Layere de bază (raster) ──
-    const osm = new ol.layer.Tile({
-      source: new ol.source.OSM(),
-      properties: { name: "OpenStreetMap" }
+    // ── Layere de bază (raster) ── în Stereo 70 nativ via MapProxy
+    // Grid stereo70: origin NW (120000, 800000), 15 niveluri de rezoluție.
+    const stereoGrid = new ol.tilegrid.TileGrid({
+      origin:      [120000, 800000],
+      resolutions: [3072, 1536, 768, 384, 192, 96, 48, 24, 12, 6, 3, 1.5, 0.75, 0.375, 0.1875],
+      tileSize:    [256, 256],
+      extent:      [120000, 250000, 900000, 800000]
     })
 
-    this._baseLayers = { osm }
+    this._baseLayers = {}
 
     if (this.mapproxyUrlValue) {
+      // OSM via MapProxy în 3844 nativ (cache stereo70)
+      this._baseLayers.osm = new ol.layer.Tile({
+        source: new ol.source.XYZ({
+          url:          `${this.mapproxyUrlValue}/tms/1.0.0/osm/stereo70/{z}/{x}/{-y}.png`,
+          projection:   "EPSG:3844",
+          tileGrid:     stereoGrid,
+          attributions: "© OpenStreetMap contributors (via MapProxy / Stereo70)"
+        }),
+        properties: { name: "OpenStreetMap (Stereo70)" }
+      })
+
+      // Ortofotoplan ANCPI în 3844 nativ
       this._baseLayers.ortofotoplan = new ol.layer.Tile({
         source: new ol.source.XYZ({
-          url: `${this.mapproxyUrlValue}/tms/1.0.0/ortoplan/webmercator/{z}/{x}/{-y}.jpeg`,
-          attributions: "© ANCPI – Ortofotoplan",
-          maxZoom: 20
+          url:          `${this.mapproxyUrlValue}/tms/1.0.0/ortoplan/stereo70/{z}/{x}/{-y}.jpeg`,
+          projection:   "EPSG:3844",
+          tileGrid:     stereoGrid,
+          attributions: "© ANCPI – Ortofotoplan (Stereo70)"
         }),
-        properties: { name: "Ortofotoplan" }
+        properties: { name: "Ortofotoplan (Stereo70)" }
+      })
+    } else {
+      // Fallback fără MapProxy: OSM 3857 cu reproject OL (calitate redusă)
+      this._baseLayers.osm = new ol.layer.Tile({
+        source: new ol.source.OSM(),
+        properties: { name: "OpenStreetMap (3857 reproject)" }
       })
     }
 
-    this.map.addLayer(osm)
+    this.map.addLayer(this._baseLayers.osm)
 
     // ── Layere vectoriale (overlays) ──
     this.uatLayer = new ol.layer.Vector({
