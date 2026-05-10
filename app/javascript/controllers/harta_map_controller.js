@@ -146,10 +146,7 @@ export default class extends Controller {
 
     this.cladiriLayer = new ol.layer.Vector({
       source: new ol.source.Vector(),
-      style: () => new ol.style.Style({
-        stroke: new ol.style.Stroke({ color: "#b45309", width: 1.5 }),
-        fill:   new ol.style.Fill({ color: "rgba(251, 191, 36, 0.3)" })
-      }),
+      style:  this._cladireStyle.bind(this),
       properties: { name: "cladiri" }
     })
 
@@ -225,13 +222,45 @@ export default class extends Controller {
     const status = feature.get("status")
     const cat    = feature.get("categoria_folosinta")
     const fill   = PARCEL_COLORS[cat] || "#6b7280"
+    const nrCad  = feature.get("numar_cadastral") || ""
+    const geom   = feature.getGeometry()
+    // Suprafața recalculată din geometry curentă — actualizare dinamică în edit
+    const area   = geom ? Math.round(geom.getArea()) : null
+    const label  = nrCad && area != null ? `${nrCad}\n${area} mp` : (nrCad || (area != null ? `${area} mp` : ""))
     return new ol.style.Style({
       stroke: new ol.style.Stroke({
         color:    status === "litigiu" ? "#dc2626" : "#1d4ed8",
         width:    status === "litigiu" ? 2.5 : 1.5,
         lineDash: status === "inactiv" ? [6, 4] : null
       }),
-      fill: new ol.style.Fill({ color: hexToRgba(fill, 0.35) })
+      fill: new ol.style.Fill({ color: hexToRgba(fill, 0.35) }),
+      text: label ? new ol.style.Text({
+        text:        label,
+        font:        "600 11px system-ui, sans-serif",
+        fill:        new ol.style.Fill({ color: "#1a1a2e" }),
+        stroke:      new ol.style.Stroke({ color: "#fff", width: 3 }),
+        textAlign:   "center",
+        overflow:    true
+      }) : null
+    })
+  }
+
+  _cladireStyle(feature) {
+    const nrCad = feature.get("numar_cadastral") || ""
+    const geom  = feature.getGeometry()
+    const area  = geom ? Math.round(geom.getArea()) : null
+    const label = nrCad && area != null ? `${nrCad}\n${area} mp` : (nrCad || (area != null ? `${area} mp` : ""))
+    return new ol.style.Style({
+      stroke: new ol.style.Stroke({ color: "#b45309", width: 1.5 }),
+      fill:   new ol.style.Fill({ color: "rgba(251, 191, 36, 0.3)" }),
+      text: label ? new ol.style.Text({
+        text:      label,
+        font:      "600 10px system-ui, sans-serif",
+        fill:      new ol.style.Fill({ color: "#7c2d12" }),
+        stroke:    new ol.style.Stroke({ color: "#fff", width: 3 }),
+        textAlign: "center",
+        overflow:  true
+      }) : null
     })
   }
 
