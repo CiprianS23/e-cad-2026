@@ -21,6 +21,13 @@
 
 # MapProxy cache
 /mapproxy/cache_data/
+/mapproxy/mapproxy/cache_data/
+
+# Date sursă / fixture-uri mari (nu se versionează)
+/lib/data/
+
+# Note de lucru locale
+/0_prompt-mama-claude-code.md
 
 # Node / assets
 /node_modules
@@ -28,3 +35,4 @@ yarn-error.log
 
 # macOS
 .DS_Store
+**/__MACOSX/
