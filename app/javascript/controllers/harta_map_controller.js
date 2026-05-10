@@ -43,6 +43,8 @@ export default class extends Controller {
     this._loadParcele()
     this._loadCgxml()
     this._loadCladiri()
+    // Notifică alte controllere (digitizare, layer-switcher) că harta e gata
+    this.dispatch("ready", { detail: { map: this.map }, bubbles: true })
   }
 
   disconnect() {
