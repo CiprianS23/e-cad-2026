@@ -582,8 +582,23 @@ export default class extends Controller {
     })
   }
 
-  _onDrawEnd(_evt) {
+  _onDrawEnd(evt) {
     if (this._geomChangeKey) ol.Observable.unByKey(this._geomChangeKey)
+
+    // Re-extragem _verts din geometria FINALĂ (închisă, fără cursor live).
+    // OL.finishDrawing pop-uiește cursor-ul ÎNAINTE să închidă ring-ul, dar
+    // ultima dată când change event a fost prins în handler-ul nostru, _draw
+    // era încă activ → _extractVerts elimina și ultimul vertex real ca pe cursor.
+    const ring = evt.feature.getGeometry().getCoordinates()[0] || []
+    this._verts = (ring.length > 1 ? ring.slice(0, -1) : ring).map(c => ({ x: c[0], y: c[1] }))
+    this._polygonValid      = false
+    this._polygonSimple     = false
+    this._topologyHasErrors = true
+    this._renderEditVertices()
+    this._updateVertexList()
+    this._updateLiveArea()
+    this._updateSaveAvailability()
+
     if (this._draw && this.map) { this.map.removeInteraction(this._draw); this._draw = null }
     if (this._snap && this.map) { this.map.removeInteraction(this._snap); this._snap = null }
     this._hartaMap?.setDigitizing(false)
@@ -591,6 +606,7 @@ export default class extends Controller {
     this.btnStartTarget.classList.remove("btn-active")
     this._setStatus(`Poligon închis — ${this._verts.length} vertecși.`, "ok")
     this._calcArea()
+    this._verifyTopology()
     this._locateUat()
   }
 
