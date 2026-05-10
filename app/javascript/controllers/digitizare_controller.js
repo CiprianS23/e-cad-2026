@@ -119,16 +119,28 @@ export default class extends Controller {
     if (!raw) return
     this.cmdInputTarget.value = ""
 
-    const isRelativeOrPolar = raw.startsWith("@")
+    const isDistance   = /^-?\d+(\.\d+)?$/.test(raw)
+    const isRelOrPolar = raw.startsWith("@")
+    const isAbsolute   = !isDistance && !isRelOrPolar
 
-    // Pornește digitizarea automat dacă utilizatorul intră coords absolute
-    // și nu a apăsat încă butonul „Digitizare"
+    // Pornește digitizarea automat doar pentru coords absolute (au sens fără
+    // punct anterior). Pentru distanță / relativ / polar, cere punct prim.
     if (!this._draw) {
-      if (isRelativeOrPolar) {
+      if (!isAbsolute) {
         this._cmdHint(`Eroare: ${raw} cere un punct anterior. Începe cu coords absolute (X,Y).`, true)
         return
       }
       this.startDrawing()
+    }
+
+    if (isDistance && this._verts.length === 0) {
+      this._cmdHint(`Distanță fără punct anterior. Adaugă X,Y sau click pe hartă mai întâi.`, true)
+      return
+    }
+
+    if (isDistance && !this._cursorStereo) {
+      this._cmdHint(`Mișcă mouse-ul pe hartă pentru a stabili direcția înainte de a tasta lungimea.`, true)
+      return
     }
 
     const pt = this._parseCmd(raw)
@@ -368,6 +380,22 @@ export default class extends Controller {
   // ── Linia de comandă (parser absolut / relativ / polar) ──────────────────
 
   _parseCmd(raw) {
+    // Direct distance entry (CAD): doar număr → folosește direcția cursorului
+    if (/^-?\d+(\.\d+)?$/.test(raw)) {
+      const dist = parseFloat(raw)
+      if (isNaN(dist) || this._verts.length === 0 || !this._cursorStereo) return null
+      const last = this._verts[this._verts.length - 1]
+      let dx = this._cursorStereo.x - last.x
+      let dy = this._cursorStereo.y - last.y
+      if (this._orthoEnabled) {
+        if (Math.abs(dx) > Math.abs(dy)) dy = 0
+        else dx = 0
+      }
+      const len = Math.sqrt(dx * dx + dy * dy)
+      if (len === 0) return null
+      return { x: last.x + dist * dx / len, y: last.y + dist * dy / len }
+    }
+
     if (raw.startsWith("@")) {
       if (this._verts.length === 0) return null
       const last = this._verts[this._verts.length - 1]
@@ -422,6 +450,7 @@ export default class extends Controller {
 
   _onPointerMove(evt) {
     const [x, y] = ol.proj.transform(evt.coordinate, "EPSG:3857", "EPSG:3844")
+    this._cursorStereo = { x, y }
     if (this.hasStatusXTarget) this.statusXTarget.textContent = FMT(x)
     if (this.hasStatusYTarget) this.statusYTarget.textContent = FMT(y)
   }
