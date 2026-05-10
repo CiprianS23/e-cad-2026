@@ -284,21 +284,30 @@ export default class extends Controller {
     })
   }
 
+  // Returnează interior point al unui Polygon SAU MultiPolygon. Standard
+  // OL: getInteriorPoint() există doar pe Polygon — pentru MultiPolygon
+  // apelăm pe primul sub-poligon.
+  _geomInteriorPoint(geom) {
+    const type = geom.getType()
+    if (type === "Polygon") return geom.getInteriorPoint().getCoordinates()
+    if (type === "MultiPolygon") {
+      const polys = geom.getPolygons()
+      if (polys.length === 0) return ol.extent.getCenter(geom.getExtent())
+      return polys[0].getInteriorPoint().getCoordinates()
+    }
+    return ol.extent.getCenter(geom.getExtent())
+  }
+
   // Calculează poziția optimă pentru etichetă astfel încât să rămână în
   // viewport chiar și când poligonul se extinde dincolo de zona vizibilă
-  // (la zoom-in puternic). Strategie:
-  //   1. Dacă poligonul nu intersectează deloc viewport-ul → null (nu randăm)
-  //   2. Dacă interior point-ul natural e în viewport → folosim-l (label
-  //      apare în interior, exact ca standard)
-  //   3. Altfel → folosim centrul intersecției bbox(geom) ∩ bbox(viewport),
-  //      apoi îl proiectăm înapoi pe poligon dacă pică în afara lui
+  // (la zoom-in puternic).
   _computeLabelPosition(geom) {
-    if (!this.map) return geom.getInteriorPoint().getCoordinates()
+    if (!this.map) return this._geomInteriorPoint(geom)
     const viewExt = this.map.getView().calculateExtent(this.map.getSize())
     const polyExt = geom.getExtent()
     if (!ol.extent.intersects(polyExt, viewExt)) return null
 
-    const interior = geom.getInteriorPoint().getCoordinates()
+    const interior = this._geomInteriorPoint(geom)
     if (ol.extent.containsCoordinate(viewExt, interior)) return interior
 
     // Centrul intersecției bbox-urilor — în general în viewport
@@ -307,8 +316,7 @@ export default class extends Controller {
     const c = ol.extent.getCenter(inter)
     // Dacă centrul nu e în poligon, aproximăm cu cel mai apropiat punct de pe boundary
     if (geom.intersectsCoordinate(c)) return c
-    const closest = geom.getClosestPoint(c)
-    return closest
+    return geom.getClosestPoint(c)
   }
 
   _cladireStyle(feature) {
