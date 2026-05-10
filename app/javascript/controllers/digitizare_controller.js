@@ -19,7 +19,7 @@ export default class extends Controller {
   static targets = [
     "panel", "panelBody",
     "snapSlider", "snapToleranceVal", "snapModes",
-    "btnStart", "btnClose", "btnUndo",
+    "btnStart", "btnEdit", "btnClose", "btnUndo",
     "statusBar",
     "inputX", "inputY",
     "areaCalc", "areaAct", "areaDiff",
@@ -81,6 +81,9 @@ export default class extends Controller {
     } else {
       outlet.element.addEventListener("harta-map:ready", () => this._attachToMap(), { once: true })
     }
+    // Ascultăm evenimentele de selecție feature de la harta-map
+    outlet.element.addEventListener("harta-map:feature-selected",   (e) => this._onFeatureSelected(e.detail))
+    outlet.element.addEventListener("harta-map:feature-deselected", ()  => this._onFeatureSelected(null))
   }
 
   hartaMapOutletDisconnected() { this._teardown() }
@@ -844,6 +847,39 @@ export default class extends Controller {
     if (evt.key === "F3") { evt.preventDefault(); this.toggleSnap() }
     if (evt.key === "F8") { evt.preventDefault(); this.toggleOrtho() }
     if (evt.key === "Escape" && this._draw) { evt.preventDefault(); this.clearAll() }
+  }
+
+  // ── Selecție feature (pentru intrare în edit mode) ────────────────────────
+
+  _onFeatureSelected(sel) {
+    if (this._draw || this._editing) return
+    this._selected = sel
+    this._updateEditButton()
+  }
+
+  _updateEditButton() {
+    if (!this.hasBtnEditTarget) return
+    const sel = this._selected
+    this.btnEditTarget.disabled = !sel
+    if (sel) {
+      const label = sel.feature.get("numar_cadastral") || `#${sel.feature.get("id")}`
+      this.btnEditTarget.title = `Editează ${sel.kind} ${label}`
+      this.btnEditTarget.textContent = `✎ Editează ${sel.kind} ${label}`
+    } else {
+      this.btnEditTarget.title = "Click pe un poligon de pe hartă pentru a-l selecta"
+      this.btnEditTarget.textContent = "✎ Editează"
+    }
+  }
+
+  editSelected() {
+    if (!this._selected) {
+      this._setStatus("Selectează un poligon pe hartă (click pe el) înainte de Editează.", "warn")
+      return
+    }
+    this.editKindValue = this._selected.kind
+    this.editIdValue   = String(this._selected.feature.get("id"))
+    this._hartaMap?.clearSelection()
+    this._enterEditMode(this._selected.feature, this._selected.layer)
   }
 
   // ── EDIT MODE: modify geometrie poligon existent ─────────────────────────

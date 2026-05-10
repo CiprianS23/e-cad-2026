@@ -190,6 +190,35 @@ export default class extends Controller {
     if (active) this._popup?.setPosition(undefined)
   }
 
+  // ── Selecție feature (pentru Edit mode) ────────────────────────────────
+
+  _setSelectedFeature(sel) {
+    if (!this._selectionLayer) {
+      this._selectionLayer = new ol.layer.Vector({
+        source: new ol.source.Vector(),
+        style:  () => new ol.style.Style({
+          stroke: new ol.style.Stroke({ color: "#16a34a", width: 4 }),
+          fill:   new ol.style.Fill({ color: "rgba(34, 197, 94, 0.15)" })
+        }),
+        zIndex: 999
+      })
+      this.map.addLayer(this._selectionLayer)
+    }
+    this._selectionLayer.getSource().clear()
+    if (sel) {
+      // Clonăm geometry pentru un layer de overlay (nu mutăm originalul)
+      const overlay = new ol.Feature({ geometry: sel.feature.getGeometry().clone() })
+      this._selectionLayer.getSource().addFeature(overlay)
+    }
+    this._selected = sel
+    this.dispatch(sel ? "feature-selected" : "feature-deselected", {
+      detail: sel,
+      bubbles: true
+    })
+  }
+
+  clearSelection() { this._setSelectedFeature(null) }
+
   // ── Stiluri ──────────────────────────────────────────────────────────────
 
   _parcelStyle(feature) {
@@ -238,13 +267,13 @@ export default class extends Controller {
     this.map.on("singleclick", (evt) => {
       if (this._digitizing) return  // în timpul digitizării nu afișăm popup-uri info
 
-      let html = null
+      let html = null, selected = null
       this.map.forEachFeatureAtPixel(evt.pixel, (feature, layer) => {
         const layerName = layer?.get("name")
-        if (layerName === "parcele")  html = this._parcelPopupHtml(feature)
-        if (layerName === "cladiri")  html = this._cladirePopupHtml(feature)
-        if (layerName === "cgxml")    html = this._cgxmlPopupHtml(feature)
-        if (layerName === "uat")      html = this._uatPopupHtml(feature)
+        if (layerName === "parcele")  { html = this._parcelPopupHtml(feature);  selected = { kind: "parcela", feature, layer } }
+        if (layerName === "cladiri")  { html = this._cladirePopupHtml(feature); selected = { kind: "cladire", feature, layer } }
+        if (layerName === "cgxml")    { html = this._cgxmlPopupHtml(feature) }
+        if (layerName === "uat")      { html = this._uatPopupHtml(feature) }
         return html ? true : undefined
       }, { hitTolerance: 3 })
 
@@ -254,6 +283,9 @@ export default class extends Controller {
       } else {
         this._popup.setPosition(undefined)
       }
+
+      // Highlight selecție și notificăm controllerele care ascultă (digitizare)
+      this._setSelectedFeature(selected)
     })
 
     this.map.on("pointermove", (evt) => {
