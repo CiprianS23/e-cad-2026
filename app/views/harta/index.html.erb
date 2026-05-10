@@ -116,16 +116,50 @@
       <span class="cad-cmdline-hint" data-digitizare-target="cmdHint">Stereo70 (EPSG:3844)</span>
     </div>
 
-    <!-- Status bar (stil AutoCAD) — toggle-uri SNAP/ORTHO + coords + scară + suprafață -->
+    <!-- Status bar (stil AutoCAD) — toate funcțiile snap + coords + scară + suprafață -->
     <div class="cad-statusbar">
       <button type="button" class="cad-status-toggle cad-status-toggle--on"
               data-digitizare-target="snapToggle"
               data-action="click->digitizare#toggleSnap"
               title="SNAP — comutare prin tastatură: F3">SNAP</button>
+
+      <div class="cad-status-snapmodes" data-digitizare-target="snapModes" title="Moduri OSNAP active">
+        <label class="cad-status-mode">
+          <input type="checkbox" data-snap-mode="endpoint" checked
+                 data-action="change->digitizare#onSnapModeChange">
+          <span>ENDP</span>
+        </label>
+        <label class="cad-status-mode">
+          <input type="checkbox" data-snap-mode="midpoint" checked
+                 data-action="change->digitizare#onSnapModeChange">
+          <span>MID</span>
+        </label>
+        <label class="cad-status-mode">
+          <input type="checkbox" data-snap-mode="nearest"
+                 data-action="change->digitizare#onSnapModeChange">
+          <span>NEAR</span>
+        </label>
+        <label class="cad-status-mode">
+          <input type="checkbox" data-snap-mode="centroid"
+                 data-action="change->digitizare#onSnapModeChange">
+          <span>CEN</span>
+        </label>
+      </div>
+
+      <label class="cad-status-tol" title="Toleranță snap (pixeli)">
+        Tol
+        <input type="range" min="5" max="50" value="15" class="cad-status-slider"
+               data-digitizare-target="snapSlider"
+               data-action="input->digitizare#toleranceChanged">
+        <span data-digitizare-target="snapToleranceVal">15</span>px
+      </label>
+
+      <span class="cad-status-divider">│</span>
       <button type="button" class="cad-status-toggle"
               data-digitizare-target="orthoToggle"
               data-action="click->digitizare#toggleOrtho"
               title="ORTHO — comutare prin tastatură: F8">ORTHO</button>
+
       <span class="cad-status-divider">│</span>
       <span class="cad-status-coord">X: <span data-digitizare-target="statusX">—</span></span>
       <span class="cad-status-coord">Y: <span data-digitizare-target="statusY">—</span></span>
@@ -162,53 +196,7 @@
         <span class="badge badge-info" style="font-size:10px">Stereo 70</span>
       </div>
 
-      <!-- 1. Coordonate cursor + snap -->
-      <section class="digi-section">
-        <div class="digi-section-label">Coordonate cursor</div>
-        <div class="digi-coords-row">
-          <div class="digi-coord-box">
-            <span class="digi-coord-label">X (E)</span>
-            <span class="digi-coord-val" data-digitizare-target="cursorX">—</span>
-          </div>
-          <div class="digi-coord-box">
-            <span class="digi-coord-label">Y (N)</span>
-            <span class="digi-coord-val" data-digitizare-target="cursorY">—</span>
-          </div>
-        </div>
-        <div class="digi-snap-row">
-          <span class="snap-dot" data-digitizare-target="snapDot" title="Snap inactiv"></span>
-          <span class="snap-label" data-digitizare-target="snapLabel">Snap: în așteptare</span>
-          <label class="snap-tol-label">
-            Toleranță
-            <input type="range" min="5" max="50" value="15" class="snap-slider"
-                   data-digitizare-target="snapSlider"
-                   data-action="input->digitizare#toleranceChanged">
-            <span data-digitizare-target="snapToleranceVal">15</span> px
-          </label>
-        </div>
-        <div class="digi-snap-modes" data-digitizare-target="snapModes">
-          <label class="digi-snap-mode">
-            <input type="checkbox" data-snap-mode="endpoint" checked
-                   data-action="change->digitizare#onSnapModeChange">
-            <span>ENDP</span>
-          </label>
-          <label class="digi-snap-mode">
-            <input type="checkbox" data-snap-mode="midpoint" checked
-                   data-action="change->digitizare#onSnapModeChange">
-            <span>MID</span>
-          </label>
-          <label class="digi-snap-mode">
-            <input type="checkbox" data-snap-mode="nearest"
-                   data-action="change->digitizare#onSnapModeChange">
-            <span>NEAR</span>
-          </label>
-          <label class="digi-snap-mode">
-            <input type="checkbox" data-snap-mode="centroid"
-                   data-action="change->digitizare#onSnapModeChange">
-            <span>CEN</span>
-          </label>
-        </div>
-      </section>
+      <!-- (Coordonate cursor + OSnap + Toleranță au fost mutate în status bar-ul de jos) -->
 
       <!-- 2. Acțiuni -->
       <section class="digi-section">
@@ -241,21 +229,7 @@
         </div>
       </section>
 
-      <!-- 3. Vertecși -->
-      <section class="digi-section digi-section-flex">
-        <div class="digi-section-label">
-          Vertecși
-          <span class="badge badge-secondary" data-digitizare-target="vertexCount">0</span>
-        </div>
-        <div class="digi-vertex-scroll">
-          <table class="digi-vertex-table">
-            <thead>
-              <tr><th>#</th><th>X (m)</th><th>Y (m)</th><th></th></tr>
-            </thead>
-            <tbody data-digitizare-target="vertexTbody"></tbody>
-          </table>
-        </div>
-      </section>
+      <!-- (Lista vertecșilor scoasă — neutilizată în flow-ul tipic) -->
 
       <!-- 4. Input manual / import TXT -->
       <section class="digi-section">

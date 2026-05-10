@@ -312,6 +312,47 @@ legend { font-size: 13px; font-weight: 700; color: #374151; padding: 0 6px; }
 .cad-status-meta { color: #94a3b8; }
 .cad-status-meta span { color: #e2e8f0; font-weight: 700; }
 
+/* OSnap chips în status bar (mai compacte decât panoul) */
+.cad-status-snapmodes {
+  display: flex;
+  gap: 2px;
+}
+.cad-status-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border: 1px solid #334155;
+  border-radius: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #64748b;
+  cursor: pointer;
+  background: transparent;
+}
+.cad-status-mode input { margin: 0; accent-color: #38bdf8; transform: scale(0.85); }
+.cad-status-mode:has(input:checked) {
+  background: #1e3a8a;
+  border-color: #1d4ed8;
+  color: #fbbf24;
+}
+
+/* Toleranță snap (slider compact) */
+.cad-status-tol {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+.cad-status-tol span { color: #e2e8f0; font-weight: 700; min-width: 18px; text-align: right; }
+.cad-status-slider {
+  width: 70px;
+  accent-color: #38bdf8;
+  height: 4px;
+}
+
 /* ── Digitizare — moduri snap (subset AutoCAD-style chips) ── */
 .digi-snap-modes {
   display: flex;

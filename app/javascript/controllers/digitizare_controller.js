@@ -413,8 +413,6 @@ export default class extends Controller {
         clearTimeout(this._areaDebounce)
         this._areaDebounce = setTimeout(() => this._calcArea(), 400)
       }
-      this.snapDotTarget.style.background = "#22c55e"
-      this.snapLabelTarget.textContent    = `Snap: ACTIV  (${this._verts.length} pts)`
     })
   }
 
@@ -492,14 +490,16 @@ export default class extends Controller {
   // ── Vertex list UI ───────────────────────────────────────────────────────
 
   _updateVertexList() {
-    const tbody = this.vertexTbodyTarget
-    tbody.innerHTML = ""
-    this._verts.forEach((v, i) => {
-      const tr = document.createElement("tr")
-      tr.innerHTML = `<td class="vt-no">${i + 1}</td><td class="vt-coord">${FMT(v.x)}</td><td class="vt-coord">${FMT(v.y)}</td><td></td>`
-      tbody.appendChild(tr)
-    })
-    this.vertexCountTarget.textContent = this._verts.length
+    if (this.hasVertexTbodyTarget) {
+      const tbody = this.vertexTbodyTarget
+      tbody.innerHTML = ""
+      this._verts.forEach((v, i) => {
+        const tr = document.createElement("tr")
+        tr.innerHTML = `<td class="vt-no">${i + 1}</td><td class="vt-coord">${FMT(v.x)}</td><td class="vt-coord">${FMT(v.y)}</td><td></td>`
+        tbody.appendChild(tr)
+      })
+    }
+    if (this.hasVertexCountTarget) this.vertexCountTarget.textContent = this._verts.length
   }
 
   // ── Area calc + diferență ────────────────────────────────────────────────
