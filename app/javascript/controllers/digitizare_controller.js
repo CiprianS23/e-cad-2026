@@ -16,6 +16,7 @@ export default class extends Controller {
   static targets = [
     "cursorX", "cursorY",
     "snapDot", "snapLabel", "snapSlider", "snapToleranceVal",
+    "snapModes",
     "btnStart", "btnClose", "btnUndo",
     "statusBar",
     "vertexTbody", "vertexCount",
@@ -26,7 +27,10 @@ export default class extends Controller {
     "wktFieldCladire", "saveFormCladire", "saveAreaFieldCladire",
     "formParcela", "formCladire",
     "btnEntityParcela", "btnEntityCladire",
-    "panelBody"
+    "panelBody",
+    "cmdInput", "cmdHint",
+    "snapToggle", "orthoToggle",
+    "statusX", "statusY", "statusScale", "statusArea"
   ]
 
   // ── Lifecycle ────────────────────────────────────────────────────────────
@@ -36,6 +40,9 @@ export default class extends Controller {
     this._areaCalc     = 0
     this._areaDebounce = null
     this._entityType   = "parcela"
+    this._snapEnabled  = true
+    this._orthoEnabled = false
+    this._snapModes    = new Set(["endpoint", "midpoint"])
 
     this._drawSource = new ol.source.Vector()
     this._drawLayer  = new ol.layer.Vector({
@@ -43,31 +50,39 @@ export default class extends Controller {
       style:  this._drawStyle.bind(this),
       properties: { name: "digitizare" }
     })
+
+    this._onKeyDown = (evt) => this._handleGlobalKey(evt)
+    document.addEventListener("keydown", this._onKeyDown)
   }
 
-  disconnect() { this._teardown() }
+  disconnect() {
+    document.removeEventListener("keydown", this._onKeyDown)
+    this._teardown()
+  }
 
   hartaMapOutletConnected(outlet) {
     this._hartaMap = outlet
     if (outlet.map) {
       this._attachToMap()
     } else {
-      // harta-map.connect() nu a rulat încă; așteaptă evenimentul "ready"
       outlet.element.addEventListener("harta-map:ready", () => this._attachToMap(), { once: true })
     }
   }
+
+  hartaMapOutletDisconnected() { this._teardown() }
 
   _attachToMap() {
     this.map = this._hartaMap?.map
     if (!this.map) return
     this.map.addLayer(this._drawLayer)
     this._mouseMoveKey = this.map.on("pointermove", (evt) => this._onPointerMove(evt))
+    this._moveEndKey   = this.map.on("moveend",     ()    => this._updateScale())
+    this._updateScale()
   }
-
-  hartaMapOutletDisconnected() { this._teardown() }
 
   _teardown() {
     if (this._mouseMoveKey) ol.Observable.unByKey(this._mouseMoveKey)
+    if (this._moveEndKey)   ol.Observable.unByKey(this._moveEndKey)
     if (this._draw && this.map) this.map.removeInteraction(this._draw)
     if (this._snap && this.map) this.map.removeInteraction(this._snap)
     if (this._drawLayer && this.map) this.map.removeLayer(this._drawLayer)
@@ -76,8 +91,43 @@ export default class extends Controller {
 
   // ── Public actions ───────────────────────────────────────────────────────
 
-  togglePanel() {
-    this.element.classList.toggle("digi-panel--collapsed")
+  togglePanel() { this.element.classList.toggle("digi-panel--collapsed") }
+
+  toggleSnap() {
+    this._snapEnabled = !this._snapEnabled
+    this.snapToggleTarget.classList.toggle("cad-status-toggle--on", this._snapEnabled)
+    if (this._snap) this._snap.setActive(this._snapEnabled)
+    this._setStatus(`SNAP ${this._snapEnabled ? "activ" : "oprit"}.`)
+  }
+
+  toggleOrtho() {
+    this._orthoEnabled = !this._orthoEnabled
+    this.orthoToggleTarget.classList.toggle("cad-status-toggle--on", this._orthoEnabled)
+    this._setStatus(`ORTHO ${this._orthoEnabled ? "activ" : "oprit"}.`)
+  }
+
+  onSnapModeChange(evt) {
+    const mode = evt.target.dataset.snapMode
+    if (evt.target.checked) this._snapModes.add(mode)
+    else this._snapModes.delete(mode)
+    if (this._draw) this._refreshSnap()
+  }
+
+  onCmdKey(evt) {
+    if (evt.key !== "Enter") return
+    evt.preventDefault()
+    const raw = this.cmdInputTarget.value.trim()
+    if (!raw) return
+    this.cmdInputTarget.value = ""
+
+    if (!this._draw) { this._setStatus("Pornește digitizarea înainte să adaugi puncte.", "warn"); return }
+
+    const pt = this._parseCmd(raw)
+    if (!pt) { this._setStatus(`Format invalid: ${raw}`, "warn"); return }
+
+    const mapCoord = ol.proj.transform([pt.x, pt.y], "EPSG:3844", "EPSG:3857")
+    this._draw.appendCoordinates([mapCoord])
+    this._setStatus(`Punct: X=${FMT(pt.x)}  Y=${FMT(pt.y)}`, "ok")
   }
 
   startDrawing() {
@@ -87,21 +137,12 @@ export default class extends Controller {
     this._draw = new ol.interaction.Draw({
       source: this._drawSource,
       type:   "Polygon",
-      style:  this._drawStyle.bind(this)
+      style:  this._drawStyle.bind(this),
+      geometryFunction: this._buildGeometryFunction()
     })
     this.map.addInteraction(this._draw)
 
-    // Snap la features-uri din parcele + cgxml + clădiri (referință pentru aliniere)
-    const refFeatures = new ol.Collection([
-      ...this._hartaMap.parcelLayer.getSource().getFeatures(),
-      ...this._hartaMap.cgxmlLayer.getSource().getFeatures(),
-      ...this._hartaMap.cladiriLayer.getSource().getFeatures()
-    ])
-    this._snap = new ol.interaction.Snap({
-      features:  refFeatures,
-      pixelTolerance: this.snapToleranceValue
-    })
-    this.map.addInteraction(this._snap)
+    this._refreshSnap()
 
     this._draw.on("drawstart", (evt) => this._onDrawStart(evt))
     this._draw.on("drawend",   (evt) => this._onDrawEnd(evt))
@@ -109,15 +150,12 @@ export default class extends Controller {
     this.btnStartTarget.classList.add("btn-active")
     this.btnCloseTarget.disabled = false
     this.btnUndoTarget.disabled  = false
-    this._setStatus("Clic pe hartă pentru primul vertex. Dublu-clic pentru închidere.")
+    this._setStatus("Clic pe hartă pentru primul vertex. Dublu-clic pentru închidere. F8=ORTHO.")
   }
 
   closePolygon() {
-    if (!this._draw) { this._setStatus("Nu este o digitizare activă.", "warn"); return }
-    if (this._verts.length < 3) {
-      this._setStatus("Sunt necesare cel puțin 3 puncte.", "warn")
-      return
-    }
+    if (!this._draw) { this._setStatus("Nu există digitizare activă.", "warn"); return }
+    if (this._verts.length < 3) { this._setStatus("Sunt necesare cel puțin 3 puncte.", "warn"); return }
     this._draw.finishDrawing()
   }
 
@@ -144,6 +182,7 @@ export default class extends Controller {
     this.areaCalcTarget.textContent  = "—"
     this.areaDiffTarget.textContent  = "—"
     this.topologyMsgTarget.textContent = ""
+    if (this.hasStatusAreaTarget) this.statusAreaTarget.textContent = "—"
     this._setStatus("Toți vertecșii au fost șterși.")
   }
 
@@ -152,7 +191,6 @@ export default class extends Controller {
     const y = parseFloat(this.inputYTarget.value)
     if (isNaN(x) || isNaN(y)) { this._setStatus("Coordonate invalide.", "warn"); return }
     if (!this._draw) { this._setStatus("Pornește digitizarea înainte să adaugi puncte.", "warn"); return }
-
     const mapCoord = ol.proj.transform([x, y], "EPSG:3844", "EPSG:3857")
     this._draw.appendCoordinates([mapCoord])
     this.inputXTarget.value = ""
@@ -163,11 +201,7 @@ export default class extends Controller {
   importTxt(event) {
     const file = event.target.files[0]
     if (!file) return
-    if (!this._draw) {
-      this._setStatus("Pornește digitizarea înainte să imporți.", "warn")
-      event.target.value = ""
-      return
-    }
+    if (!this._draw) { this._setStatus("Pornește digitizarea înainte să imporți.", "warn"); event.target.value = ""; return }
     const reader = new FileReader()
     reader.onload = (e) => {
       const pts = this._parseTxt(e.target.result)
@@ -183,7 +217,7 @@ export default class extends Controller {
   toleranceChanged() {
     this.snapToleranceValue = parseInt(this.snapSliderTarget.value)
     this.snapToleranceValTarget.textContent = this.snapToleranceValue
-    if (this._snap) this._snap.pixelTolerance_ = this.snapToleranceValue
+    if (this._draw) this._refreshSnap()
   }
 
   updateDiff() { this._updateDiffDisplay() }
@@ -198,12 +232,9 @@ export default class extends Controller {
       })
       const blob = await res.blob()
       const url  = URL.createObjectURL(blob)
-      const a    = Object.assign(document.createElement("a"), { href: url, download: "parcela.dxf" })
-      a.click()
+      Object.assign(document.createElement("a"), { href: url, download: "parcela.dxf" }).click()
       URL.revokeObjectURL(url)
-    } catch (e) {
-      this._setStatus("Eroare export DXF: " + e.message, "warn")
-    }
+    } catch (e) { this._setStatus("Eroare export DXF: " + e.message, "warn") }
   }
 
   showRaport() {
@@ -243,18 +274,130 @@ export default class extends Controller {
     this.btnEntityParcelaTarget.classList.remove("digi-entity-btn--active")
   }
 
+  // ── Snap multi-mode ──────────────────────────────────────────────────────
+
+  _refreshSnap() {
+    if (!this.map) return
+    if (this._snap) this.map.removeInteraction(this._snap)
+    const features = this._buildSnapFeatures()
+    this._snap = new ol.interaction.Snap({
+      features:       new ol.Collection(features),
+      pixelTolerance: this.snapToleranceValue,
+      vertex:         this._snapModes.has("endpoint") || this._snapModes.has("midpoint") || this._snapModes.has("centroid"),
+      edge:           this._snapModes.has("nearest")
+    })
+    this._snap.setActive(this._snapEnabled)
+    this.map.addInteraction(this._snap)
+  }
+
+  _buildSnapFeatures() {
+    if (!this._hartaMap) return []
+    const out  = []
+    const refs = [this._hartaMap.parcelLayer, this._hartaMap.cgxmlLayer, this._hartaMap.cladiriLayer]
+    const m    = this._snapModes
+    refs.forEach(layer => {
+      layer.getSource().getFeatures().forEach(f => {
+        if (m.has("endpoint") || m.has("nearest")) out.push(f)
+        if (m.has("midpoint")) this._addMidpoints(f, out)
+        if (m.has("centroid")) this._addCentroid(f, out)
+      })
+    })
+    return out
+  }
+
+  _addMidpoints(feature, out) {
+    const geom = feature.getGeometry()
+    if (!geom) return
+    const t = geom.getType()
+    const rings = t === "Polygon"      ? geom.getCoordinates()
+                : t === "MultiPolygon" ? geom.getCoordinates().flat()
+                : []
+    rings.forEach(ring => {
+      for (let i = 0; i < ring.length - 1; i++) {
+        const mx = (ring[i][0] + ring[i + 1][0]) / 2
+        const my = (ring[i][1] + ring[i + 1][1]) / 2
+        out.push(new ol.Feature(new ol.geom.Point([mx, my])))
+      }
+    })
+  }
+
+  _addCentroid(feature, out) {
+    const geom = feature.getGeometry()
+    if (!geom) return
+    const ext = geom.getExtent()
+    const center = ol.extent.getCenter(ext)
+    out.push(new ol.Feature(new ol.geom.Point(center)))
+  }
+
+  // ── Linia de comandă (parser absolut / relativ / polar) ──────────────────
+
+  _parseCmd(raw) {
+    if (raw.startsWith("@")) {
+      if (this._verts.length === 0) return null
+      const last = this._verts[this._verts.length - 1]
+      const rest = raw.slice(1)
+      if (rest.includes("<")) {
+        // Polar: lungime<unghi (grade, 0=N, 90=E, sens orar)
+        const [lenS, angS] = rest.split("<")
+        const len = parseFloat(lenS), ang = parseFloat(angS)
+        if (isNaN(len) || isNaN(ang)) return null
+        const rad = ang * Math.PI / 180
+        return { x: last.x + len * Math.sin(rad), y: last.y + len * Math.cos(rad) }
+      } else {
+        const [dxS, dyS] = rest.replace(/,/g, " ").split(/\s+/)
+        const dx = parseFloat(dxS), dy = parseFloat(dyS)
+        if (isNaN(dx) || isNaN(dy)) return null
+        return { x: last.x + dx, y: last.y + dy }
+      }
+    } else {
+      const parts = raw.replace(/,/g, " ").split(/\s+/).filter(Boolean)
+      if (parts.length < 2) return null
+      const x = parseFloat(parts[0]), y = parseFloat(parts[1])
+      if (isNaN(x) || isNaN(y)) return null
+      return { x, y }
+    }
+  }
+
+  // ── Ortho mode (constrânge desenul la 90°) ───────────────────────────────
+
+  _buildGeometryFunction() {
+    return (coords, geom) => {
+      if (this._orthoEnabled && coords.length >= 2) {
+        const last = coords[coords.length - 1]
+        const prev = coords[coords.length - 2]
+        const dx = Math.abs(last[0] - prev[0])
+        const dy = Math.abs(last[1] - prev[1])
+        coords[coords.length - 1] = dx > dy ? [last[0], prev[1]] : [prev[0], last[1]]
+      }
+      if (!geom) geom = new ol.geom.Polygon([coords])
+      else geom.setCoordinates([coords])
+      return geom
+    }
+  }
+
   // ── Map handlers ─────────────────────────────────────────────────────────
 
   _onPointerMove(evt) {
     const [x, y] = ol.proj.transform(evt.coordinate, "EPSG:3857", "EPSG:3844")
-    this.cursorXTarget.textContent = FMT(x)
-    this.cursorYTarget.textContent = FMT(y)
+    if (this.hasCursorXTarget) this.cursorXTarget.textContent = FMT(x)
+    if (this.hasCursorYTarget) this.cursorYTarget.textContent = FMT(y)
+    if (this.hasStatusXTarget) this.statusXTarget.textContent = FMT(x)
+    if (this.hasStatusYTarget) this.statusYTarget.textContent = FMT(y)
+  }
+
+  _updateScale() {
+    if (!this.map || !this.hasStatusScaleTarget) return
+    const view = this.map.getView()
+    const res  = view.getResolution()
+    const mpu  = view.getProjection().getMetersPerUnit() || 1
+    // Ecran: 96 dpi → 39.37 inch/m
+    const scale = res * mpu * 39.37 * 96
+    this.statusScaleTarget.textContent = scale > 1000 ? Math.round(scale / 100) * 100 : Math.round(scale)
   }
 
   _onDrawStart(evt) {
     this._currentFeature = evt.feature
-    // Geometria se modifică la fiecare clic — extragem vertecșii și recalculăm
-    this._geomChangeKey = this._currentFeature.getGeometry().on("change", (e) => {
+    this._geomChangeKey  = this._currentFeature.getGeometry().on("change", (e) => {
       this._extractVerts(e.target)
       if (this._verts.length >= 3) {
         clearTimeout(this._areaDebounce)
@@ -277,15 +420,27 @@ export default class extends Controller {
   }
 
   _extractVerts(geom) {
-    // Pentru polygon în formare, OL include un "punct curent" care urmărește cursorul
-    // și se duplică la capăt. Eliminăm ultimul punct (= cursor) și ultimul (= primul, închis).
     const ring = geom.getCoordinates()[0] || []
-    const vertices = ring.length > 1 ? ring.slice(0, -1) : ring
-    this._verts = vertices.map((c) => {
+    const verts = ring.length > 1 ? ring.slice(0, -1) : ring
+    this._verts = verts.map((c) => {
       const [x, y] = ol.proj.transform(c, "EPSG:3857", "EPSG:3844")
       return { x, y }
     })
     this._updateVertexList()
+    this._updateLiveArea()
+  }
+
+  _updateLiveArea() {
+    if (!this.hasStatusAreaTarget) return
+    if (this._verts.length < 3) { this.statusAreaTarget.textContent = "—"; return }
+    // Calcul aproximativ Stereo70 (proiecție conformă pe România → suficient pentru live preview)
+    const ring = [...this._verts.map(v => [v.x, v.y]), [this._verts[0].x, this._verts[0].y]]
+    let area = 0
+    for (let i = 0; i < ring.length - 1; i++) {
+      area += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1]
+    }
+    area = Math.abs(area) / 2
+    this.statusAreaTarget.textContent = `${FMT2(area)} mp`
   }
 
   _drawStyle(_feature) {
@@ -300,7 +455,7 @@ export default class extends Controller {
     })
   }
 
-  // ── Locate UAT (autofill județ/localitate) ───────────────────────────────
+  // ── Locate UAT ───────────────────────────────────────────────────────────
 
   async _locateUat() {
     if (!this.locateUatUrlValue || this._verts.length < 3) return
@@ -312,12 +467,9 @@ export default class extends Controller {
       })
       const data = await res.json()
       if (!data.judet) return
-
       this.element.querySelectorAll('[data-siruta-target="judetInput"]').forEach(el => this._flashFill(el, data.judet))
       this.element.querySelectorAll('[data-siruta-target="localitateInput"]').forEach(el => this._flashFill(el, data.localitate))
-    } catch (e) {
-      console.warn("Locate UAT error:", e)
-    }
+    } catch (e) { console.warn("Locate UAT error:", e) }
   }
 
   _flashFill(input, value) {
@@ -333,18 +485,13 @@ export default class extends Controller {
     tbody.innerHTML = ""
     this._verts.forEach((v, i) => {
       const tr = document.createElement("tr")
-      tr.innerHTML = `
-        <td class="vt-no">${i + 1}</td>
-        <td class="vt-coord">${FMT(v.x)}</td>
-        <td class="vt-coord">${FMT(v.y)}</td>
-        <td></td>
-      `
+      tr.innerHTML = `<td class="vt-no">${i + 1}</td><td class="vt-coord">${FMT(v.x)}</td><td class="vt-coord">${FMT(v.y)}</td><td></td>`
       tbody.appendChild(tr)
     })
     this.vertexCountTarget.textContent = this._verts.length
   }
 
-  // ── Area calculation ─────────────────────────────────────────────────────
+  // ── Area calc + diferență ────────────────────────────────────────────────
 
   async _calcArea() {
     if (this._verts.length < 3) return
@@ -357,16 +504,12 @@ export default class extends Controller {
       const data = await res.json()
       this._areaCalc = data.suprafata || 0
       this.areaCalcTarget.textContent = this._areaCalc > 0 ? `${FMT2(this._areaCalc)} mp` : "—"
-
       const msgs = []
       if (data.is_valid  === false) msgs.push("⚠ Poligon invalid (auto-intersecție)")
       if (data.is_simple === false) msgs.push("⚠ Poligon non-simplu")
       this.topologyMsgTarget.innerHTML = msgs.map(m => `<span class="topo-warn">${m}</span>`).join("")
-
       this._updateDiffDisplay()
-    } catch (e) {
-      console.warn("Eroare calcul suprafață:", e)
-    }
+    } catch (e) { console.warn("Eroare calcul suprafață:", e) }
   }
 
   _updateDiffDisplay() {
@@ -411,7 +554,6 @@ export default class extends Controller {
     const act  = parseFloat(this.areaActTarget.value) || 0
     const calc = this._areaCalc
     const pct  = act ? (((calc - act) / act) * 100).toFixed(2) : "—"
-
     return `<!DOCTYPE html><html lang="ro"><head>
       <meta charset="UTF-8"><title>Raport Digitizare</title>
       <style>
@@ -421,29 +563,26 @@ export default class extends Controller {
         table{width:100%;border-collapse:collapse;margin-top:8px}
         th{background:#f3f4f6;padding:6px 10px;text-align:left;font-size:12px}
         td{padding:5px 10px;border-bottom:1px solid #e5e7eb;font-family:monospace}
-        .summary{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
-        .sum-box{border:1px solid #e5e7eb;border-radius:6px;padding:10px}
-        .sum-val{font-size:20px;font-weight:700;color:#1d4ed8}
-        .diff-ok{color:#16a34a} .diff-warn{color:#d97706} .diff-bad{color:#dc2626}
-      </style>
-    </head><body>
+      </style></head><body>
       <h1>Raport Digitizare Parcelă Cadastrală</h1>
       <p>Generat: ${new Date().toLocaleString("ro-RO")} | Proiecție: Stereo 70 (EPSG:3844)</p>
       <h2>Coordonate vertecși</h2>
-      <table>
-        <thead><tr><th>#</th><th>X — Est (m)</th><th>Y — Nord (m)</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <table><thead><tr><th>#</th><th>X — Est (m)</th><th>Y — Nord (m)</th></tr></thead><tbody>${rows}</tbody></table>
       <h2>Suprafețe</h2>
-      <div class="summary">
-        <div class="sum-box"><div style="color:#6b7280;font-size:11px">CALCULATĂ (PostGIS)</div><div class="sum-val">${FMT2(calc)} mp</div></div>
-        <div class="sum-box"><div style="color:#6b7280;font-size:11px">DIN ACT</div><div class="sum-val">${act ? FMT2(act) + " mp" : "—"}</div></div>
-        <div class="sum-box"><div style="color:#6b7280;font-size:11px">DIFERENȚĂ</div><div class="sum-val ${Math.abs(parseFloat(pct)) <= 3 ? 'diff-ok' : Math.abs(parseFloat(pct)) <= 10 ? 'diff-warn' : 'diff-bad'}">${pct !== "—" ? (parseFloat(pct) >= 0 ? "+" : "") + pct + "%" : "—"}</div></div>
-        <div class="sum-box"><div style="color:#6b7280;font-size:11px">NR. VERTECȘI</div><div class="sum-val">${this._verts.length}</div></div>
-      </div>
+      <p>Calculată (PostGIS): <b>${FMT2(calc)} mp</b> | Din act: <b>${act ? FMT2(act) + " mp" : "—"}</b> | Diferență: <b>${pct !== "—" ? (parseFloat(pct) >= 0 ? "+" : "") + pct + "%" : "—"}</b></p>
       <h2>WKT (Stereo 70)</h2>
       <pre style="font-size:10px;background:#f8fafc;padding:10px;overflow:auto;word-break:break-all">${this._buildWkt()}</pre>
     </body></html>`
+  }
+
+  // ── Keyboard shortcuts ───────────────────────────────────────────────────
+
+  _handleGlobalKey(evt) {
+    const tag = evt.target.tagName
+    if (tag === "INPUT" || tag === "TEXTAREA") return
+    if (evt.key === "F3") { evt.preventDefault(); this.toggleSnap() }
+    if (evt.key === "F8") { evt.preventDefault(); this.toggleOrtho() }
+    if (evt.key === "Escape" && this._draw) { evt.preventDefault(); this.clearAll() }
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -453,7 +592,5 @@ export default class extends Controller {
     this.statusBarTarget.className   = `digi-status digi-status-${type}`
   }
 
-  _csrf() {
-    return document.querySelector('[name="csrf-token"]')?.content ?? ""
-  }
+  _csrf() { return document.querySelector('[name="csrf-token"]')?.content ?? "" }
 }

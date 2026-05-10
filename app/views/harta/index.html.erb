@@ -95,14 +95,46 @@
     <%= link_to "Listă parcele", parcele_cadastrale_path, class: "btn btn-secondary btn-sm sidebar-link" %>
   </aside>
 
-  <!-- ── Hartă (centru) ──────────────────────────────────────────────────── -->
-  <div id="harta-map"
-       data-controller="harta-map"
-       data-harta-map-geojson-url-value="<%= geojson_parcele_cadastrale_path(params.permit(:q, :status, :judet, :categoria_folosinta)) %>"
-       data-harta-map-cgxml-geojson-url-value="<%= cgxml_geojson_harta_path %>"
-       data-harta-map-cladiri-url-value="<%= geojson_cladiri_cadastrale_index_path %>"
-       data-harta-map-uat-url-value="<%= uat_boundaries_geojson_path %>"
-       data-harta-map-mapproxy-url-value="http://localhost:8080">
+  <!-- ── Zona hartă (centru): hartă + linia de comandă + status bar ───────── -->
+  <div class="harta-center">
+    <div id="harta-map"
+         data-controller="harta-map"
+         data-harta-map-geojson-url-value="<%= geojson_parcele_cadastrale_path(params.permit(:q, :status, :judet, :categoria_folosinta)) %>"
+         data-harta-map-cgxml-geojson-url-value="<%= cgxml_geojson_harta_path %>"
+         data-harta-map-cladiri-url-value="<%= geojson_cladiri_cadastrale_index_path %>"
+         data-harta-map-uat-url-value="<%= uat_boundaries_geojson_path %>"
+         data-harta-map-mapproxy-url-value="http://localhost:8080">
+    </div>
+
+    <!-- Linia de comandă (stil AutoCAD) — input absolut / relativ / polar -->
+    <div class="cad-cmdline">
+      <span class="cad-cmdline-prompt">&gt;</span>
+      <input type="text" class="cad-cmdline-input"
+             data-digitizare-target="cmdInput"
+             data-action="keydown->digitizare#onCmdKey"
+             placeholder="X,Y  sau  @ΔX,ΔY  sau  @lungime&lt;unghi  (Enter)">
+      <span class="cad-cmdline-hint" data-digitizare-target="cmdHint">Stereo70 (EPSG:3844)</span>
+    </div>
+
+    <!-- Status bar (stil AutoCAD) — toggle-uri SNAP/ORTHO + coords + scară + suprafață -->
+    <div class="cad-statusbar">
+      <button type="button" class="cad-status-toggle cad-status-toggle--on"
+              data-digitizare-target="snapToggle"
+              data-action="click->digitizare#toggleSnap"
+              title="SNAP — comutare prin tastatură: F3">SNAP</button>
+      <button type="button" class="cad-status-toggle"
+              data-digitizare-target="orthoToggle"
+              data-action="click->digitizare#toggleOrtho"
+              title="ORTHO — comutare prin tastatură: F8">ORTHO</button>
+      <span class="cad-status-divider">│</span>
+      <span class="cad-status-coord">X: <span data-digitizare-target="statusX">—</span></span>
+      <span class="cad-status-coord">Y: <span data-digitizare-target="statusY">—</span></span>
+      <span class="cad-status-divider">│</span>
+      <span class="cad-status-meta">Stereo70</span>
+      <span class="cad-status-meta">Scară 1:<span data-digitizare-target="statusScale">—</span></span>
+      <span class="cad-status-divider">│</span>
+      <span class="cad-status-meta">Suprafață: <span data-digitizare-target="statusArea">—</span></span>
+    </div>
   </div>
 
   <!-- ── Panou Digitizare (dreapta, pliabil) ─────────────────────────────── -->
@@ -152,6 +184,28 @@
                    data-digitizare-target="snapSlider"
                    data-action="input->digitizare#toleranceChanged">
             <span data-digitizare-target="snapToleranceVal">15</span> px
+          </label>
+        </div>
+        <div class="digi-snap-modes" data-digitizare-target="snapModes">
+          <label class="digi-snap-mode">
+            <input type="checkbox" data-snap-mode="endpoint" checked
+                   data-action="change->digitizare#onSnapModeChange">
+            <span>ENDP</span>
+          </label>
+          <label class="digi-snap-mode">
+            <input type="checkbox" data-snap-mode="midpoint" checked
+                   data-action="change->digitizare#onSnapModeChange">
+            <span>MID</span>
+          </label>
+          <label class="digi-snap-mode">
+            <input type="checkbox" data-snap-mode="nearest"
+                   data-action="change->digitizare#onSnapModeChange">
+            <span>NEAR</span>
+          </label>
+          <label class="digi-snap-mode">
+            <input type="checkbox" data-snap-mode="centroid"
+                   data-action="change->digitizare#onSnapModeChange">
+            <span>CEN</span>
           </label>
         </div>
       </section>

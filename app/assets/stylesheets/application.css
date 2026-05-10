@@ -229,10 +229,116 @@ legend { font-size: 13px; font-weight: 700; color: #374151; padding: 0 6px; }
 .sidebar-link { margin-top: auto; }
 .input-sm { padding: 5px 8px; font-size: 12px; width: 100%; }
 
+/* ── Centru: hartă + linia de comandă + status bar ── */
+.harta-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+}
 #harta-map {
   flex: 1;
-  height: 100%;
+  min-height: 0;
   z-index: 1;
+}
+
+/* ── Linia de comandă (AutoCAD-style) ── */
+.cad-cmdline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1e293b;
+  color: #e2e8f0;
+  padding: 6px 12px;
+  border-top: 1px solid #334155;
+  font-family: monospace;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.cad-cmdline-prompt { color: #38bdf8; font-weight: 700; }
+.cad-cmdline-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e2e8f0;
+  font-family: inherit;
+  font-size: 12px;
+  padding: 2px 0;
+}
+.cad-cmdline-input::placeholder { color: #64748b; }
+.cad-cmdline-hint { color: #64748b; font-size: 11px; }
+
+/* ── Status bar (AutoCAD-style) ── */
+.cad-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #0f172a;
+  color: #cbd5e1;
+  padding: 4px 12px;
+  border-top: 1px solid #1e293b;
+  font-size: 11px;
+  font-family: monospace;
+  flex-shrink: 0;
+  height: 26px;
+}
+.cad-status-toggle {
+  background: transparent;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.cad-status-toggle:hover { background: #1e293b; color: #e2e8f0; }
+.cad-status-toggle--on {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+  color: #fff;
+}
+.cad-status-toggle--on:hover { background: #1e40af; }
+.cad-status-divider { color: #334155; }
+.cad-status-coord {
+  color: #fbbf24;
+  font-weight: 700;
+}
+.cad-status-coord span { display: inline-block; min-width: 80px; text-align: right; }
+.cad-status-meta { color: #94a3b8; }
+.cad-status-meta span { color: #e2e8f0; font-weight: 700; }
+
+/* ── Digitizare — moduri snap (subset AutoCAD-style chips) ── */
+.digi-snap-modes {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.digi-snap-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #6b7280;
+  cursor: pointer;
+  background: #fff;
+  transition: all 0.15s;
+}
+.digi-snap-mode input { margin: 0; accent-color: #1d4ed8; }
+.digi-snap-mode:has(input:checked) {
+  background: #eff6ff;
+  border-color: #1d4ed8;
+  color: #1d4ed8;
 }
 
 /* ── Panou layere (sidebar stâng) ── */
