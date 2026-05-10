@@ -59,17 +59,27 @@ export default class extends Controller {
       proj4.defs("EPSG:3844", STEREO70)
     }
     if (ol.proj?.proj4) ol.proj.proj4.register(proj4)
+    // Setăm extent-ul real al Stereo 70 pentru România ca OL să poată face
+    // reproject corect al tile-urilor 3857 (OSM, Ortofotoplan) în view 3844.
+    const proj = ol.proj.get("EPSG:3844")
+    if (proj && !proj.getExtent()) {
+      proj.setExtent([120000, 250000, 900000, 800000])
+    }
   }
 
   _buildMap() {
+    // VIEW în Stereo 70 — toate coordonatele cursor / vertecși sunt direct în
+    // EPSG:3844 (metri reali România), fără round-trip prin Web Mercator.
+    // Tile-urile OSM/Ortofotoplan sunt în 3857; OL le reproject automat pe-ndelete.
     this.map = new ol.Map({
       target: this.element,
       controls: ol.control.defaults.defaults({ attribution: true, zoom: true }),
       view: new ol.View({
-        center: ol.proj.fromLonLat([24.9, 45.75]),
-        zoom: 7,
-        minZoom: 4,
-        maxZoom: 22
+        projection: "EPSG:3844",
+        center:     [500000, 500000],  // aprox. centru România în Stereo70
+        zoom:       2,
+        minZoom:    -2,
+        maxZoom:    18
       })
     })
   }
@@ -339,7 +349,9 @@ export default class extends Controller {
     const extent = layer.getSource().getExtent()
     const cx = (extent[0] + extent[2]) / 2
     const cy = (extent[1] + extent[3]) / 2
-    const [lng, lat] = ol.proj.toLonLat([cx, cy])
+    // Centroid e în EPSG:3844 (Stereo 70). Transform doar pentru parametrii
+    // endpoint-ului UAT care lucrează în lat/lng.
+    const [lng, lat] = ol.proj.transform([cx, cy], "EPSG:3844", "EPSG:4326")
     try {
       const res  = await fetch(`${this.uatUrlValue}?lat=${lat}&lng=${lng}`)
       const data = await res.json()
@@ -353,9 +365,11 @@ export default class extends Controller {
   // ── Utilitare ─────────────────────────────────────────────────────────────
 
   _addGeoJSON(layer, data) {
+    // GeoJSON din server vine în EPSG:4326; îl convertim la projection-ul
+    // view-ului (EPSG:3844) ca features-urile să fie nativ în Stereo 70.
     const features = new ol.format.GeoJSON().readFeatures(data, {
       dataProjection:    "EPSG:4326",
-      featureProjection: "EPSG:3857"
+      featureProjection: "EPSG:3844"
     })
     layer.getSource().addFeatures(features)
   }

@@ -177,14 +177,12 @@ export default class extends Controller {
       return
     }
 
-    const mapCoord = ol.proj.transform([pt.x, pt.y], "EPSG:3844", "EPSG:3857")
+    const mapCoord = [pt.x, pt.y]  // direct în Stereo 70 (view e EPSG:3844)
     try {
       this._draw.appendCoordinates([mapCoord])
-      // Pan automat dacă punctul cade în afara viewport-ului (frecvent la primul
-      // vertex când utilizatorul tastează coords absolute fără să zoom-eze pe zonă)
       const view = this.map.getView()
       if (!ol.extent.containsCoordinate(view.calculateExtent(this.map.getSize()), mapCoord)) {
-        view.animate({ center: mapCoord, zoom: Math.max(view.getZoom() || 0, 17), duration: 250 })
+        view.animate({ center: mapCoord, zoom: Math.max(view.getZoom() || 0, 6), duration: 250 })
       }
       this._cmdHint(`✓ Punct: X=${FMT(pt.x)}  Y=${FMT(pt.y)}`, false)
     } catch (e) {
@@ -273,8 +271,7 @@ export default class extends Controller {
     const y = parseFloat(this.inputYTarget.value)
     if (isNaN(x) || isNaN(y)) { this._setStatus("Coordonate invalide.", "warn"); return }
     if (!this._draw) { this._setStatus("Pornește digitizarea înainte să adaugi puncte.", "warn"); return }
-    const mapCoord = ol.proj.transform([x, y], "EPSG:3844", "EPSG:3857")
-    this._draw.appendCoordinates([mapCoord])
+    this._draw.appendCoordinates([[x, y]])  // direct în Stereo 70
     this.inputXTarget.value = ""
     this.inputYTarget.value = ""
     this.inputXTarget.focus()
@@ -288,8 +285,7 @@ export default class extends Controller {
     reader.onload = (e) => {
       const pts = this._parseTxt(e.target.result)
       if (!pts.length) { this._setStatus("Fișier TXT fără date valide.", "warn"); return }
-      const mapCoords = pts.map(({ x, y }) => ol.proj.transform([x, y], "EPSG:3844", "EPSG:3857"))
-      this._draw.appendCoordinates(mapCoords)
+      this._draw.appendCoordinates(pts.map(({ x, y }) => [x, y]))  // direct în Stereo 70
       this._setStatus(`${pts.length} puncte importate din ${file.name}.`, "ok")
       event.target.value = ""
     }
@@ -518,7 +514,8 @@ export default class extends Controller {
   // ── Map handlers ─────────────────────────────────────────────────────────
 
   _onPointerMove(evt) {
-    const [x, y] = ol.proj.transform(evt.coordinate, "EPSG:3857", "EPSG:3844")
+    // View-ul OL e în EPSG:3844 → evt.coordinate e DIRECT în Stereo 70 (m), fără transform.
+    const [x, y] = evt.coordinate
     this._cursorStereo = { x, y }
     if (this.hasStatusXTarget) this.statusXTarget.textContent = FMT(x)
     if (this.hasStatusYTarget) this.statusYTarget.textContent = FMT(y)
@@ -571,10 +568,8 @@ export default class extends Controller {
     let actual = ring.length > 1 ? ring.slice(0, -1) : ring
     if (this._draw && actual.length > 1) actual = actual.slice(0, -1)
 
-    this._verts = actual.map((c) => {
-      const [x, y] = ol.proj.transform(c, "EPSG:3857", "EPSG:3844")
-      return { x, y }
-    })
+    // Coords ring sunt deja în EPSG:3844 (view-ul e în Stereo 70), zero round-trip.
+    this._verts = actual.map((c) => ({ x: c[0], y: c[1] }))
     // Pesimist: fiecare modificare geometrică invalidează rezultatul anterior
     // de validare. _calcArea + _verifyTopology vor seta valorile la răspunsul PostGIS.
     this._polygonValid      = false
@@ -717,7 +712,7 @@ export default class extends Controller {
       try {
         const feat = fmt.readFeature(issue.geojson, {
           dataProjection:    "EPSG:4326",
-          featureProjection: "EPSG:3857"
+          featureProjection: "EPSG:3844"
         })
         feat.set("severity", issue.severity)
         feat.set("issueType", issue.type)

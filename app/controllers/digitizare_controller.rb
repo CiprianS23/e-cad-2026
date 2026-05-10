@@ -10,19 +10,38 @@ class DigitizareController < ApplicationController
     ring += ", #{pts.first[0]} #{pts.first[1]}" unless pts.first == pts.last
     wkt  = "POLYGON((#{ring}))"
 
-    overlap_min   = 0.01  # mp — sub acest prag = noise rotunjire
-    sliver_max_mp = 1.00  # mp — gap < 1 mp = sliver flag
-    sliver_dist   = 1.00  # m  — distanță maximă "near"
+    # Toleranțe (în metri Stereo70). Clientul lucrează nativ în EPSG:3844,
+    # deci nu mai există erori de round-trip prin Web Mercator. Snap rezidual
+    # mic doar pentru floating-point noise.
+    snap_tol      = 0.05  # m  — 5cm, conform spec snap_tolerance
+    overlap_min   = 0.10  # mp — conform spec sliver_threshold
+    sliver_max_mp = 1.00  # mp
+    sliver_dist   = 1.00  # m
 
     issues = []
 
     # ── Suprapuneri (overlap) cu același tip de entitate ──────────────────
-    # parcele vs parcele = eroare; clădiri vs clădiri = eroare; parcele vs clădiri = OK
+    # Aplicăm ST_Snap înainte de check ca să eliminăm false-pozitive cauzate
+    # de precizie sub-cm (vertecși snap-uiti pe vecin în client, dar shifți
+    # cu cm/dm după conversia 3857 ↔ 3844).
     overlap_target = entity == "cladire" ? ["cladire", "cladiri_cadastrale"] : ["parcela", "parcele_cadastrale"]
     kind, table = overlap_target
     excl = exclude_id || 0
-    overlap_sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt, excl, overlap_min])
-      WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom)
+    overlap_sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt, snap_tol, snap_tol, excl, overlap_min])
+      WITH np_orig AS (SELECT ST_GeomFromText(?, 3844) AS geom),
+           ref AS (
+             SELECT ST_Collect(t.geom) AS geom
+             FROM #{table} t, np_orig
+             WHERE t.geom IS NOT NULL
+               AND ST_DWithin(t.geom, np_orig.geom, ?)
+           ),
+           np AS (
+             SELECT CASE WHEN ref.geom IS NOT NULL
+                          THEN ST_MakeValid(ST_Snap(np_orig.geom, ref.geom, ?))
+                          ELSE np_orig.geom
+                    END AS geom
+             FROM np_orig, ref
+           )
       SELECT t.id, t.numar_cadastral AS label,
         ST_Area(ST_Intersection(t.geom, np.geom)) AS area,
         ST_AsGeoJSON(ST_Transform(ST_Intersection(t.geom, np.geom), 4326), 6) AS geojson
