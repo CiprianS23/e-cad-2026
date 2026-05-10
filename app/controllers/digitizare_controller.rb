@@ -208,8 +208,14 @@ class DigitizareController < ApplicationController
     render json: { issues: [], error: e.message }, status: :unprocessable_entity
   end
 
-  # Salvare topology-aware: actualizează simultan poligonul primar + vecinii
-  # care au fost modificați în edit mode (toate într-o tranzacție).
+  # Salvare topology-aware în 2 faze:
+  #   Faza 1: scriem toate geometriile în DB cu save(validate: false). Astfel
+  #           DB reflectă starea finală a tuturor poligoanelor înainte de
+  #           orice verificare.
+  #   Faza 2: rulăm validatorii pe fiecare. Acum overlap se calculează între
+  #           geometriile NEW (toate sunt în DB), nu între NEW și OLD →
+  #           fără fals-pozitive.
+  #   Dacă oricare validare eșuează în Faza 2, ROLLBACK întreaga tranzacție.
   def save_batch
     primary   = params[:primary]
     neighbors = params[:neighbors] || []
@@ -219,13 +225,24 @@ class DigitizareController < ApplicationController
     redirect_url = nil
 
     ActiveRecord::Base.transaction do
-      saved = update_one(primary, errors)
+      records = []
+
+      # ── Faza 1: assign + save fără validări ──────────────────────────
+      [primary, *neighbors].each do |payload|
+        record = phase1_save(payload, errors)
+        records << record if record
+      end
       raise ActiveRecord::Rollback if errors.any?
 
-      neighbors.each do |n|
-        update_one(n, errors)
-        raise ActiveRecord::Rollback if errors.any?
+      # ── Faza 2: validate cu DB în starea finală ───────────────────────
+      records.each do |r|
+        r.reload
+        next if r.valid?
+        kind  = r.is_a?(CladireCadastrala) ? "cladire" : "parcela"
+        label = r.respond_to?(:numar_cadastral) ? r.numar_cadastral : r.id
+        r.errors.full_messages.each { |m| errors << "#{kind} #{label}: #{m}" }
       end
+      raise ActiveRecord::Rollback if errors.any?
 
       kind = primary[:kind] || primary["kind"]
       id   = primary[:id]   || primary["id"]
@@ -347,9 +364,10 @@ class DigitizareController < ApplicationController
 
   private
 
-  # Helper pentru save_batch — actualizează un poligon (parcelă sau clădire)
-  # cu noul WKT + suprafață. Adaugă mesajele de eroare la array-ul `errors`.
-  def update_one(payload, errors)
+  # Faza 1 a save_batch: assign atribute + save FĂRĂ validări.
+  # Triggerează manual conversia WKT → geom (atribuie_geom_din_wkt e
+  # before_validation, deci save(validate: false) o sare).
+  def phase1_save(payload, errors)
     kind = payload[:kind] || payload["kind"]
     id   = payload[:id]   || payload["id"]
     wkt  = payload[:geom_wkt] || payload["geom_wkt"]
@@ -361,13 +379,25 @@ class DigitizareController < ApplicationController
       errors << "#{kind} ##{id}: nu există"
       return nil
     end
-    attrs = { geom_wkt: wkt }
-    if area.present?
-      attrs[kind == "cladire" ? :suprafata_construita_mp : :suprafata_mp] = area
+
+    # Setăm WKT și triggerăm conversia manual (callback before_validation)
+    record.geom_wkt = wkt if wkt.present?
+    record.send(:atribuie_geom_din_wkt) if record.respond_to?(:atribuie_geom_din_wkt, true) && wkt.present?
+
+    # Pentru clădire, refacem și legătura cu parcela din noul geom (recalc spațial)
+    if record.is_a?(CladireCadastrala) && record.geom.present?
+      record.parcela_cadastrala_id = nil  # forțăm recalcul
+      record.send(:atribuie_parcela_din_geom)
     end
-    unless record.update(attrs)
+
+    if area.present?
+      record[kind == "cladire" ? :suprafata_construita_mp : :suprafata_mp] = area
+    end
+
+    unless record.save(validate: false)
       label = record.respond_to?(:numar_cadastral) ? record.numar_cadastral : id
-      record.errors.full_messages.each { |m| errors << "#{kind} #{label}: #{m}" }
+      errors << "#{kind} #{label}: salvare DB eșuată"
+      return nil
     end
     record
   end
