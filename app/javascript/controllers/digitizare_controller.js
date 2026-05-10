@@ -570,9 +570,18 @@ export default class extends Controller {
   }
 
   _extractVerts(geom) {
-    const ring = geom.getCoordinates()[0] || []
+    // Suport pentru ambele tipuri de geometrii:
+    // - Polygon (la digitizare nouă):   getCoordinates() = [ring, hole?...]
+    // - MultiPolygon (la edit din DB):  getCoordinates() = [[ring, hole?...], [...], ...]
+    const type = geom.getType()
+    let ring = []
+    if (type === "MultiPolygon") {
+      ring = geom.getCoordinates()[0]?.[0] || []
+    } else if (type === "Polygon") {
+      ring = geom.getCoordinates()[0] || []
+    }
     // Format ring în timpul desenării: [v1, v2, ..., vN, cursor, v1]
-    // Format după finishDrawing:        [v1, v2, ..., vN, v1]
+    // Format după finishDrawing / din DB: [v1, v2, ..., vN, v1]
     // Eliminăm întotdeauna ultimul (closing duplicate); dacă desenarea e activă
     // mai eliminăm încă unul (cursor live) ca să rămână doar vertecșii confirmați.
     let actual = ring.length > 1 ? ring.slice(0, -1) : ring
