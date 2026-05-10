@@ -3,6 +3,7 @@
 <% content_for :fullpage, true %>
 
 <div class="harta-page">
+  <!-- ── Sidebar stânga: filtre + legendă ────────────────────────────────── -->
   <aside class="harta-sidebar">
     <div class="sidebar-header">
       <h2>Parcele Cadastrale</h2>
@@ -17,6 +18,52 @@
               {}, { class: "input input-sm", data: { action: "change->harta-map#reloadParcele" } } %>
         <%= f.submit "Filtrează", class: "btn btn-sm" %>
       <% end %>
+    </div>
+
+    <div class="layer-panel"
+         data-controller="layer-switcher"
+         data-layer-switcher-harta-map-outlet="#harta-map">
+      <h3>Hartă de bază</h3>
+      <div class="layer-group">
+        <label class="layer-radio">
+          <input type="radio" name="base-layer" value="osm" checked
+                 data-action="change->layer-switcher#selectBase">
+          <span>OpenStreetMap</span>
+        </label>
+        <label class="layer-radio">
+          <input type="radio" name="base-layer" value="ortofotoplan"
+                 data-action="change->layer-switcher#selectBase">
+          <span>Ortofotoplan (ANCPI)</span>
+        </label>
+      </div>
+
+      <h3>Straturi vectoriale</h3>
+      <div class="layer-group">
+        <label class="layer-check">
+          <input type="checkbox" data-overlay="uat" checked
+                 data-action="change->layer-switcher#toggleOverlay">
+          <span class="layer-swatch layer-swatch--uat"></span>
+          <span>Limite UAT</span>
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-overlay="parcele" checked
+                 data-action="change->layer-switcher#toggleOverlay">
+          <span class="layer-swatch layer-swatch--parcele"></span>
+          <span>Parcele cadastrale</span>
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-overlay="cladiri" checked
+                 data-action="change->layer-switcher#toggleOverlay">
+          <span class="layer-swatch layer-swatch--cladiri"></span>
+          <span>Clădiri cadastrale</span>
+        </label>
+        <label class="layer-check">
+          <input type="checkbox" data-overlay="cgxml" checked
+                 data-action="change->layer-switcher#toggleOverlay">
+          <span class="layer-swatch layer-swatch--cgxml"></span>
+          <span>Imobile CGXML</span>
+        </label>
+      </div>
     </div>
 
     <div class="legenda">
@@ -48,6 +95,7 @@
     <%= link_to "Listă parcele", parcele_cadastrale_path, class: "btn btn-secondary btn-sm sidebar-link" %>
   </aside>
 
+  <!-- ── Hartă (centru) ──────────────────────────────────────────────────── -->
   <div id="harta-map"
        data-controller="harta-map"
        data-harta-map-geojson-url-value="<%= geojson_parcele_cadastrale_path(params.permit(:q, :status, :judet, :categoria_folosinta)) %>"
@@ -56,4 +104,282 @@
        data-harta-map-uat-url-value="<%= uat_boundaries_geojson_path %>"
        data-harta-map-mapproxy-url-value="http://localhost:8080">
   </div>
+
+  <!-- ── Panou Digitizare (dreapta, pliabil) ─────────────────────────────── -->
+  <aside class="digi-panel digi-panel--collapsed"
+         data-controller="digitizare"
+         data-digitizare-harta-map-outlet="#harta-map"
+         data-digitizare-calc-url-value="<%= digitizare_calculeaza_path %>"
+         data-digitizare-export-dxf-url-value="<%= digitizare_export_dxf_path %>"
+         data-digitizare-locate-uat-url-value="<%= digitizare_locate_uat_path %>"
+         data-digitizare-snap-tolerance-value="15">
+
+    <!-- Toggle bar (vizibil mereu) -->
+    <button type="button" class="digi-panel-toggle"
+            data-action="click->digitizare#togglePanel"
+            title="Deschide / Închide Digitizare">
+      <span class="digi-panel-toggle-icon">✏</span>
+      <span class="digi-panel-toggle-label">Digitizare</span>
+    </button>
+
+    <!-- Conținutul (vizibil când e deschis) -->
+    <div class="digi-panel-body" data-digitizare-target="panelBody">
+
+      <div class="digi-sidebar-header">
+        <span class="digi-title">Digitizare Cadastrală</span>
+        <span class="badge badge-info" style="font-size:10px">Stereo 70</span>
+      </div>
+
+      <!-- 1. Coordonate cursor + snap -->
+      <section class="digi-section">
+        <div class="digi-section-label">Coordonate cursor</div>
+        <div class="digi-coords-row">
+          <div class="digi-coord-box">
+            <span class="digi-coord-label">X (E)</span>
+            <span class="digi-coord-val" data-digitizare-target="cursorX">—</span>
+          </div>
+          <div class="digi-coord-box">
+            <span class="digi-coord-label">Y (N)</span>
+            <span class="digi-coord-val" data-digitizare-target="cursorY">—</span>
+          </div>
+        </div>
+        <div class="digi-snap-row">
+          <span class="snap-dot" data-digitizare-target="snapDot" title="Snap inactiv"></span>
+          <span class="snap-label" data-digitizare-target="snapLabel">Snap: în așteptare</span>
+          <label class="snap-tol-label">
+            Toleranță
+            <input type="range" min="5" max="50" value="15" class="snap-slider"
+                   data-digitizare-target="snapSlider"
+                   data-action="input->digitizare#toleranceChanged">
+            <span data-digitizare-target="snapToleranceVal">15</span> px
+          </label>
+        </div>
+      </section>
+
+      <!-- 2. Acțiuni -->
+      <section class="digi-section">
+        <div class="digi-section-label">Acțiuni</div>
+        <div class="digi-btn-row">
+          <button class="btn btn-primary btn-sm"
+                  data-digitizare-target="btnStart"
+                  data-action="click->digitizare#startDrawing">
+            ✏ Digitizare
+          </button>
+          <button class="btn btn-secondary btn-sm"
+                  data-digitizare-target="btnClose"
+                  data-action="click->digitizare#closePolygon"
+                  disabled>
+            ⬡ Închide
+          </button>
+          <button class="btn btn-secondary btn-sm"
+                  data-action="click->digitizare#undoVertex"
+                  disabled
+                  data-digitizare-target="btnUndo">
+            ↩ Undo
+          </button>
+          <button class="btn btn-outline btn-sm"
+                  data-action="click->digitizare#clearAll">
+            ✕ Șterge tot
+          </button>
+        </div>
+        <div class="digi-status" data-digitizare-target="statusBar">
+          Apăsați „Digitizare" pentru a începe.
+        </div>
+      </section>
+
+      <!-- 3. Vertecși -->
+      <section class="digi-section digi-section-flex">
+        <div class="digi-section-label">
+          Vertecși
+          <span class="badge badge-secondary" data-digitizare-target="vertexCount">0</span>
+        </div>
+        <div class="digi-vertex-scroll">
+          <table class="digi-vertex-table">
+            <thead>
+              <tr><th>#</th><th>X (m)</th><th>Y (m)</th><th></th></tr>
+            </thead>
+            <tbody data-digitizare-target="vertexTbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 4. Input manual / import TXT -->
+      <section class="digi-section">
+        <div class="digi-section-label">Adaugă coordonate</div>
+        <div class="digi-manual-row">
+          <input type="number" step="0.001" placeholder="X (E)" class="input input-sm digi-coord-input"
+                 data-digitizare-target="inputX">
+          <input type="number" step="0.001" placeholder="Y (N)" class="input input-sm digi-coord-input"
+                 data-digitizare-target="inputY">
+          <button class="btn btn-secondary btn-sm"
+                  data-action="click->digitizare#addManualPoint">+ Adaugă</button>
+        </div>
+        <label class="digi-import-label">
+          <input type="file" accept=".txt,.csv" class="digi-file-input"
+                 data-action="change->digitizare#importTxt">
+          📄 Import TXT stație totală
+        </label>
+      </section>
+
+      <!-- 5. Suprafață -->
+      <section class="digi-section">
+        <div class="digi-section-label">Suprafață</div>
+        <div class="digi-area-grid">
+          <span class="digi-area-label">Calculată (PostGIS)</span>
+          <span class="digi-area-val" data-digitizare-target="areaCalc">—</span>
+
+          <span class="digi-area-label">Din act (mp)</span>
+          <input type="number" step="0.01" class="input input-sm digi-area-input"
+                 placeholder="0.00"
+                 data-digitizare-target="areaAct"
+                 data-action="input->digitizare#updateDiff">
+
+          <span class="digi-area-label">Diferență</span>
+          <span class="digi-area-diff" data-digitizare-target="areaDiff">—</span>
+        </div>
+        <div class="digi-topology" data-digitizare-target="topologyMsg"></div>
+      </section>
+
+      <!-- 6. Export -->
+      <section class="digi-section">
+        <div class="digi-section-label">Export</div>
+        <div class="digi-btn-row">
+          <button class="btn btn-secondary btn-sm"
+                  data-action="click->digitizare#exportDxf">
+            ⬇ DXF
+          </button>
+          <button class="btn btn-secondary btn-sm"
+                  data-action="click->digitizare#showRaport">
+            📋 Raport
+          </button>
+        </div>
+      </section>
+
+      <!-- 7. Salvare -->
+      <section class="digi-section">
+
+        <!-- Toggle entitate -->
+        <div class="digi-entity-toggle">
+          <button type="button" class="digi-entity-btn digi-entity-btn--active"
+                  data-digitizare-target="btnEntityParcela"
+                  data-action="click->digitizare#switchToParcel">
+            Parcelă
+          </button>
+          <button type="button" class="digi-entity-btn"
+                  data-digitizare-target="btnEntityCladire"
+                  data-action="click->digitizare#switchToBuilding">
+            Clădire
+          </button>
+        </div>
+
+        <!-- Formular parcelă -->
+        <div data-digitizare-target="formParcela">
+          <%= form_with url: parcele_cadastrale_path, method: :post, data: { digitizare_target: "saveForm" } do |f| %>
+            <%= hidden_field_tag "parcela_cadastrala[geom_wkt]", "", data: { digitizare_target: "wktField" } %>
+            <div class="digi-save-grid">
+              <%= f.text_field  "parcela_cadastrala[numar_cadastral]", placeholder: "Nr. cadastral *", class: "input input-sm" %>
+              <%= f.select      "parcela_cadastrala[categoria_folosinta]",
+                                [["— Categorie *", ""], ["Arabil","arabil"], ["Pășune","pasune"],
+                                 ["Fânețe","faneata"], ["Vie","vie"], ["Livadă","livada"],
+                                 ["Pădure","padure"], ["Curți/construcții","curti_constructii"],
+                                 ["Ape","ape"], ["Neproductiv","neproductiv"]],
+                                {}, { class: "input input-sm" } %>
+            </div>
+            <div data-controller="siruta"
+                 data-siruta-url-value="<%= siruta_autocomplete_path %>"
+                 style="display:contents">
+              <div class="digi-save-grid" style="flex-direction:row">
+                <div class="ac-wrap">
+                  <%= f.text_field "parcela_cadastrala[judet]",
+                        placeholder: "Județ *", class: "input input-sm", autocomplete: "off",
+                        data: { siruta_target: "judetInput",
+                                action: "input->siruta#onJudetInput keydown->siruta#onJudetKeydown" } %>
+                  <ul class="ac-dropdown" data-siruta-target="judetDropdown" hidden></ul>
+                </div>
+                <div class="ac-wrap">
+                  <%= f.text_field "parcela_cadastrala[localitate]",
+                        placeholder: "Localitate *", class: "input input-sm", autocomplete: "off",
+                        data: { siruta_target: "localitateInput",
+                                action: "input->siruta#onLocalitateInput keydown->siruta#onLocalitateKeydown" } %>
+                  <ul class="ac-dropdown" data-siruta-target="localitateDropdown" hidden></ul>
+                </div>
+              </div>
+            </div>
+            <div class="digi-save-grid">
+              <%= f.text_field   "parcela_cadastrala[proprietar]",  placeholder: "Proprietar",   class: "input input-sm" %>
+              <%= f.number_field "parcela_cadastrala[suprafata_mp]", placeholder: "Suprafață mp",
+                                  step: 0.01, class: "input input-sm",
+                                  data: { digitizare_target: "saveAreaField" } %>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm"
+                    style="width:100%;margin-top:8px"
+                    data-action="click->digitizare#saveParcel">
+              💾 Salvează parcela
+            </button>
+          <% end %>
+        </div>
+
+        <!-- Formular clădire -->
+        <div data-digitizare-target="formCladire" style="display:none">
+          <%= form_with url: cladiri_cadastrale_index_path, method: :post, data: { digitizare_target: "saveFormCladire" } do |f| %>
+            <%= hidden_field_tag "cladire_cadastrala[geom_wkt]", "", data: { digitizare_target: "wktFieldCladire" } %>
+            <div class="digi-save-grid">
+              <%= f.text_field "cladire_cadastrala[numar_cadastral]", placeholder: "Nr. cadastral *", class: "input input-sm" %>
+              <%= f.select     "cladire_cadastrala[destinatie]",
+                               [["— Destinație", ""], ["Locuințe","locuinte"], ["Birouri","birouri"],
+                                ["Comercial","comercial"], ["Industrial","industrial"],
+                                ["Cult","cult"], ["Învățământ","invatamant"],
+                                ["Sănătate","sanatate"], ["Cultură","cultura"],
+                                ["Sport","sport"], ["Agrement","agrement"],
+                                ["Administrativ","administrativ"], ["Tehnico-edilitar","tehnico_edilitar"],
+                                ["Gospodărie","gospodarie"], ["Neproductiv","neproductiv"]],
+                               {}, { class: "input input-sm" } %>
+            </div>
+            <div class="digi-save-grid" style="flex-direction:row">
+              <%= f.text_field   "cladire_cadastrala[regim_inaltime]",       placeholder: "Regim înălțime (P, P+1...)", class: "input input-sm" %>
+              <%= f.number_field "cladire_cadastrala[suprafata_construita_mp]", placeholder: "Suprafață mp",
+                                  step: 0.01, class: "input input-sm",
+                                  data: { digitizare_target: "saveAreaFieldCladire" } %>
+            </div>
+            <div data-controller="siruta"
+                 data-siruta-url-value="<%= siruta_autocomplete_path %>"
+                 style="display:contents">
+              <div class="digi-save-grid" style="flex-direction:row">
+                <div class="ac-wrap">
+                  <%= f.text_field "cladire_cadastrala[judet]",
+                        placeholder: "Județ *", class: "input input-sm", autocomplete: "off",
+                        data: { siruta_target: "judetInput",
+                                action: "input->siruta#onJudetInput keydown->siruta#onJudetKeydown" } %>
+                  <ul class="ac-dropdown" data-siruta-target="judetDropdown" hidden></ul>
+                </div>
+                <div class="ac-wrap">
+                  <%= f.text_field "cladire_cadastrala[localitate]",
+                        placeholder: "Localitate *", class: "input input-sm", autocomplete: "off",
+                        data: { siruta_target: "localitateInput",
+                                action: "input->siruta#onLocalitateInput keydown->siruta#onLocalitateKeydown" } %>
+                  <ul class="ac-dropdown" data-siruta-target="localitateDropdown" hidden></ul>
+                </div>
+              </div>
+            </div>
+            <div class="digi-parcela-ref">
+              <p class="digi-parcela-hint">
+                Parcela asociată va fi determinată automat prin intersecție spațială la salvare.
+              </p>
+            </div>
+
+            <div class="digi-save-grid">
+              <%= f.text_field "cladire_cadastrala[proprietar]", placeholder: "Proprietar", class: "input input-sm" %>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm"
+                    style="width:100%;margin-top:8px"
+                    data-action="click->digitizare#saveBuilding">
+              💾 Salvează clădirea
+            </button>
+          <% end %>
+        </div>
+
+      </section>
+
+    </div>
+  </aside>
 </div>

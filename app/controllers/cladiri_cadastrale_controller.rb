@@ -9,7 +9,7 @@ class CladiriCadastraleController < ApplicationController
       redirect_to cladiri_cadastrale_path(@cladire),
                   notice: "Clădirea #{@cladire.numar_cadastral} a fost creată."
     else
-      redirect_to digitizare_path,
+      redirect_to harta_path,
                   alert: @cladire.errors.full_messages.to_sentence
     end
   end

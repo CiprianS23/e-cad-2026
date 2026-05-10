@@ -235,6 +235,33 @@ legend { font-size: 13px; font-weight: 700; color: #374151; padding: 0 6px; }
   z-index: 1;
 }
 
+/* ── Panou layere (sidebar stâng) ── */
+.layer-panel h3 {
+  font-size: 11px; font-weight: 700; color: #6b7280;
+  text-transform: uppercase; letter-spacing: .05em;
+  margin: 0 0 6px;
+}
+.layer-panel h3:not(:first-child) { margin-top: 12px; }
+.layer-group { display: flex; flex-direction: column; gap: 4px; }
+.layer-radio,
+.layer-check {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: #374151;
+  cursor: pointer; padding: 3px 4px; border-radius: 4px;
+}
+.layer-radio:hover,
+.layer-check:hover { background: #f3f4f6; }
+.layer-radio input,
+.layer-check input { accent-color: #1d4ed8; flex-shrink: 0; }
+.layer-swatch {
+  width: 14px; height: 14px; border-radius: 2px; flex-shrink: 0;
+  border: 1px solid rgba(0,0,0,.15);
+}
+.layer-swatch--uat     { background: #a855f7; opacity: .25; border: 1px dashed #6b21a8; }
+.layer-swatch--parcele { background: #93c5fd; border-color: #1d4ed8; }
+.layer-swatch--cladiri { background: #fbbf24; border-color: #b45309; }
+.layer-swatch--cgxml   { background: #fcd34d; border-color: #92400e; }
+
 /* ── Legendă ── */
 .legenda h3 { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
 .legenda-grid { display: flex; flex-direction: column; gap: 4px; }
@@ -471,27 +498,69 @@ nav.pagination a:hover  { background: #f3f4f6; }
 .total-row { font-weight: 700; background: #f8fafc; }
 
 /* ══════════════════════════════════════════════════════════════════
-   MODUL DIGITIZARE CADASTRALĂ
+   MODUL DIGITIZARE — panou pliabil (stil AutoCAD)
    ══════════════════════════════════════════════════════════════════ */
 
-/* Layout principal */
-.digi-layout {
-  display: grid;
-  grid-template-columns: 1fr 320px;
-  height: calc(100vh - 44px);
-  overflow: hidden;
+/* Panou dreapta, mereu prezent în .harta-page; toggle bar 36px + body 320px */
+.digi-panel {
+  display: flex;
+  flex-shrink: 0;
+  background: #fff;
+  border-left: 1px solid #2d2d4a;
+  font-size: 12px;
+  z-index: 1000;
+  height: 100%;
+  box-shadow: -2px 0 4px rgba(0, 0, 0, 0.04);
 }
-.digi-map { width: 100%; height: 100%; }
 
-/* Sidebar */
-.digi-sidebar {
+/* Toggle bar (vertical, mereu vizibil) */
+.digi-panel-toggle {
+  width: 36px;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+  color: #e5e7eb;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 10px;
+  border-right: 1px solid #2d2d4a;
+  transition: background 0.15s;
+}
+.digi-panel-toggle:hover {
+  background: linear-gradient(180deg, #2d2d4a 0%, #1e2a4a 100%);
+  color: #fff;
+}
+.digi-panel-toggle-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.digi-panel-toggle-label {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* Body panou — vizibil când e expandat */
+.digi-panel-body {
+  width: 320px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  background: #fff;
-  border-left: 1px solid #e5e7eb;
-  font-size: 12px;
+  background: #fafbfc;
 }
+
+/* Stare colapsată — body ascuns */
+.digi-panel--collapsed .digi-panel-body {
+  display: none;
+}
+
 .digi-sidebar-header {
   display: flex;
   align-items: center;

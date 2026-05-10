@@ -5,20 +5,16 @@ const FMT = (n) => Number(n).toLocaleString("ro-RO", { minimumFractionDigits: 3,
 const FMT2 = (n) => Number(n).toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 export default class extends Controller {
+  static outlets = ["harta-map"]
+
   static values = {
     calcUrl:       String,
     exportDxfUrl:  String,
-    cgxmlUrl:      String,
-    parcelUrl:     String,
-    cladireUrl:    String,
-    mapproxyUrl:   String,
-    uatUrl:             String,
     locateUatUrl:  String,
     snapTolerance: { type: Number, default: 15 }
   }
 
   static targets = [
-    "mapEl",
     "cursorX", "cursorY",
     "snapDot", "snapLabel", "snapSlider", "snapToleranceVal",
     "btnStart", "btnClose", "btnUndo",
@@ -30,200 +26,74 @@ export default class extends Controller {
     "wktField", "saveForm", "saveAreaField",
     "wktFieldCladire", "saveFormCladire", "saveAreaFieldCladire",
     "formParcela", "formCladire",
-    "btnEntityParcela", "btnEntityCladire"
+    "btnEntityParcela", "btnEntityCladire",
+    "panelBody"
   ]
 
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
   connect() {
     proj4.defs("EPSG:3844", STEREO70)
-    this._verts       = []        // [{x, y}] Stereo70
-    this._drawing     = false
-    this._closed      = false
-    this._snapPt      = null      // L.LatLng | null
-    this._refSnap     = []        // L.LatLng[] from CGXML layer
-    this._areaCalc    = 0
+    this._verts        = []
+    this._drawing      = false
+    this._closed       = false
+    this._snapPt       = null
+    this._refSnap      = []
+    this._areaCalc     = 0
     this._areaDebounce = null
 
-    this._layerPoly    = null     // L.Polygon preview
-    this._layerPreview = null     // L.Polyline cursor→last vertex
-    this._layerSnap    = null     // L.CircleMarker snap indicator
-    this._markerGroup  = null     // L.LayerGroup vertex markers
-    this._uatLayer     = null     // L.GeoJSON UAT boundaries
-    this._cladireLayer = null     // L.GeoJSON cladiri cadastrale
-    this._entityType = "parcela"
-
-    this._initMap()
-    this._loadParcelLayer()
-    this._loadCladireLayer()
-    this._loadCgxmlLayer()
+    this._layerPoly    = null
+    this._layerPreview = null
+    this._layerSnap    = null
+    this._markerGroup  = null
+    this._entityType   = "parcela"
   }
 
   disconnect() {
-    this.map?.remove()
+    this._detachFromMap()
   }
 
-  // ── Map init ─────────────────────────────────────────────────────────────
+  // ── Outlet (harta-map) ───────────────────────────────────────────────────
 
-  _initMap() {
-    this.map = L.map(this.mapElTarget, { center: [45.75, 24.9], zoom: 7, zoomControl: true })
-
-    const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      { attribution: "© OpenStreetMap contributors", maxZoom: 19 })
-
-    const baseLayers = { "OpenStreetMap": osm }
-    if (this.mapproxyUrlValue) {
-      const orto = L.tileLayer(
-        `${this.mapproxyUrlValue}/tms/1.0.0/ortoplan/webmercator/{z}/{x}/{y}.jpeg`,
-        { attribution: "© ANCPI – Ortofotoplan", maxZoom: 20, tms: true }
-      )
-      baseLayers["Ortofotoplan"] = orto
-      orto.addTo(this.map)
-    } else {
-      osm.addTo(this.map)
-    }
-
-    this._uatLayer = L.geoJSON(null, {
-      style: () => ({
-        color:       "#6b21a8",
-        weight:      1.2,
-        fillColor:   "#a855f7",
-        fillOpacity: 0.06,
-        dashArray:   "4 3"
-      }),
-      onEachFeature: (f, l) => {
-        const p = f.properties || {}
-        l.bindTooltip(p.name || p.nat_code || "UAT", { sticky: true, className: "uat-tooltip" })
-        l.on("mouseover", () => l.setStyle({ weight: 2, fillOpacity: 0.18 }))
-        l.on("mouseout",  () => this._uatLayer.resetStyle(l))
-      }
-    })
-
-    this._parcelLayer = L.geoJSON(null, {
-      style:         () => ({ color: "#1d4ed8", weight: 1.5, fillOpacity: 0.15, fillColor: "#3b82f6" }),
-      onEachFeature: (f, l) => {
-        const p = f.properties || {}
-        l.bindPopup(`<b>${p.numar_cadastral || "—"}</b><br>${p.localitate || ""} ${p.judet || ""}`.trim())
-      }
-    })
-
-    this._cladireLayer = L.geoJSON(null, {
-      style:         () => ({ color: "#b45309", weight: 1.5, fillOpacity: 0.2, fillColor: "#fbbf24" }),
-      onEachFeature: (f, l) => {
-        const p = f.properties || {}
-        l.bindPopup(
-          `<b>${p.numar_cadastral || "—"}</b> · Clădire<br>` +
-          `${[p.destinatie, p.regim_inaltime].filter(Boolean).join(", ") || "—"}<br>` +
-          `${p.localitate || ""} ${p.judet || ""}`.trim()
-        )
-      }
-    })
-
-    this._cgxmlLayer = L.geoJSON(null, {
-      style:          (f) => this._cgxmlStyle(f),
-      onEachFeature:  (f, l) => this._cgxmlPopup(f, l)
-    })
+  hartaMapOutletConnected(outlet) {
+    this._hartaMap = outlet
+    this.map = outlet.map
     this._markerGroup = L.layerGroup().addTo(this.map)
 
-    L.control.layers(baseLayers, {
-      "Limite UAT":         this._uatLayer,
-      "Parcele cadastrale": this._parcelLayer,
-      "Clădiri cadastrale": this._cladireLayer,
-      "Imobile CGXML":      this._cgxmlLayer
-    }, { collapsed: false }).addTo(this.map)
-    this._uatLayer.addTo(this.map)
-    this._parcelLayer.addTo(this.map)
-    this._cladireLayer.addTo(this.map)
-    this._cgxmlLayer.addTo(this.map)
+    this._onMouseMoveBound = (e) => this._onMouseMove(e)
+    this._onMapClickBound  = (e) => this._onMapClick(e)
+    this._onDblClickBound  = (e) => this._onDblClick(e)
 
-    this.map.on("mousemove",  (e) => this._onMouseMove(e))
-    this.map.on("click",      (e) => this._onMapClick(e))
-    this.map.on("dblclick",   (e) => this._onDblClick(e))
+    this.map.on("mousemove", this._onMouseMoveBound)
+    this.map.on("click",     this._onMapClickBound)
+    this.map.on("dblclick",  this._onDblClickBound)
   }
 
-  async _loadParcelLayer() {
-    if (!this.parcelUrlValue) return
-    try {
-      const res  = await fetch(this.parcelUrlValue)
-      const data = await res.json()
-      this._parcelLayer.addData(data)
-      if (this._parcelLayer.getLayers().length > 0) {
-        this.map.fitBounds(this._parcelLayer.getBounds(), { padding: [40, 40] })
-        this._loadUatLayer(this._parcelLayer.getBounds().getCenter())
-      }
-      this._rebuildRefSnap()
-    } catch (e) {
-      console.warn("Parcel layer error:", e)
-    }
+  hartaMapOutletDisconnected() {
+    this._detachFromMap()
   }
 
-  async _loadCgxmlLayer() {
-    if (!this.cgxmlUrlValue) return
-    try {
-      const res  = await fetch(this.cgxmlUrlValue)
-      const data = await res.json()
-      this._cgxmlLayer.addData(data)
-      if (this._cgxmlLayer.getLayers().length > 0 && this._parcelLayer.getLayers().length === 0) {
-        this.map.fitBounds(this._cgxmlLayer.getBounds(), { padding: [40, 40] })
-        this._loadUatLayer(this._cgxmlLayer.getBounds().getCenter())
-      }
-      this._rebuildRefSnap()
-    } catch (e) {
-      console.warn("CGXML layer error:", e)
-    }
-  }
-
-  async _loadCladireLayer() {
-    if (!this.cladireUrlValue) return
-    try {
-      const res  = await fetch(this.cladireUrlValue)
-      const data = await res.json()
-      this._cladireLayer.addData(data)
-    } catch (e) {
-      console.warn("Cladire layer error:", e)
-    }
-  }
-
-  async _loadUatLayer(center) {
-    if (!this.uatUrlValue || !center) return
-    try {
-      const url  = `${this.uatUrlValue}?lat=${center.lat}&lng=${center.lng}`
-      const res  = await fetch(url)
-      const data = await res.json()
-      this._uatLayer.clearLayers()
-      this._uatLayer.addData(data)
-    } catch (e) {
-      console.warn("UAT layer error:", e)
-    }
-  }
-
-  async _locateUat() {
-    if (!this.locateUatUrlValue || this._verts.length < 3) return
-    try {
-      const res  = await fetch(this.locateUatUrlValue, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": this._csrf() },
-        body:    JSON.stringify({ coords: this._verts.map(v => [v.x, v.y]) })
-      })
-      const data = await res.json()
-      if (!data.judet) return
-
-      this.element.querySelectorAll('[data-siruta-target="judetInput"]').forEach(el => this._flashFill(el, data.judet))
-      this.element.querySelectorAll('[data-siruta-target="localitateInput"]').forEach(el => this._flashFill(el, data.localitate))
-    } catch (e) {
-      console.warn("Locate UAT error:", e)
-    }
-  }
-
-  _flashFill(input, value) {
-    input.value = value
-    input.classList.add("digi-autofill")
-    setTimeout(() => input.classList.remove("digi-autofill"), 1800)
+  _detachFromMap() {
+    if (!this.map) return
+    this.map.off("mousemove", this._onMouseMoveBound)
+    this.map.off("click",     this._onMapClickBound)
+    this.map.off("dblclick",  this._onDblClickBound)
+    ;["_layerPoly", "_layerPreview", "_layerSnap"].forEach(l => this._removeLayer(l))
+    this._markerGroup?.clearLayers()
+    if (this._markerGroup) { this.map.removeLayer(this._markerGroup); this._markerGroup = null }
+    this.map = null
+    this._hartaMap = null
   }
 
   // ── Public actions ───────────────────────────────────────────────────────
 
+  togglePanel() {
+    this.element.classList.toggle("digi-panel--collapsed")
+  }
+
   startDrawing() {
+    if (!this.map) return
+    this._rebuildRefSnap()
     this._drawing = true
     this._closed  = false
     this.map.getContainer().style.cursor = "crosshair"
@@ -240,7 +110,7 @@ export default class extends Controller {
     }
     this._drawing = false
     this._closed  = true
-    this.map.getContainer().style.cursor = ""
+    if (this.map) this.map.getContainer().style.cursor = ""
     this.btnStartTarget.classList.remove("btn-active")
     this.btnCloseTarget.disabled = true
     this._removeLayer("_layerPreview")
@@ -266,12 +136,12 @@ export default class extends Controller {
     this._verts   = []
     this._drawing = false
     this._closed  = false
-    this.map.getContainer().style.cursor = ""
+    if (this.map) this.map.getContainer().style.cursor = ""
     this.btnStartTarget.classList.remove("btn-active")
     this.btnCloseTarget.disabled = true
     this.btnUndoTarget.disabled  = true
     ;["_layerPoly", "_layerPreview", "_layerSnap"].forEach(l => this._removeLayer(l))
-    this._markerGroup.clearLayers()
+    this._markerGroup?.clearLayers()
     this._updateVertexList()
     this.areaCalcTarget.textContent  = "—"
     this.areaDiffTarget.textContent  = "—"
@@ -372,19 +242,16 @@ export default class extends Controller {
   // ── Map event handlers ───────────────────────────────────────────────────
 
   _onMouseMove(e) {
-    // Coordonate Stereo70 la cursor
     const { x, y }  = this._fromLatLng(e.latlng)
     this.cursorXTarget.textContent = FMT(x)
     this.cursorYTarget.textContent = FMT(y)
 
     if (!this._drawing) return
 
-    // Snap
     const snap = this._findSnap(e.latlng)
     this._snapPt = snap
     this._updateSnapIndicator(snap, e.latlng)
 
-    // Linie preview de la ultimul vertex la cursor
     if (this._verts.length > 0) {
       const target = snap || e.latlng
       const last   = this._toLatLng(this._verts[this._verts.length - 1].x, this._verts[this._verts.length - 1].y)
@@ -397,7 +264,6 @@ export default class extends Controller {
 
   _onMapClick(e) {
     if (!this._drawing) return
-    // Ignorăm al doilea clic din dblclick
     if (e.originalEvent._digitizareDblClick) return
 
     const latlng = this._snapPt || e.latlng
@@ -407,14 +273,40 @@ export default class extends Controller {
 
   _onDblClick(e) {
     if (!this._drawing || this._verts.length < 3) return
-    // Marcăm evenimentul ca dublu-clic ca să nu se adauge un vertex extra
     e.originalEvent._digitizareDblClick = true
     this.closePolygon()
+  }
+
+  // ── Locate UAT (autofill județ/localitate) ───────────────────────────────
+
+  async _locateUat() {
+    if (!this.locateUatUrlValue || this._verts.length < 3) return
+    try {
+      const res  = await fetch(this.locateUatUrlValue, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": this._csrf() },
+        body:    JSON.stringify({ coords: this._verts.map(v => [v.x, v.y]) })
+      })
+      const data = await res.json()
+      if (!data.judet) return
+
+      this.element.querySelectorAll('[data-siruta-target="judetInput"]').forEach(el => this._flashFill(el, data.judet))
+      this.element.querySelectorAll('[data-siruta-target="localitateInput"]').forEach(el => this._flashFill(el, data.localitate))
+    } catch (e) {
+      console.warn("Locate UAT error:", e)
+    }
+  }
+
+  _flashFill(input, value) {
+    input.value = value
+    input.classList.add("digi-autofill")
+    setTimeout(() => input.classList.remove("digi-autofill"), 1800)
   }
 
   // ── Snap ─────────────────────────────────────────────────────────────────
 
   _findSnap(latlng) {
+    if (!this.map) return null
     const px  = this.map.latLngToLayerPoint(latlng)
     let best  = null
     let bestD = this.snapToleranceValue
@@ -424,9 +316,7 @@ export default class extends Controller {
       if (d < bestD) { bestD = d; best = ll }
     }
 
-    // Snap la propriii vertecși
     this._verts.forEach(v => check(this._toLatLng(v.x, v.y)))
-    // Snap la stratul de referință CGXML
     this._refSnap.forEach(ll => check(ll))
 
     return best
@@ -452,6 +342,7 @@ export default class extends Controller {
 
   _rebuildRefSnap() {
     this._refSnap = []
+    if (!this._hartaMap) return
     const addCoords = (layer) => {
       const geom = layer.feature?.geometry
       if (!geom) return
@@ -459,19 +350,18 @@ export default class extends Controller {
                     geom.type === "MultiPolygon"  ? geom.coordinates.flat() : []
       rings.forEach(ring => ring.forEach(([lng, lat]) => this._refSnap.push(L.latLng(lat, lng))))
     }
-    this._cgxmlLayer.eachLayer(addCoords)
-    this._parcelLayer.eachLayer(addCoords)
+    this._hartaMap.cgxmlLayer?.eachLayer(addCoords)
+    this._hartaMap.parcelLayer?.eachLayer(addCoords)
+    this._hartaMap.cladiriLayer?.eachLayer(addCoords)
   }
 
   // ── Vertex management ────────────────────────────────────────────────────
 
   _addVertex(x, y) {
     this._verts.push({ x, y })
-    // Marker pe hartă
     const marker = L.circleMarker(this._toLatLng(x, y), {
       radius: 4, color: "#1d4ed8", fillColor: "#fff", fillOpacity: 1, weight: 2, interactive: false
     })
-    // Tooltip cu coordonate
     marker.bindTooltip(`<b>#${this._verts.length}</b><br>X: ${FMT(x)}<br>Y: ${FMT(y)}`,
       { permanent: false, direction: "top", className: "digi-vertex-tooltip" })
     this._markerGroup.addLayer(marker)
@@ -479,7 +369,6 @@ export default class extends Controller {
     this._updatePolyPreview()
     this._updateVertexList()
 
-    // Dacă avem ≥3 vertecși, calculăm suprafața cu debounce
     if (this._verts.length >= 3) {
       clearTimeout(this._areaDebounce)
       this._areaDebounce = setTimeout(() => this._calcArea(), 400)
@@ -551,7 +440,6 @@ export default class extends Controller {
         ? `${FMT2(this._areaCalc)} mp`
         : "—"
 
-      // Topologie
       const msgs = []
       if (data.is_valid  === false) msgs.push("⚠ Poligon invalid (auto-intersecție)")
       if (data.is_simple === false) msgs.push("⚠ Poligon non-simplu")
@@ -580,7 +468,6 @@ export default class extends Controller {
     content.trim().split(/\r?\n/).forEach(line => {
       const raw = line.trim()
       if (!raw || raw.startsWith("#") || raw.startsWith("//")) return
-      // Separator: virgulă, punct și virgulă, tab, spații
       const parts = raw.replace(/,/g, ".").split(/[\s;]+/).filter(Boolean)
       let x, y
       if (parts.length >= 3) { x = parseFloat(parts[1]); y = parseFloat(parts[2]) }
@@ -590,7 +477,7 @@ export default class extends Controller {
     return results
   }
 
-  // ── WKT / DXF / Raport ───────────────────────────────────────────────────
+  // ── WKT / Raport ─────────────────────────────────────────────────────────
 
   _buildWkt(type = "POLYGON") {
     if (this._verts.length < 3) return ""
@@ -658,43 +545,6 @@ export default class extends Controller {
     </body></html>`
   }
 
-  // ── CGXML layer style & popup ────────────────────────────────────────────
-
-  _cgxmlStyle(feature) {
-    const isBuilding = feature.properties?.entity_type === "building"
-    return {
-      color:       isBuilding ? "#b91c1c" : "#92400e",
-      weight:      isBuilding ? 1.5 : 2,
-      fillColor:   isBuilding ? "#fca5a5" : "#fcd34d",
-      fillOpacity: 0.4
-    }
-  }
-
-  _cgxmlPopup(feature, layer) {
-    const p  = feature.properties ?? {}
-    const lb = p.entity_type === "building" ? "Construcție" : "Imobil"
-    const mp = (v) => v != null ? `${Number(v).toLocaleString("ro-RO", { maximumFractionDigits: 2 })} mp` : "—"
-
-    layer.bindPopup(`
-      <div style="font-size:12px;min-width:180px">
-        <b>${lb} #${p.id ?? "?"}</b>
-        <table style="width:100%;margin-top:6px;border-collapse:collapse">
-          <tr><td style="color:#9ca3af;padding:2px 6px 2px 0">Fișier</td>
-              <td style="font-family:monospace;font-size:11px">${p.filename ?? "—"}</td></tr>
-          <tr><td style="color:#9ca3af;padding:2px 6px 2px 0">Suprafață</td>
-              <td>${mp(p.measuredarea)}</td></tr>
-          ${p.cadgenno ? `<tr><td style="color:#9ca3af;padding:2px 6px 2px 0">Nr. cad.</td>
-              <td style="font-family:monospace">${p.cadgenno}</td></tr>` : ""}
-          ${p.e2identifier ? `<tr><td style="color:#9ca3af;padding:2px 6px 2px 0">E2 ID</td>
-              <td style="font-family:monospace">${p.e2identifier}</td></tr>` : ""}
-        </table>
-      </div>
-    `, { maxWidth: 220 })
-
-    layer.on("mouseover", () => layer.setStyle({ weight: 3, fillOpacity: 0.65 }))
-    layer.on("mouseout",  () => this._cgxmlLayer.resetStyle(layer))
-  }
-
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   _toLatLng(x, y) {
@@ -708,7 +558,7 @@ export default class extends Controller {
   }
 
   _removeLayer(name) {
-    if (this[name]) { this.map.removeLayer(this[name]); this[name] = null }
+    if (this[name] && this.map) { this.map.removeLayer(this[name]); this[name] = null }
   }
 
   _setStatus(msg, type = "info") {

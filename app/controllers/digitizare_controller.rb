@@ -1,6 +1,4 @@
 class DigitizareController < ApplicationController
-  def index; end
-
   def calculeaza_suprafata
     coords = params[:coords]
     return render json: { suprafata: 0 } if coords.blank? || coords.length < 3

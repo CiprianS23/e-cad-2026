@@ -32,18 +32,15 @@ export default class extends Controller {
       { attribution: "© OpenStreetMap contributors", maxZoom: 19 }
     )
 
-    const baseLayers = { "OpenStreetMap": osm }
+    this._baseLayers = { osm }
 
     if (this.mapproxyUrlValue) {
-      const ortoplan = L.tileLayer(
+      this._baseLayers.ortofotoplan = L.tileLayer(
         `${this.mapproxyUrlValue}/tms/1.0.0/ortoplan/webmercator/{z}/{x}/{y}.jpeg`,
         { attribution: "© ANCPI – Ortofotoplan", maxZoom: 20, tms: true }
       )
-      baseLayers["Ortofotoplan (MapProxy)"] = ortoplan
-      ortoplan.addTo(this.map)
-    } else {
-      osm.addTo(this.map)
     }
+    osm.addTo(this.map)
 
     this.uatLayer = L.geoJSON(null, {
       style: () => ({
@@ -93,18 +90,31 @@ export default class extends Controller {
       onEachFeature: this._bindCgxmlPopup.bind(this)
     })
 
-    const overlays = {
-      "Limite UAT":          this.uatLayer,
-      "Parcele cadastrale":  this.parcelLayer,
-      "Clădiri cadastrale":  this.cladiriLayer,
-      "Imobile CGXML":       this.cgxmlLayer
+    this._overlays = {
+      uat:     this.uatLayer,
+      parcele: this.parcelLayer,
+      cladiri: this.cladiriLayer,
+      cgxml:   this.cgxmlLayer
     }
 
-    L.control.layers(baseLayers, overlays, { collapsed: false }).addTo(this.map)
     this.uatLayer.addTo(this.map)
     this.parcelLayer.addTo(this.map)
     this.cladiriLayer.addTo(this.map)
     this.cgxmlLayer.addTo(this.map)
+  }
+
+  setBaseLayer(name) {
+    if (!this._baseLayers) return
+    Object.values(this._baseLayers).forEach(l => this.map.removeLayer(l))
+    const layer = this._baseLayers[name]
+    if (layer) layer.addTo(this.map)
+  }
+
+  toggleOverlay(name, visible) {
+    const layer = this._overlays?.[name]
+    if (!layer) return
+    if (visible) layer.addTo(this.map)
+    else this.map.removeLayer(layer)
   }
 
   async _loadParcele() {
