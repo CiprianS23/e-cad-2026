@@ -109,6 +109,7 @@ export default class extends Controller {
     if (!this.map) return
     this.map.addLayer(this._drawLayer)
     this.map.addLayer(this._topoLayer)
+    this.map.addLayer(this._editVertexLayer)  // cerculețele roșii la vertecși — pentru ambele moduri
     this._mouseMoveKey = this.map.on("pointermove", (evt) => this._onPointerMove(evt))
     this._moveEndKey   = this.map.on("moveend",     ()    => this._updateScale())
     this._updateScale()
@@ -281,6 +282,7 @@ export default class extends Controller {
     this._hartaMap?.setDigitizing(false)
     this._drawSource.clear()
     this._topoSource?.clear()
+    this._editVertexSource?.clear()
     this.btnStartTarget.classList.remove("btn-active")
     this.btnCloseTarget.disabled = true
     this.btnUndoTarget.disabled  = true
@@ -617,6 +619,7 @@ export default class extends Controller {
     this._updateSaveAvailability()
     this._updateVertexList()
     this._updateLiveArea()
+    this._renderEditVertices()  // cerculețe roșii la vertecșii confirmați (ambele moduri)
   }
 
   _updateLiveArea() {
@@ -935,19 +938,14 @@ export default class extends Controller {
     this._enterEditMode(sel.feature, sel.layer)
   }
 
-  _renderEditVertices(geom) {
+  // Folosește _verts (deja cleaned de cursor și closing duplicate) ca să
+  // randeze cerculețe roșii la fiecare vertex confirmat. Aplicabil atât la
+  // edit cât și la digitizare nouă.
+  _renderEditVertices() {
     if (!this._editVertexSource) return
     this._editVertexSource.clear()
-    const type = geom.getType()
-    let rings = []
-    if (type === "Polygon")           rings = geom.getCoordinates()
-    else if (type === "MultiPolygon") rings = geom.getCoordinates().flat()
-    rings.forEach(ring => {
-      // Eliminăm closing duplicate (ultimul = primul vertex)
-      const verts = ring.length > 1 ? ring.slice(0, -1) : ring
-      verts.forEach(coord => {
-        this._editVertexSource.addFeature(new ol.Feature(new ol.geom.Point(coord)))
-      })
+    this._verts.forEach(v => {
+      this._editVertexSource.addFeature(new ol.Feature(new ol.geom.Point([v.x, v.y])))
     })
   }
 
@@ -1001,15 +999,10 @@ export default class extends Controller {
     this._snapModes = new Set(["endpoint"])
     this._refreshSnap()
 
-    // Adaugă layer-ul cu cerculețe vertex pe hartă
-    this.map.addLayer(this._editVertexLayer)
-    this._renderEditVertices(feature.getGeometry())
-
-    // Extract verts inițial + on change
+    // Extract verts inițial + on change (apelul _renderEditVertices e deja inclus în _extractVerts)
     this._extractVerts(feature.getGeometry())
     this._geomChangeKey = feature.getGeometry().on("change", (e) => {
       this._extractVerts(e.target)
-      this._renderEditVertices(e.target)
       clearTimeout(this._areaDebounce); clearTimeout(this._topoDebounce)
       this._areaDebounce = setTimeout(() => this._calcArea(), 400)
       this._topoDebounce = setTimeout(() => this._verifyTopology(), 700)
