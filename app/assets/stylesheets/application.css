@@ -931,6 +931,23 @@ nav.pagination a:hover  { background: #f3f4f6; }
 .digi-entity-btn--active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
 .digi-entity-btn--active:hover { background: #1e40af; }
 
+/* ── Digitizare — panou edit mode ───────────────────────────────── */
+.digi-edit-panel {
+  background: #fef3c7;
+  border: 2px solid #f59e0b;
+  border-radius: 6px;
+  padding: 10px;
+  margin-top: 6px;
+}
+.digi-edit-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: #92400e;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
 /* ── Digitizare — referință parcelă ─────────────────────────────── */
 .digi-parcela-ref { margin-bottom: 6px; }
 .digi-parcela-hint {

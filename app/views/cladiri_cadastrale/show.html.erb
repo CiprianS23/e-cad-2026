@@ -10,7 +10,8 @@
 <div class="page-header">
   <h1>Clădire <%= @cladire.numar_cadastral %></h1>
   <div class="header-actions">
-    <%= link_to "✏ Digitizare", harta_path, class: "btn btn-secondary" %>
+    <%= link_to "✏ Editează geometrie", harta_path(edit_kind: "cladire", edit_id: @cladire.id), class: "btn btn-primary" %>
+    <%= link_to "Digitizare nouă", harta_path, class: "btn btn-secondary" %>
     <%= link_to "← Înapoi", harta_path, class: "btn btn-link" %>
   </div>
 </div>

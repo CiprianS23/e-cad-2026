@@ -1,7 +1,16 @@
 class CladiriCadastraleController < ApplicationController
-  before_action :set_cladire, only: :show
+  before_action :set_cladire, only: [:show, :update]
 
   def show; end
+
+  def update
+    if @cladire.update(cladire_params)
+      redirect_to cladiri_cadastrale_path(@cladire), notice: "Clădirea a fost actualizată."
+    else
+      redirect_to harta_path(edit_kind: "cladire", edit_id: @cladire.id),
+                  alert: @cladire.errors.full_messages.to_sentence
+    end
+  end
 
   def create
     @cladire = CladireCadastrala.new(cladire_params)

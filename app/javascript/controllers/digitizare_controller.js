@@ -11,7 +11,9 @@ export default class extends Controller {
     verificaUrl:   String,
     exportDxfUrl:  String,
     locateUatUrl:  String,
-    snapTolerance: { type: Number, default: 15 }
+    snapTolerance: { type: Number, default: 15 },
+    editKind:      String,
+    editId:        String
   }
 
   static targets = [
@@ -92,6 +94,11 @@ export default class extends Controller {
     this._moveEndKey   = this.map.on("moveend",     ()    => this._updateScale())
     this._updateScale()
     this._updateSaveAvailability()  // butoanele Salvează încep dezactivate
+
+    // Dacă URL-ul indică editare (?edit_kind=parcela&edit_id=5), intrăm în mod editare
+    if (this.editKindValue && this.editIdValue) {
+      this._waitForFeatureAndEdit()
+    }
   }
 
   _teardown() {
@@ -689,10 +696,7 @@ export default class extends Controller {
       const res = await fetch(this.verificaUrlValue, {
         method:  "POST",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": this._csrf() },
-        body:    JSON.stringify({
-          coords:      this._verts.map(v => [v.x, v.y]),
-          entity_type: this._entityType
-        })
+        body:    JSON.stringify(this._verifyTopologyParams())
       })
       const data = await res.json()
       this._topologyIssues    = data.issues || []
@@ -840,6 +844,138 @@ export default class extends Controller {
     if (evt.key === "F3") { evt.preventDefault(); this.toggleSnap() }
     if (evt.key === "F8") { evt.preventDefault(); this.toggleOrtho() }
     if (evt.key === "Escape" && this._draw) { evt.preventDefault(); this.clearAll() }
+  }
+
+  // ── EDIT MODE: modify geometrie poligon existent ─────────────────────────
+
+  _waitForFeatureAndEdit() {
+    // Layer-ul țintă e deja încărcat (parcele/cladiri) sau în curs; așteptăm
+    // până feature-ul cu id-ul cerut e în source. Polling la 200ms (max 5s).
+    const start = Date.now()
+    const poll  = () => {
+      const layer = this.editKindValue === "cladire"
+        ? this._hartaMap?.cladiriLayer
+        : this._hartaMap?.parcelLayer
+      if (!layer) {
+        if (Date.now() - start < 5000) return setTimeout(poll, 200)
+        return
+      }
+      const feat = layer.getSource().getFeatures().find(f => String(f.get("id")) === String(this.editIdValue))
+      if (feat) return this._enterEditMode(feat, layer)
+      if (Date.now() - start < 5000) setTimeout(poll, 200)
+      else this._setStatus(`Nu am găsit ${this.editKindValue} #${this.editIdValue} pentru editare.`, "warn")
+    }
+    poll()
+  }
+
+  _enterEditMode(feature, sourceLayer) {
+    this._editing = true
+    this._editFeature = feature
+    this._editSourceLayer = sourceLayer
+    this._hartaMap?.setDigitizing(true)
+
+    // Mut feature-ul în drawSource ca să-l facem editable; ascund original-ul.
+    sourceLayer.setVisible(false)
+    this._drawSource.clear()
+    this._drawSource.addFeature(feature)
+    this._drawLayer.setSource(this._drawSource)
+
+    // Modify interaction
+    this._modify = new ol.interaction.Modify({ source: this._drawSource })
+    this.map.addInteraction(this._modify)
+
+    // Snap la celelalte features (refLayers fără cel curent)
+    this._snapModes = new Set(["endpoint"])
+    this._refreshSnap()
+
+    // Extract verts inițial + on change
+    this._extractVerts(feature.getGeometry())
+    this._geomChangeKey = feature.getGeometry().on("change", (e) => {
+      this._extractVerts(e.target)
+      clearTimeout(this._areaDebounce); clearTimeout(this._topoDebounce)
+      this._areaDebounce = setTimeout(() => this._calcArea(), 400)
+      this._topoDebounce = setTimeout(() => this._verifyTopology(), 700)
+    })
+
+    // Preluăm zoom la feature ca să fie vizibil
+    const ext = feature.getGeometry().getExtent()
+    this.map.getView().fit(ext, { padding: [60, 60, 60, 60], maxZoom: 19, duration: 250 })
+
+    // Înlocuim butoanele Salvează cu un buton dedicat „Salvează modificări"
+    this._injectEditUI()
+    this._setStatus(`Editare ${this.editKindValue} #${this.editIdValue} — drag pe vertex pentru a modifica.`, "ok")
+    this._calcArea()
+    this._verifyTopology()
+  }
+
+  _injectEditUI() {
+    // Ascund formele de salvare nouă; show un mic header de edit + buton save
+    if (this.hasFormParcelaTarget)  this.formParcelaTarget.style.display  = "none"
+    if (this.hasFormCladireTarget)  this.formCladireTarget.style.display  = "none"
+    const ent = this.element.querySelector(".digi-entity-toggle")
+    if (ent) ent.style.display = "none"
+
+    // Inject panou de edit (idempotent)
+    if (this.element.querySelector(".digi-edit-panel")) return
+    const wrapper = this.formParcelaTarget?.parentElement || this.element
+    const panel = document.createElement("div")
+    panel.className = "digi-edit-panel"
+    panel.innerHTML = `
+      <div class="digi-edit-header">Modificare ${this.editKindValue} #${this.editIdValue}</div>
+      <p class="digi-parcela-hint">Drag pe orice vertex pentru a-l muta. Ctrl+drag pe muchie adaugă vertex nou.</p>
+      <button type="button" class="btn btn-primary btn-sm digi-edit-save"
+              data-action="click->digitizare#saveEdit"
+              style="width:100%;margin-top:8px">💾 Salvează modificări</button>
+      <button type="button" class="btn btn-secondary btn-sm"
+              style="width:100%;margin-top:6px"
+              onclick="window.location.href='/${this.editKindValue === 'cladire' ? 'cladiri_cadastrale' : 'parcele_cadastrale'}/${this.editIdValue}'">
+        ✕ Anulează (înapoi la detalii)
+      </button>
+    `
+    wrapper.appendChild(panel)
+    this._updateSaveAvailability()
+  }
+
+  async saveEdit() {
+    if (!await this._validateBeforeSave()) return
+    const url = this.editKindValue === "cladire"
+      ? `/cladiri_cadastrale/${this.editIdValue}`
+      : `/parcele_cadastrale/${this.editIdValue}`
+    const param = this.editKindValue === "cladire" ? "cladire_cadastrala" : "parcela_cadastrala"
+    const wkt = this._buildWkt("MULTIPOLYGON")
+    try {
+      const res = await fetch(url, {
+        method:  "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": this._csrf(),
+          "Accept":       "text/html"
+        },
+        body: JSON.stringify({
+          [param]: { geom_wkt: wkt, suprafata_mp: this._areaCalc > 0 ? this._areaCalc.toFixed(4) : null }
+        }),
+        redirect: "follow"
+      })
+      if (res.ok || res.redirected) {
+        window.location.href = res.url || url
+      } else {
+        const text = await res.text()
+        this._setStatus(`Eroare la salvare: ${res.status}`, "warn")
+        console.warn("Save edit failed:", text.slice(0, 500))
+      }
+    } catch (e) {
+      this._setStatus(`Eroare rețea: ${e.message}`, "warn")
+    }
+  }
+
+  // În edit mode, suprapunerea se verifică EXCLUDÂND poligonul curent
+  _verifyTopologyParams() {
+    const params = {
+      coords:      this._verts.map(v => [v.x, v.y]),
+      entity_type: this._editing ? this.editKindValue : this._entityType
+    }
+    if (this._editing) params.exclude_id = this.editIdValue
+    return params
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
