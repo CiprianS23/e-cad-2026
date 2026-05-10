@@ -449,7 +449,14 @@ export default class extends Controller {
     this.statusAreaTarget.textContent = `${FMT2(area)} mp`
   }
 
-  _drawStyle(_feature) {
+  _drawStyle(feature) {
+    const type = feature.getGeometry()?.getType()
+    // OL Draw creează intern 3 features: Polygon (constrâns prin geometryFunction),
+    // LineString preview de la ultimul vertex la cursor (RAW, neconstrâns), și
+    // Point la cursor. În modul ortho, ascundem LineString-ul ca să nu se vadă
+    // o a doua linie pe direcția liberă a cursorului.
+    if (this._orthoEnabled && type === "LineString") return null
+
     return new ol.style.Style({
       stroke: new ol.style.Stroke({ color: "#1d4ed8", width: 2 }),
       fill:   new ol.style.Fill({ color: "rgba(147, 197, 253, 0.25)" }),
