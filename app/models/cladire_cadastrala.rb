@@ -18,7 +18,9 @@ class CladireCadastrala < ApplicationRecord
     message: "nu a fost găsită — poligonul clădirii nu se suprapune cu nicio parcelă cadastrală"
   }
   validate  :geom_wkt_parsabil, if: -> { @geom_wkt.present? }
-  validate  :geom_topologic_valid, if: -> { geom.present? }
+  validate  :geom_topologic_valid,                  if: -> { geom.present? }
+  validate  :nu_se_suprapune_cu_alte_cladiri,       if: -> { geom.present? }
+  validate  :nu_traverseaza_mai_multe_parcele,      if: -> { geom.present? }
 
   before_validation :atribuie_geom_din_wkt,     if: -> { @geom_wkt.present? }
   before_validation :atribuie_parcela_din_geom,  if: -> { geom.present? && parcela_cadastrala_id.blank? }
@@ -66,6 +68,42 @@ class CladireCadastrala < ApplicationRecord
     )
     return if row["is_valid"]
     errors.add(:geom, "geometrie invalidă topologic: #{row['reason']}")
+  end
+
+  def nu_se_suprapune_cu_alte_cladiri
+    wkt = geom.as_text
+    excl = id || 0
+    overlaps = self.class.connection.select_all(
+      ApplicationRecord.sanitize_sql_array([<<~SQL, wkt, excl, 0.01])
+        WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom)
+        SELECT id, numar_cadastral,
+          ROUND(ST_Area(ST_Intersection(geom, np.geom))::numeric, 2) AS area
+        FROM cladiri_cadastrale, np
+        WHERE geom IS NOT NULL
+          AND id != ?
+          AND ST_Intersects(geom, np.geom)
+          AND ST_Area(ST_Intersection(geom, np.geom)) > ?
+      SQL
+    )
+    overlaps.each do |o|
+      errors.add(:geom, "se suprapune cu clădirea #{o['numar_cadastral']} (#{o['area']} mp)")
+    end
+  end
+
+  def nu_traverseaza_mai_multe_parcele
+    wkt = geom.as_text
+    rows = self.class.connection.select_all(
+      ApplicationRecord.sanitize_sql_array([<<~SQL, wkt])
+        WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom),
+             vts AS (SELECT (ST_DumpPoints(np.geom)).geom AS pt FROM np)
+        SELECT DISTINCT p.id, p.numar_cadastral
+        FROM parcele_cadastrale p, vts
+        WHERE p.geom IS NOT NULL AND ST_Intersects(p.geom, vts.pt)
+      SQL
+    )
+    return if rows.size <= 1
+    labels = rows.map { |r| r["numar_cadastral"] }.join(", ")
+    errors.add(:geom, "vertecșii clădirii sunt în #{rows.size} parcele diferite (#{labels}) — clădirea trebuie încadrată într-o singură parcelă")
   end
 
   def calculeaza_centroid

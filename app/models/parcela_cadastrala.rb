@@ -14,6 +14,7 @@ class ParcelaCadastrala < ApplicationRecord
   validates :status,              inclusion: { in: STATUSURI }
   validate  :geom_wkt_parsabil,   if: -> { @geom_wkt.present? }
   validate  :geom_topologic_valid, if: -> { geom.present? }
+  validate  :nu_se_suprapune_cu_alte_parcele, if: -> { geom.present? }
 
   before_validation :atribuie_geom_din_wkt, if: -> { @geom_wkt.present? }
   before_save       :calculeaza_centroid,    if: :geom_changed?
@@ -67,6 +68,26 @@ class ParcelaCadastrala < ApplicationRecord
     )
     return if row["is_valid"]
     errors.add(:geom, "geometrie invalidă topologic: #{row['reason']}")
+  end
+
+  def nu_se_suprapune_cu_alte_parcele
+    wkt = geom.as_text
+    excl = id || 0
+    overlaps = self.class.connection.select_all(
+      ApplicationRecord.sanitize_sql_array([<<~SQL, wkt, excl, 0.01])
+        WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom)
+        SELECT id, numar_cadastral,
+          ROUND(ST_Area(ST_Intersection(geom, np.geom))::numeric, 2) AS area
+        FROM parcele_cadastrale, np
+        WHERE geom IS NOT NULL
+          AND id != ?
+          AND ST_Intersects(geom, np.geom)
+          AND ST_Area(ST_Intersection(geom, np.geom)) > ?
+      SQL
+    )
+    overlaps.each do |o|
+      errors.add(:geom, "se suprapune cu parcela #{o['numar_cadastral']} (#{o['area']} mp)")
+    end
   end
 
   def calculeaza_centroid

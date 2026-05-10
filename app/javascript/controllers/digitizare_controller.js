@@ -8,6 +8,7 @@ export default class extends Controller {
 
   static values = {
     calcUrl:       String,
+    verificaUrl:   String,
     exportDxfUrl:  String,
     locateUatUrl:  String,
     snapTolerance: { type: Number, default: 15 }
@@ -33,21 +34,33 @@ export default class extends Controller {
   // ── Lifecycle ────────────────────────────────────────────────────────────
 
   connect() {
-    this._verts          = []
-    this._areaCalc       = 0
-    this._areaDebounce   = null
-    this._entityType     = "parcela"
-    this._snapEnabled    = true
-    this._orthoEnabled   = false
-    this._snapModes      = new Set(["endpoint", "midpoint"])
-    this._polygonValid   = false
-    this._polygonSimple  = false
+    this._verts             = []
+    this._areaCalc          = 0
+    this._areaDebounce      = null
+    this._topoDebounce      = null
+    this._entityType        = "parcela"
+    this._snapEnabled       = true
+    this._orthoEnabled      = false
+    this._snapModes         = new Set(["endpoint", "midpoint"])
+    this._polygonValid      = false
+    this._polygonSimple     = false
+    this._topologyIssues    = []
+    this._topologyHasErrors = false
 
     this._drawSource = new ol.source.Vector()
     this._drawLayer  = new ol.layer.Vector({
       source: this._drawSource,
       style:  this._drawStyle.bind(this),
       properties: { name: "digitizare" }
+    })
+
+    // Layer separat pentru evidențierea conflictelor topologice (overlap, sliver, vertex-off)
+    this._topoSource = new ol.source.Vector()
+    this._topoLayer  = new ol.layer.Vector({
+      source: this._topoSource,
+      style:  this._topoStyle.bind(this),
+      properties: { name: "topologie-issues" },
+      zIndex: 1000
     })
 
     this._onKeyDown = (evt) => this._handleGlobalKey(evt)
@@ -74,6 +87,7 @@ export default class extends Controller {
     this.map = this._hartaMap?.map
     if (!this.map) return
     this.map.addLayer(this._drawLayer)
+    this.map.addLayer(this._topoLayer)
     this._mouseMoveKey = this.map.on("pointermove", (evt) => this._onPointerMove(evt))
     this._moveEndKey   = this.map.on("moveend",     ()    => this._updateScale())
     this._updateScale()
@@ -86,6 +100,7 @@ export default class extends Controller {
     if (this._draw && this.map) this.map.removeInteraction(this._draw)
     if (this._snap && this.map) this.map.removeInteraction(this._snap)
     if (this._drawLayer && this.map) this.map.removeLayer(this._drawLayer)
+    if (this._topoLayer && this.map) this.map.removeLayer(this._topoLayer)
     this._draw = this._snap = this.map = this._hartaMap = null
   }
 
@@ -234,10 +249,13 @@ export default class extends Controller {
     this._areaCalc = 0
     this._polygonValid = false
     this._polygonSimple = false
+    this._topologyIssues = []
+    this._topologyHasErrors = false
     if (this._draw && this.map) { this.map.removeInteraction(this._draw); this._draw = null }
     if (this._snap && this.map) { this.map.removeInteraction(this._snap); this._snap = null }
     this._hartaMap?.setDigitizing(false)
     this._drawSource.clear()
+    this._topoSource?.clear()
     this.btnStartTarget.classList.remove("btn-active")
     this.btnCloseTarget.disabled = true
     this.btnUndoTarget.disabled  = true
@@ -329,8 +347,10 @@ export default class extends Controller {
       return false
     }
     clearTimeout(this._areaDebounce)
+    clearTimeout(this._topoDebounce)
     this._setStatus("Verificare topologie…")
     await this._calcArea()
+    await this._verifyTopology()
     return this._guardSavable()
   }
 
@@ -345,6 +365,11 @@ export default class extends Controller {
     }
     if (!this._polygonSimple) {
       this._setStatus("Poligon NON-SIMPLU — corectează vertecșii înainte de salvare.", "warn")
+      return false
+    }
+    if (this._topologyHasErrors) {
+      const errs = this._topologyIssues.filter(i => i.severity === "error")
+      this._setStatus(`Conflict topologic: ${errs.length} eroare(i) cu vecinii — vezi panoul.`, "warn")
       return false
     }
     return true
@@ -519,6 +544,8 @@ export default class extends Controller {
       if (this._verts.length >= 3) {
         clearTimeout(this._areaDebounce)
         this._areaDebounce = setTimeout(() => this._calcArea(), 400)
+        clearTimeout(this._topoDebounce)
+        this._topoDebounce = setTimeout(() => this._verifyTopology(), 700)
       }
     })
   }
@@ -549,9 +576,10 @@ export default class extends Controller {
       return { x, y }
     })
     // Pesimist: fiecare modificare geometrică invalidează rezultatul anterior
-    // de validare. _calcArea va seta din nou true/false la răspunsul PostGIS.
-    this._polygonValid  = false
-    this._polygonSimple = false
+    // de validare. _calcArea + _verifyTopology vor seta valorile la răspunsul PostGIS.
+    this._polygonValid      = false
+    this._polygonSimple     = false
+    this._topologyHasErrors = true
     this._updateSaveAvailability()
     this._updateVertexList()
     this._updateLiveArea()
@@ -652,7 +680,89 @@ export default class extends Controller {
   }
 
   _isPolygonSavable() {
-    return this._verts.length >= 3 && this._polygonValid && this._polygonSimple
+    return this._verts.length >= 3
+      && this._polygonValid
+      && this._polygonSimple
+      && !this._topologyHasErrors
+  }
+
+  // ── Verificare topologie cu vecini (overlap, sliver, vertex-on-vertex) ──
+
+  async _verifyTopology() {
+    if (!this.hasVerificaUrlValue || this._verts.length < 3) return
+    try {
+      const res = await fetch(this.verificaUrlValue, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": this._csrf() },
+        body:    JSON.stringify({
+          coords:      this._verts.map(v => [v.x, v.y]),
+          entity_type: this._entityType
+        })
+      })
+      const data = await res.json()
+      this._topologyIssues    = data.issues || []
+      this._topologyHasErrors = !!data.has_errors
+      this._renderTopologyIssues()
+      this._updateSaveAvailability()
+    } catch (e) {
+      console.warn("Topology check error:", e)
+    }
+  }
+
+  _renderTopologyIssues() {
+    this._topoSource.clear()
+    const fmt = new ol.format.GeoJSON()
+    this._topologyIssues.forEach(issue => {
+      if (!issue.geojson) return
+      try {
+        const feat = fmt.readFeature(issue.geojson, {
+          dataProjection:    "EPSG:4326",
+          featureProjection: "EPSG:3857"
+        })
+        feat.set("severity", issue.severity)
+        feat.set("issueType", issue.type)
+        feat.set("message",  issue.message)
+        this._topoSource.addFeature(feat)
+      } catch (e) { /* skip un-parsable */ }
+    })
+    this._renderTopologyPanel()
+  }
+
+  _renderTopologyPanel() {
+    const errs  = this._topologyIssues.filter(i => i.severity === "error")
+    const warns = this._topologyIssues.filter(i => i.severity === "warning")
+    const html  = []
+    if (errs.length)  html.push(`<div class="topo-error-header">⛔ ${errs.length} eroare(i):</div>`)
+    errs.forEach(e  => html.push(`<span class="topo-warn topo-error-item">• ${e.message}</span>`))
+    if (warns.length) html.push(`<div class="topo-warn-header">⚠ ${warns.length} avertizare(i):</div>`)
+    warns.forEach(w => html.push(`<span class="topo-warn">• ${w.message}</span>`))
+    this.topologyMsgTarget.innerHTML = html.join("")
+  }
+
+  _topoStyle(feature) {
+    const sev  = feature.get("severity")
+    const type = feature.get("issueType")
+    if (sev === "error") {
+      // Overlap rosu pulsant + bordura groasă
+      return new ol.style.Style({
+        stroke: new ol.style.Stroke({ color: "#dc2626", width: 3 }),
+        fill:   new ol.style.Fill({ color: "rgba(220, 38, 38, 0.45)" })
+      })
+    }
+    if (type === "vertex_off") {
+      return new ol.style.Style({
+        image: new ol.style.Circle({
+          radius: 7,
+          fill:   new ol.style.Fill({ color: "#d97706" }),
+          stroke: new ol.style.Stroke({ color: "#fff", width: 2 })
+        })
+      })
+    }
+    // sliver / alte warnings
+    return new ol.style.Style({
+      stroke: new ol.style.Stroke({ color: "#d97706", width: 2, lineDash: [4, 4] }),
+      fill:   new ol.style.Fill({ color: "rgba(251, 191, 36, 0.25)" })
+    })
   }
 
   _updateSaveAvailability() {
