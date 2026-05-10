@@ -17,7 +17,7 @@ export default class extends Controller {
   }
 
   static targets = [
-    "panel", "panelBody",
+    "panel", "panelBody", "editTopoMirror",
     "snapSlider", "snapToleranceVal", "snapModes",
     "btnStart", "btnEdit", "btnClose", "btnUndo",
     "statusBar",
@@ -760,11 +760,21 @@ export default class extends Controller {
     const errs  = this._topologyIssues.filter(i => i.severity === "error")
     const warns = this._topologyIssues.filter(i => i.severity === "warning")
     const html  = []
-    if (errs.length)  html.push(`<div class="topo-error-header">⛔ ${errs.length} eroare(i):</div>`)
-    errs.forEach(e  => html.push(`<span class="topo-warn topo-error-item">• ${e.message}</span>`))
-    if (warns.length) html.push(`<div class="topo-warn-header">⚠ ${warns.length} avertizare(i):</div>`)
-    warns.forEach(w => html.push(`<span class="topo-warn">• ${w.message}</span>`))
-    this.topologyMsgTarget.innerHTML = html.join("")
+    if (errs.length === 0 && warns.length === 0) {
+      // Show "OK" message when no issues
+      if (this._verts.length >= 3) {
+        html.push(`<span class="topo-ok">✓ Topologie OK (fără conflicte cu vecini)</span>`)
+      }
+    } else {
+      if (errs.length)  html.push(`<div class="topo-error-header">⛔ ${errs.length} eroare(i):</div>`)
+      errs.forEach(e  => html.push(`<span class="topo-warn topo-error-item">• ${e.message}</span>`))
+      if (warns.length) html.push(`<div class="topo-warn-header">⚠ ${warns.length} avertizare(i):</div>`)
+      warns.forEach(w => html.push(`<span class="topo-warn">• ${w.message}</span>`))
+    }
+    const out = html.join("")
+    this.topologyMsgTarget.innerHTML = out
+    // Mirror în panoul de edit (vizibil la top)
+    if (this.hasEditTopoMirrorTarget) this.editTopoMirrorTarget.innerHTML = out
   }
 
   _topoStyle(feature) {
@@ -1022,16 +1032,17 @@ export default class extends Controller {
 
     // Inject panou de edit (idempotent)
     if (this.element.querySelector(".digi-edit-panel")) return
-    const wrapper = this.formParcelaTarget?.parentElement || this.element
-    const panel = document.createElement("div")
-    panel.className = "digi-edit-panel"
+    const panel = document.createElement("section")
+    panel.className = "digi-section digi-edit-panel"
     panel.innerHTML = `
       <div class="digi-edit-header">Modificare ${this.editKindValue} #${this.editIdValue}</div>
       <ul class="digi-parcela-hint" style="margin:6px 0;padding-left:18px;line-height:1.6">
-        <li><b>Drag</b> pe vertex → mută vertex</li>
+        <li><b>Drag</b> pe vertex (cerc roșu) → mută vertex</li>
         <li><b>Click pe muchie + drag</b> → adaugă vertex nou</li>
         <li><b>Shift+Click</b> pe vertex → șterge vertex</li>
       </ul>
+      <div class="digi-edit-topo-mirror" data-digitizare-target="editTopoMirror"
+           style="margin-top:8px;font-size:11px;display:flex;flex-direction:column;gap:3px"></div>
       <button type="button" class="btn btn-primary btn-sm digi-edit-save"
               data-action="click->digitizare#saveEdit"
               style="width:100%;margin-top:8px">💾 Salvează modificări</button>
@@ -1041,7 +1052,11 @@ export default class extends Controller {
         ✕ Anulează (înapoi la detalii)
       </button>
     `
-    wrapper.appendChild(panel)
+    // Inserăm panoul la TOP-ul panel-body, ca să fie imediat vizibil sub header
+    const body = this.hasPanelBodyTarget ? this.panelBodyTarget : this.element
+    const firstSection = body.querySelector(".digi-section")
+    if (firstSection) body.insertBefore(panel, firstSection)
+    else body.appendChild(panel)
     this._updateSaveAvailability()
   }
 
