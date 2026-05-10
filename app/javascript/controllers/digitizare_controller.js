@@ -910,17 +910,19 @@ export default class extends Controller {
     this._editSourceLayer = sourceLayer
     this._hartaMap?.setDigitizing(true)
 
-    // Mut feature-ul în drawSource ca să-l facem editable; ascund original-ul.
-    sourceLayer.setVisible(false)
-    this._drawSource.clear()
-    this._drawSource.addFeature(feature)
-    this._drawLayer.setSource(this._drawSource)
+    // Forțează închiderea popup-ului de info (în caz că setDigitizing nu a apucat)
+    this._hartaMap?._popup?.setPosition(undefined)
+    this._hartaMap?.clearSelection?.()
 
-    // Modify interaction
-    this._modify = new ol.interaction.Modify({ source: this._drawSource })
+    // Modify direct pe feature, fără să-l mut între source-uri — parcelLayer
+    // rămâne vizibil și Modify identifică vertecșii poligonului direct.
+    this._modify = new ol.interaction.Modify({
+      features:       new ol.Collection([feature]),
+      pixelTolerance: 12
+    })
     this.map.addInteraction(this._modify)
 
-    // Snap la celelalte features (refLayers fără cel curent)
+    // Snap la celelalte features
     this._snapModes = new Set(["endpoint"])
     this._refreshSnap()
 
