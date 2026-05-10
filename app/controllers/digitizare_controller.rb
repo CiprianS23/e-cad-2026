@@ -10,11 +10,12 @@ class DigitizareController < ApplicationController
     ring += ", #{pts.first[0]} #{pts.first[1]}" unless pts.first == pts.last
     wkt  = "POLYGON((#{ring}))"
 
-    # Toleranțe (în metri Stereo70). Clientul lucrează nativ în EPSG:3844,
-    # deci nu mai există erori de round-trip prin Web Mercator. Snap rezidual
-    # mic doar pentru floating-point noise.
-    snap_tol      = 0.05  # m  — 5cm, conform spec snap_tolerance
-    overlap_min   = 0.10  # mp — conform spec sliver_threshold
+    # Toleranțe ZERO pentru snap server-side: clientul OL lucrează nativ în
+    # EPSG:3844, coords sunt exacte. Orice ST_Snap > 0 ar masca lipsa unei
+    # alinieri reale a vertecșilor → posibili sliveri. Detecția se face la
+    # 0.01 mp (= 1 cm²) — sub asta e doar floating-point în PostGIS.
+    snap_tol      = 0.0   # m  — fără fuzzy snap, alinierea TREBUIE să vină din client
+    overlap_min   = 0.01  # mp — 1 cm², strict
     sliver_max_mp = 1.00  # mp
     sliver_dist   = 1.00  # m
 
@@ -27,21 +28,8 @@ class DigitizareController < ApplicationController
     overlap_target = entity == "cladire" ? ["cladire", "cladiri_cadastrale"] : ["parcela", "parcele_cadastrale"]
     kind, table = overlap_target
     excl = exclude_id || 0
-    overlap_sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt, snap_tol, snap_tol, excl, overlap_min])
-      WITH np_orig AS (SELECT ST_GeomFromText(?, 3844) AS geom),
-           ref AS (
-             SELECT ST_Collect(t.geom) AS geom
-             FROM #{table} t, np_orig
-             WHERE t.geom IS NOT NULL
-               AND ST_DWithin(t.geom, np_orig.geom, ?)
-           ),
-           np AS (
-             SELECT CASE WHEN ref.geom IS NOT NULL
-                          THEN ST_MakeValid(ST_Snap(np_orig.geom, ref.geom, ?))
-                          ELSE np_orig.geom
-                    END AS geom
-             FROM np_orig, ref
-           )
+    overlap_sql = ActiveRecord::Base.sanitize_sql_array([<<~SQL, wkt, excl, overlap_min])
+      WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom)
       SELECT t.id, t.numar_cadastral AS label,
         ST_Area(ST_Intersection(t.geom, np.geom)) AS area,
         ST_AsGeoJSON(ST_Transform(ST_Intersection(t.geom, np.geom), 4326), 6) AS geojson

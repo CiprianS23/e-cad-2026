@@ -74,7 +74,7 @@ class ParcelaCadastrala < ApplicationRecord
     wkt = geom.as_text
     excl = id || 0
     overlaps = self.class.connection.select_all(
-      ApplicationRecord.sanitize_sql_array([<<~SQL, wkt, excl, 0.10])
+      ApplicationRecord.sanitize_sql_array([<<~SQL, wkt, excl, 0.01])
         WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom)
         SELECT p.id, p.numar_cadastral,
           ROUND(ST_Area(ST_Intersection(p.geom, np.geom))::numeric, 2) AS area
