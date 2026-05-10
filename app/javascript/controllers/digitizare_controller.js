@@ -134,6 +134,8 @@ export default class extends Controller {
     if (!this.map) return
     this.clearAll()
 
+    this._hartaMap?.setDigitizing(true)
+
     this._draw = new ol.interaction.Draw({
       source: this._drawSource,
       type:   "Polygon",
@@ -174,6 +176,7 @@ export default class extends Controller {
     this._areaCalc = 0
     if (this._draw && this.map) { this.map.removeInteraction(this._draw); this._draw = null }
     if (this._snap && this.map) { this.map.removeInteraction(this._snap); this._snap = null }
+    this._hartaMap?.setDigitizing(false)
     this._drawSource.clear()
     this.btnStartTarget.classList.remove("btn-active")
     this.btnCloseTarget.disabled = true
@@ -419,6 +422,7 @@ export default class extends Controller {
     if (this._geomChangeKey) ol.Observable.unByKey(this._geomChangeKey)
     if (this._draw && this.map) { this.map.removeInteraction(this._draw); this._draw = null }
     if (this._snap && this.map) { this.map.removeInteraction(this._snap); this._snap = null }
+    this._hartaMap?.setDigitizing(false)
     this.btnCloseTarget.disabled = true
     this.btnStartTarget.classList.remove("btn-active")
     this._setStatus(`Poligon închis — ${this._verts.length} vertecși.`, "ok")

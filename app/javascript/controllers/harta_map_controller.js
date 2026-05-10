@@ -153,6 +153,11 @@ export default class extends Controller {
     this._overlays?.[name]?.setVisible(visible)
   }
 
+  setDigitizing(active) {
+    this._digitizing = active
+    if (active) this._popup?.setPosition(undefined)
+  }
+
   // ── Stiluri ──────────────────────────────────────────────────────────────
 
   _parcelStyle(feature) {
@@ -199,6 +204,8 @@ export default class extends Controller {
     this.map.addOverlay(this._popup)
 
     this.map.on("singleclick", (evt) => {
+      if (this._digitizing) return  // în timpul digitizării nu afișăm popup-uri info
+
       let html = null
       this.map.forEachFeatureAtPixel(evt.pixel, (feature, layer) => {
         const layerName = layer?.get("name")
