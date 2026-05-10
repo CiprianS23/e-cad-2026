@@ -203,6 +203,21 @@
 
       <!-- (Coordonate cursor + OSnap + Toleranță au fost mutate în status bar-ul de jos) -->
 
+      <!-- 0. Import DXF -->
+      <section class="digi-section">
+        <div class="digi-section-label">Import DXF</div>
+        <div class="digi-btn-row">
+          <label class="btn btn-secondary btn-sm" style="cursor:pointer;flex:1">
+            📥 Selectează fișier
+            <input type="file" accept=".dxf" style="display:none"
+                   data-action="change->digitizare#onDxfFileSelected"
+                   data-digitizare-target="dxfFileInput"
+                   data-digitizare-url-param="<%= digitizare_import_dxf_path %>">
+          </label>
+        </div>
+        <div class="digi-dxf-mapping" data-digitizare-target="dxfMapping" style="display:none"></div>
+      </section>
+
       <!-- 1. Audit topologie global -->
       <section class="digi-section">
         <div class="digi-section-label">Audit topologie</div>

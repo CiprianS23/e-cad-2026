@@ -21,6 +21,7 @@ export default class extends Controller {
     "panel", "panelBody", "editTopoMirror",
     "snapSlider", "snapToleranceVal", "snapModes",
     "btnStart", "btnEdit", "btnClose", "btnUndo", "btnAudit", "auditList",
+    "dxfFileInput", "dxfMapping",
     "statusBar",
     "inputX", "inputY",
     "areaCalc", "areaAct", "areaDiff",
@@ -945,6 +946,202 @@ export default class extends Controller {
     if (evt.key === "F3") { evt.preventDefault(); this.toggleSnap() }
     if (evt.key === "F8") { evt.preventDefault(); this.toggleOrtho() }
     if (evt.key === "Escape" && this._draw) { evt.preventDefault(); this.clearAll() }
+  }
+
+  // ── Import DXF ────────────────────────────────────────────────────────
+
+  async onDxfFileSelected(evt) {
+    const file = evt.target.files[0]
+    if (!file) return
+    if (typeof DxfParser === "undefined") {
+      alert("dxf-parser nu e încărcat (verifică conexiunea sau reîncarcă pagina)")
+      return
+    }
+    const url = evt.params?.url || "/digitizare/import_dxf"
+    try {
+      const text = await file.text()
+      const parser = new DxfParser()
+      const dxf = parser.parseSync(text)
+      const layers = this._extractDxfPolygons(dxf)
+      if (Object.keys(layers).length === 0) {
+        this._renderDxfMapping(null, "Niciun poligon închis găsit în fișier (LWPOLYLINE/POLYLINE cu shape=true).")
+        return
+      }
+      this._dxfLayers = layers
+      this._dxfImportUrl = url
+      this._renderDxfMapping(layers, file.name)
+    } catch (e) {
+      this._renderDxfMapping(null, `Eroare parsare DXF: ${e.message}`)
+    } finally {
+      evt.target.value = ""  // reset ca user să poată reîncărca același fișier
+    }
+  }
+
+  _extractDxfPolygons(dxf) {
+    const out = {}
+    if (!dxf?.entities) return out
+    dxf.entities.forEach(ent => {
+      // LWPOLYLINE și POLYLINE pot fi închise (shape=true) sau deschise.
+      // Pentru import, considerăm doar poligoanele închise.
+      if (ent.type !== "LWPOLYLINE" && ent.type !== "POLYLINE") return
+      const isClosed = ent.shape === true || ent.closed === true
+      if (!isClosed) return
+      const verts = (ent.vertices || []).filter(v => Number.isFinite(v.x) && Number.isFinite(v.y))
+      if (verts.length < 3) return
+
+      const layer = ent.layer || "0"
+      if (!out[layer]) out[layer] = []
+      out[layer].push(verts.map(v => [v.x, v.y]))
+    })
+    return out
+  }
+
+  _renderDxfMapping(layers, filenameOrError) {
+    if (!this.hasDxfMappingTarget) return
+    const root = this.dxfMappingTarget
+
+    if (!layers) {
+      root.style.display = "block"
+      root.innerHTML = `<div class="topo-warn">${filenameOrError}</div>`
+      return
+    }
+
+    // Alegere automată default mapping bazat pe nume layer
+    const guess = (layerName) => {
+      const n = layerName.toUpperCase()
+      if (/PARC|TEREN|IMOBIL|LIM/.test(n))   return "parcela"
+      if (/CLAD|CONST|BUILD/.test(n))         return "cladire"
+      if (/SECT/.test(n))                     return "sector"
+      return "ignora"
+    }
+
+    const rows = Object.entries(layers).map(([layer, polys]) => {
+      const def = guess(layer)
+      const opts = ["parcela", "cladire", "sector", "ignora"].map(c => {
+        const labels = { parcela: "Parcele", cladire: "Clădiri", sector: "Sectoare", ignora: "Ignoră" }
+        return `<option value="${c}" ${c === def ? "selected" : ""}>${labels[c]}</option>`
+      }).join("")
+      return `
+        <tr>
+          <td>${layer}</td>
+          <td style="text-align:right">${polys.length}</td>
+          <td>
+            <select class="input input-sm dxf-cat" data-layer="${layer}">${opts}</select>
+          </td>
+        </tr>
+      `
+    }).join("")
+
+    root.style.display = "block"
+    root.innerHTML = `
+      <div class="digi-dxf-header">📥 ${filenameOrError}</div>
+      <table class="digi-dxf-table">
+        <thead><tr><th>Layer DXF</th><th>Poligoane</th><th>Mapează la</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="digi-dxf-defaults">
+        <div class="digi-section-label" style="margin:8px 0 4px">Defaults pentru parcele</div>
+        <div class="digi-save-grid">
+          <select class="input input-sm" data-digitizare-target="dxfCategFolosinta">
+            <option value="neproductiv" selected>Neproductiv</option>
+            <option value="arabil">Arabil</option>
+            <option value="pasune">Pășune</option>
+            <option value="faneata">Fânețe</option>
+            <option value="vie">Vie</option>
+            <option value="livada">Livadă</option>
+            <option value="padure">Pădure</option>
+            <option value="curti_constructii">Curți/construcții</option>
+            <option value="ape">Ape</option>
+          </select>
+          <input type="text" class="input input-sm" placeholder="Județ" data-digitizare-target="dxfJudet">
+          <input type="text" class="input input-sm" placeholder="Localitate" data-digitizare-target="dxfLocalitate">
+        </div>
+      </div>
+      <div class="digi-btn-row" style="margin-top:8px">
+        <button type="button" class="btn btn-primary btn-sm" data-action="click->digitizare#submitDxfImport">
+          ✓ Importă
+        </button>
+        <button type="button" class="btn btn-outline btn-sm" data-action="click->digitizare#cancelDxfImport">
+          ✕ Anulează
+        </button>
+      </div>
+      <div class="digi-dxf-result" data-digitizare-target="dxfResult"></div>
+    `
+  }
+
+  cancelDxfImport() {
+    if (!this.hasDxfMappingTarget) return
+    this.dxfMappingTarget.style.display = "none"
+    this.dxfMappingTarget.innerHTML = ""
+    this._dxfLayers = null
+  }
+
+  async submitDxfImport() {
+    if (!this._dxfLayers) return
+    const items = []
+    this.dxfMappingTarget.querySelectorAll(".dxf-cat").forEach(sel => {
+      const layer = sel.dataset.layer
+      const cat   = sel.value
+      if (cat === "ignora") return
+      const polys = this._dxfLayers[layer] || []
+      polys.forEach((coords, idx) => {
+        const wkt = this._coordsToWkt(coords)
+        if (wkt) items.push({ category: cat, geom_wkt: wkt, source_layer: layer, source_idx: idx })
+      })
+    })
+    if (items.length === 0) {
+      alert("Niciun poligon nu e mapat la o categorie (toate sunt ignorate).")
+      return
+    }
+
+    const defaults = {
+      categoria_folosinta: this.element.querySelector('[data-digitizare-target="dxfCategFolosinta"]')?.value,
+      judet:               this.element.querySelector('[data-digitizare-target="dxfJudet"]')?.value || "—",
+      localitate:          this.element.querySelector('[data-digitizare-target="dxfLocalitate"]')?.value || "—"
+    }
+
+    const resultEl = this.element.querySelector('[data-digitizare-target="dxfResult"]')
+    if (resultEl) resultEl.innerHTML = "⏳ Se importă..."
+
+    try {
+      const res = await fetch(this._dxfImportUrl || "/digitizare/import_dxf", {
+        method:  "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": this._csrf(),
+          "Accept":       "application/json"
+        },
+        body: JSON.stringify({ items, defaults })
+      })
+      const data = await res.json()
+      if (data.ok) {
+        const r = data.results
+        const msg = `✓ ${r.parcela.created} parcele + ${r.cladire.created} clădiri create`
+                  + (r.parcela.errors.length || r.cladire.errors.length ? " (cu erori — vezi detalii)" : "")
+        if (resultEl) {
+          resultEl.innerHTML = `
+            <div class="topo-ok">${msg}</div>
+            ${r.parcela.errors.length ? `<div class="topo-warn"><b>Erori parcele:</b><br>${r.parcela.errors.join('<br>')}</div>` : ""}
+            ${r.cladire.errors.length ? `<div class="topo-warn"><b>Erori clădiri:</b><br>${r.cladire.errors.join('<br>')}</div>` : ""}
+          `
+        }
+        // Reload parcele și clădiri pe hartă
+        this._hartaMap?._loadParcele()
+        this._hartaMap?._loadCladiri()
+      } else {
+        if (resultEl) resultEl.innerHTML = `<div class="topo-warn">Eroare: ${data.error}</div>`
+      }
+    } catch (e) {
+      if (resultEl) resultEl.innerHTML = `<div class="topo-warn">Eroare rețea: ${e.message}</div>`
+    }
+  }
+
+  _coordsToWkt(coords) {
+    if (!coords || coords.length < 3) return null
+    const closed = (coords[0][0] !== coords[coords.length - 1][0] || coords[0][1] !== coords[coords.length - 1][1])
+                   ? [...coords, coords[0]] : coords
+    const ring = closed.map(c => `${c[0].toFixed(6)} ${c[1].toFixed(6)}`).join(", ")
+    return `MULTIPOLYGON(((${ring})))`
   }
 
   // ── Audit topologie global ─────────────────────────────────────────────

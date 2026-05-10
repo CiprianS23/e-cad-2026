@@ -863,6 +863,16 @@ nav.pagination a:hover  { background: #f3f4f6; }
 .topo-warn { font-size: 11px; color: #b45309; background: #fffbeb; border-radius: 3px; padding: 2px 6px; }
 .topo-ok   { font-size: 11px; color: #15803d; background: #f0fdf4; border-radius: 3px; padding: 4px 8px; font-weight: 600; }
 
+/* ── Import DXF — UI mapping în panou ─────────────────────────── */
+.digi-dxf-mapping { margin-top: 8px; font-size: 11px; }
+.digi-dxf-header { padding: 4px 6px; background: #dbeafe; border-radius: 3px; font-weight: 600; color: #1e3a8a; margin-bottom: 6px; }
+.digi-dxf-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.digi-dxf-table th, .digi-dxf-table td { padding: 3px 6px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+.digi-dxf-table th { font-weight: 600; color: #6b7280; text-transform: uppercase; font-size: 10px; }
+.digi-dxf-table td { vertical-align: middle; }
+.digi-dxf-defaults { margin-top: 8px; }
+.digi-dxf-result { margin-top: 8px; }
+
 /* ── Audit topologie global — listă în panou ──────────────────── */
 .digi-audit-list { margin-top: 8px; max-height: 300px; overflow-y: auto; font-size: 11px; }
 .digi-audit-summary { padding: 4px 6px; background: #fef3c7; border-radius: 3px; margin-bottom: 6px; color: #78350f; }

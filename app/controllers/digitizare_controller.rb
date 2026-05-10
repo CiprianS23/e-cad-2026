@@ -216,6 +216,68 @@ class DigitizareController < ApplicationController
     render json: { issues: [], error: e.message }, status: :unprocessable_entity
   end
 
+  # Import DXF: primește { items: [{category, geom_wkt}], defaults: {...} },
+  # creează ParcelaCadastrala și/sau CladireCadastrala. Auto-numerotare cu
+  # prefix DXF-{timestamp}-{idx}. Validările existente (overlap, dedup
+  # geometrie, ST_IsValid) rulează pe fiecare; cele care eșuează sunt
+  # raportate în results[*].errors fără să oprească restul.
+  def import_dxf
+    items     = params[:items]
+    defaults  = params[:defaults]&.permit!&.to_h || {}
+    return render json: { ok: false, error: "items lipsă" }, status: :unprocessable_entity if items.blank?
+
+    timestamp = Time.current.strftime("%Y%m%d-%H%M%S")
+    results = {
+      parcela: { created: 0, errors: [] },
+      cladire: { created: 0, errors: [] }
+    }
+
+    items.each_with_index do |item, idx|
+      cat = item[:category] || item["category"]
+      wkt = item[:geom_wkt] || item["geom_wkt"]
+      next if wkt.blank?
+
+      case cat
+      when "parcela"
+        record = ParcelaCadastrala.new(
+          numar_cadastral:     "DXF-#{timestamp}-#{idx + 1}",
+          categoria_folosinta: defaults["categoria_folosinta"].presence || "neproductiv",
+          judet:               defaults["judet"].presence || "—",
+          localitate:          defaults["localitate"].presence || "—",
+          status:              "activ",
+          geom_wkt:            wkt
+        )
+        if record.save
+          results[:parcela][:created] += 1
+        else
+          results[:parcela][:errors] << "##{idx + 1}: #{record.errors.full_messages.first}"
+        end
+
+      when "cladire"
+        record = CladireCadastrala.new(
+          numar_cadastral: "DXF-#{timestamp}-C#{idx + 1}",
+          status:          "activ",
+          judet:           defaults["judet"].presence || "—",
+          localitate:      defaults["localitate"].presence || "—",
+          geom_wkt:        wkt
+        )
+        if record.save
+          results[:cladire][:created] += 1
+        else
+          results[:cladire][:errors] << "##{idx + 1}: #{record.errors.full_messages.first}"
+        end
+
+      when "sector"
+        # TODO: model SectorCadastral nu există încă — momentan ignorăm
+        results[:parcela][:errors] << "##{idx + 1}: categoria 'sector' nu e încă implementată"
+      end
+    end
+
+    render json: { ok: true, results: results }
+  rescue => e
+    render json: { ok: false, error: e.message }, status: :unprocessable_entity
+  end
+
   # Audit topologie global: scanează toate parcele/clădiri și returnează
   # toate issues (overlap parcele, overlap clădiri, clădire multi-parcela)
   # cu geometriile și etichetele necesare pentru afișare + zoom în client.
