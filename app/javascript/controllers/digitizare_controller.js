@@ -876,10 +876,13 @@ export default class extends Controller {
       this._setStatus("Selectează un poligon pe hartă (click pe el) înainte de Editează.", "warn")
       return
     }
-    this.editKindValue = this._selected.kind
-    this.editIdValue   = String(this._selected.feature.get("id"))
+    // Cache local — clearSelection() declanșează event \"feature-deselected\"
+    // care, prin listener, setează this._selected = null. Lucrăm pe referință.
+    const sel = this._selected
+    this.editKindValue = sel.kind
+    this.editIdValue   = String(sel.feature.get("id"))
     this._hartaMap?.clearSelection()
-    this._enterEditMode(this._selected.feature, this._selected.layer)
+    this._enterEditMode(sel.feature, sel.layer)
   }
 
   // ── EDIT MODE: modify geometrie poligon existent ─────────────────────────
