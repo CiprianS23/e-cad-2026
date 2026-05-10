@@ -442,9 +442,10 @@ export default class extends Controller {
     const m    = this._snapModes
     refs.forEach(layer => {
       layer.getSource().getFeatures().forEach(f => {
-        // În edit mode, NU includem feature-ul editat ca țintă de snap
-        // (cauza erorilor OSnap când Modify încerca să snap-uie pe el însuși)
-        if (this._editing && this._editFeature && f === this._editFeature) return
+        // Includem TOATE features-urile (primary + vecini) ca ținte de snap.
+        // Astfel snap-ul funcționează simetric: drag de la primary spre vecin
+        // ȘI invers. Risc de self-snap (V1 spre V2 al aceluiași poligon) e
+        // minor — utilizatorul poate evita prin precizie sau Undo.
         if (m.has("endpoint") || m.has("nearest")) out.push(f)
         if (m.has("midpoint")) this._addMidpoints(f, out)
         if (m.has("centroid")) this._addCentroid(f, out)
