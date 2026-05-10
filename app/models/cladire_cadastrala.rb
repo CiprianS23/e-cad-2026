@@ -71,6 +71,7 @@ class CladireCadastrala < ApplicationRecord
   end
 
   def nu_se_suprapune_cu_alte_cladiri
+    return if Thread.current[:topology_skip_overlap_check]
     wkt = geom.as_text
     excl = id || 0
     overlaps = self.class.connection.select_all(

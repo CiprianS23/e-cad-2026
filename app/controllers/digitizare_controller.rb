@@ -1,3 +1,5 @@
+require "set"
+
 class DigitizareController < ApplicationController
   def verifica_topologie
     coords     = params[:coords]
@@ -225,22 +227,57 @@ class DigitizareController < ApplicationController
     redirect_url = nil
 
     ActiveRecord::Base.transaction do
-      records = []
-
-      # ── Faza 1: assign + save fără validări ──────────────────────────
+      # Snapshot pre-edit: overlap-uri existente în DB ÎNAINTE de phase 1.
+      # Folosit ca să reportăm doar overlap-urile NOI (cauzate de edit),
+      # nu pe cele pre-existente între alte parcele/clădiri din test data.
+      pre_overlaps = {}
+      records_with_payloads = []
       [primary, *neighbors].each do |payload|
-        record = phase1_save(payload, errors)
-        records << record if record
+        kind = payload[:kind] || payload["kind"]
+        id   = payload[:id]   || payload["id"]
+        klass = kind == "cladire" ? CladireCadastrala : ParcelaCadastrala
+        record = klass.find_by(id: id)
+        next unless record
+        pre_overlaps[[klass.name, record.id]] = capture_overlap_set(record)
+        records_with_payloads << [record, payload]
+      end
+
+      # ── Faza 1: assign + save fără validări (suspendăm și overlap-check) ──
+      Thread.current[:topology_skip_overlap_check] = true
+      begin
+        records_with_payloads.each do |record, payload|
+          phase1_save_record(record, payload, errors)
+        end
+      ensure
+        Thread.current[:topology_skip_overlap_check] = nil
       end
       raise ActiveRecord::Rollback if errors.any?
 
-      # ── Faza 2: validate cu DB în starea finală ───────────────────────
-      records.each do |r|
-        r.reload
-        next if r.valid?
-        kind  = r.is_a?(CladireCadastrala) ? "cladire" : "parcela"
-        label = r.respond_to?(:numar_cadastral) ? r.numar_cadastral : r.id
-        r.errors.full_messages.each { |m| errors << "#{kind} #{label}: #{m}" }
+      # ── Faza 2: alte validări (geom_topologic_valid, traverseaza_parcele) ──
+      Thread.current[:topology_skip_overlap_check] = true
+      begin
+        records_with_payloads.each do |record, _|
+          record.reload
+          next if record.valid?
+          kind  = record.is_a?(CladireCadastrala) ? "cladire" : "parcela"
+          label = record.respond_to?(:numar_cadastral) ? record.numar_cadastral : record.id
+          record.errors.full_messages.each { |m| errors << "#{kind} #{label}: #{m}" }
+        end
+      ensure
+        Thread.current[:topology_skip_overlap_check] = nil
+      end
+      raise ActiveRecord::Rollback if errors.any?
+
+      # ── Faza 3: delta-check pe overlap (raportăm doar pe cele NOI) ──
+      records_with_payloads.each do |record, _|
+        post = capture_overlap_set(record)
+        pre  = pre_overlaps[[record.class.name, record.id]] || Set.new
+        new_overlaps = post - pre
+        kind  = record.is_a?(CladireCadastrala) ? "cladire" : "parcela"
+        label = record.respond_to?(:numar_cadastral) ? record.numar_cadastral : record.id
+        new_overlaps.each do |other_id, other_label, area|
+          errors << "#{kind} #{label}: overlap NOU cu #{kind} #{other_label} (#{area} mp)"
+        end
       end
       raise ActiveRecord::Rollback if errors.any?
 
@@ -364,29 +401,17 @@ class DigitizareController < ApplicationController
 
   private
 
-  # Faza 1 a save_batch: assign atribute + save FĂRĂ validări.
-  # Triggerează manual conversia WKT → geom (atribuie_geom_din_wkt e
-  # before_validation, deci save(validate: false) o sare).
-  def phase1_save(payload, errors)
+  # Faza 1 a save_batch: aplică payload pe record + save FĂRĂ validări.
+  def phase1_save_record(record, payload, errors)
     kind = payload[:kind] || payload["kind"]
-    id   = payload[:id]   || payload["id"]
     wkt  = payload[:geom_wkt] || payload["geom_wkt"]
     area = payload[:suprafata_mp] || payload["suprafata_mp"]
 
-    klass = kind == "cladire" ? CladireCadastrala : ParcelaCadastrala
-    record = klass.find_by(id: id)
-    unless record
-      errors << "#{kind} ##{id}: nu există"
-      return nil
-    end
-
-    # Setăm WKT și triggerăm conversia manual (callback before_validation)
     record.geom_wkt = wkt if wkt.present?
     record.send(:atribuie_geom_din_wkt) if record.respond_to?(:atribuie_geom_din_wkt, true) && wkt.present?
 
-    # Pentru clădire, refacem și legătura cu parcela din noul geom (recalc spațial)
     if record.is_a?(CladireCadastrala) && record.geom.present?
-      record.parcela_cadastrala_id = nil  # forțăm recalcul
+      record.parcela_cadastrala_id = nil
       record.send(:atribuie_parcela_din_geom)
     end
 
@@ -395,11 +420,30 @@ class DigitizareController < ApplicationController
     end
 
     unless record.save(validate: false)
-      label = record.respond_to?(:numar_cadastral) ? record.numar_cadastral : id
+      label = record.respond_to?(:numar_cadastral) ? record.numar_cadastral : record.id
       errors << "#{kind} #{label}: salvare DB eșuată"
-      return nil
     end
-    record
+  end
+
+  # Capturează overlap-urile actuale ale unui record cu alte poligoane de
+  # același tip. Returnează Set cu tupluri [other_id, other_label, area_rounded]
+  # care permite operații set diff (- pentru identificarea overlap-urilor NOI).
+  def capture_overlap_set(record)
+    return Set.new if record.geom.blank?
+    table = record.is_a?(CladireCadastrala) ? "cladiri_cadastrale" : "parcele_cadastrale"
+    rows = record.class.connection.select_all(
+      ApplicationRecord.sanitize_sql_array([<<~SQL, record.geom.as_text, record.id || 0])
+        WITH np AS (SELECT ST_GeomFromText(?, 3844) AS geom)
+        SELECT t.id, t.numar_cadastral AS label,
+          ROUND(ST_Area(ST_Intersection(t.geom, np.geom))::numeric, 2) AS area
+        FROM #{table} t, np
+        WHERE t.geom IS NOT NULL
+          AND t.id != ?
+          AND ST_Intersects(t.geom, np.geom)
+          AND ST_Area(ST_Intersection(t.geom, np.geom)) > 0.01
+      SQL
+    )
+    rows.each_with_object(Set.new) { |r, s| s << [r["id"].to_i, r["label"], r["area"].to_f] }
   end
 
   def build_dxf(pts, layer)
