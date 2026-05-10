@@ -270,6 +270,81 @@ class DigitizareController < ApplicationController
       }
     end
 
+    # CTE comun pentru poligoanele CGXML (lands + buildings) — construite din
+    # tabela `points` la fiecare rulare; reused în 3 sub-query-uri de mai jos.
+    cgxml_polys_cte = <<~SQL
+      WITH cgxml_lands AS (
+        SELECT l.id, COALESCE(l.cadgenno, l.e2identifier, 'land#' || l.id) AS label,
+          CASE WHEN ST_IsClosed(ST_MakeLine(p.coordinates ORDER BY p.no))
+               THEN ST_MakePolygon(ST_MakeLine(p.coordinates ORDER BY p.no))
+               ELSE ST_MakePolygon(ST_AddPoint(ST_MakeLine(p.coordinates ORDER BY p.no), ST_StartPoint(ST_MakeLine(p.coordinates ORDER BY p.no))))
+          END AS geom
+        FROM points p JOIN lands l ON l.id = p.land_id
+        WHERE p.coordinates IS NOT NULL
+        GROUP BY l.id
+        HAVING COUNT(*) >= 3
+      ),
+      cgxml_buildings AS (
+        SELECT b.id, COALESCE(b.cadgenno, b.e2identifier, 'bld#' || b.id) AS label,
+          CASE WHEN ST_IsClosed(ST_MakeLine(p.coordinates ORDER BY p.no))
+               THEN ST_MakePolygon(ST_MakeLine(p.coordinates ORDER BY p.no))
+               ELSE ST_MakePolygon(ST_AddPoint(ST_MakeLine(p.coordinates ORDER BY p.no), ST_StartPoint(ST_MakeLine(p.coordinates ORDER BY p.no))))
+          END AS geom
+        FROM points p JOIN buildings b ON b.id = p.building_id
+        WHERE p.coordinates IS NOT NULL
+        GROUP BY b.id
+        HAVING COUNT(*) >= 3
+      ),
+      cgxml_lands_v   AS (SELECT id, label, geom FROM cgxml_lands     WHERE ST_IsValid(geom)),
+      cgxml_buildings_v AS (SELECT id, label, geom FROM cgxml_buildings WHERE ST_IsValid(geom))
+    SQL
+
+    # 3a. Suprapuneri parcele user-drawn vs CGXML lands (cross-source)
+    sql = "#{cgxml_polys_cte}\n" + <<~SQL
+      SELECT p.id AS id_a, p.numar_cadastral AS label_a,
+             cl.id AS id_b, cl.label AS label_b,
+             ROUND(ST_Area(ST_Intersection(p.geom, cl.geom))::numeric, 2) AS area,
+             ST_AsGeoJSON(ST_Intersection(p.geom, cl.geom), 6) AS geojson
+      FROM parcele_cadastrale p, cgxml_lands_v cl
+      WHERE p.geom IS NOT NULL
+        AND ST_Intersects(p.geom, cl.geom)
+        AND ST_Area(ST_Intersection(p.geom, cl.geom)) > 0.10
+        AND ABS(ST_Area(p.geom) - ST_Area(ST_Intersection(p.geom, cl.geom))) > 0.10
+      ORDER BY ST_Area(ST_Intersection(p.geom, cl.geom)) DESC
+      LIMIT 100
+    SQL
+    ActiveRecord::Base.connection.select_all(sql).each do |row|
+      issues << {
+        category: "Divergențe parcele ↔ CGXML",
+        type: "overlap_parcela_cgxml", severity: "warning",
+        message: "Parcela #{row['label_a']} divergent față de CGXML #{row['label_b']}: #{row['area']} mp suprapunere parțială",
+        area: row['area'].to_f,
+        geojson: row['geojson']
+      }
+    end
+
+    # 3b. Suprapuneri CGXML lands ↔ CGXML lands
+    sql = "#{cgxml_polys_cte}\n" + <<~SQL
+      SELECT a.id AS id_a, a.label AS label_a, b.id AS id_b, b.label AS label_b,
+             ROUND(ST_Area(ST_Intersection(a.geom, b.geom))::numeric, 2) AS area,
+             ST_AsGeoJSON(ST_Intersection(a.geom, b.geom), 6) AS geojson
+      FROM cgxml_lands_v a, cgxml_lands_v b
+      WHERE a.id < b.id
+        AND ST_Intersects(a.geom, b.geom)
+        AND ST_Area(ST_Intersection(a.geom, b.geom)) > 0.10
+      ORDER BY ST_Area(ST_Intersection(a.geom, b.geom)) DESC
+      LIMIT 100
+    SQL
+    ActiveRecord::Base.connection.select_all(sql).each do |row|
+      issues << {
+        category: "Suprapuneri CGXML",
+        type: "overlap_cgxml_cgxml", severity: "error",
+        message: "CGXML #{row['label_a']} ⇄ #{row['label_b']}: #{row['area']} mp",
+        area: row['area'].to_f,
+        geojson: row['geojson']
+      }
+    end
+
     # 3. Clădiri ce traversează mai multe parcele
     sql = <<~SQL
       WITH cladiri_verts AS (

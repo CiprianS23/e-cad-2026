@@ -48,6 +48,7 @@ export default class extends Controller {
     this.map.on("moveend", () => {
       this.parcelLabelsLayer?.changed()
       this.cladiriLabelsLayer?.changed()
+      this.cgxmlLabelsLayer?.changed()
     })
     // Notifică alte controllere (digitizare, layer-switcher) că harta e gata
     this.dispatch("ready", { detail: { map: this.map }, bubbles: true })
@@ -177,6 +178,12 @@ export default class extends Controller {
       zIndex:     1200,
       properties: { name: "cladiri-labels" }
     })
+    this.cgxmlLabelsLayer = new ol.layer.Vector({
+      source:     this.cgxmlLayer.getSource(),
+      style:      this._cgxmlLabelStyle.bind(this),
+      zIndex:     1200,
+      properties: { name: "cgxml-labels" }
+    })
 
     this._overlays = {
       uat:     this.uatLayer,
@@ -191,6 +198,7 @@ export default class extends Controller {
     this.map.addLayer(this.cgxmlLayer)
     this.map.addLayer(this.parcelLabelsLayer)
     this.map.addLayer(this.cladiriLabelsLayer)
+    this.map.addLayer(this.cgxmlLabelsLayer)
   }
 
   // ── API public (folosit de layer-switcher prin Stimulus outlet) ──────────
@@ -207,6 +215,7 @@ export default class extends Controller {
     // Sincronizăm vizibilitatea label-urilor cu cea a layer-ului
     if (name === "parcele") this.parcelLabelsLayer?.setVisible(visible)
     if (name === "cladiri") this.cladiriLabelsLayer?.setVisible(visible)
+    if (name === "cgxml")   this.cgxmlLabelsLayer?.setVisible(visible)
   }
 
   setDigitizing(active) {
@@ -341,6 +350,28 @@ export default class extends Controller {
         text:      label,
         font:      "600 11px system-ui, sans-serif",
         fill:      new ol.style.Fill({ color: "#7c2d12" }),
+        stroke:    new ol.style.Stroke({ color: "#fff", width: 3 }),
+        textAlign: "center",
+        overflow:  true
+      })
+    })
+  }
+
+  _cgxmlLabelStyle(feature) {
+    const isBld   = feature.get("entity_type") === "building"
+    const idLabel = feature.get("cadgenno") || feature.get("e2identifier") || `#${feature.get("id")}`
+    const geom    = feature.getGeometry()
+    if (!geom) return null
+    const area    = Math.round(geom.getArea())
+    const label   = `${idLabel}\n${area} mp`
+    const labelPos = this._computeLabelPosition(geom)
+    if (!labelPos) return null
+    return new ol.style.Style({
+      geometry: new ol.geom.Point(labelPos),
+      text: new ol.style.Text({
+        text:      label,
+        font:      `600 ${isBld ? 10 : 11}px system-ui, sans-serif`,
+        fill:      new ol.style.Fill({ color: isBld ? "#7f1d1d" : "#92400e" }),
         stroke:    new ol.style.Stroke({ color: "#fff", width: 3 }),
         textAlign: "center",
         overflow:  true
