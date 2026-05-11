@@ -17,15 +17,18 @@
 
     <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
 
-    <% if content_for?(:map) %>
-      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.5.0/ol.css" />
-      <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol-ext@4.0.31/dist/ol-ext.min.css" />
-      <script src="https://cdn.jsdelivr.net/npm/ol@10.5.0/dist/ol.js"></script>
-      <script src="https://cdn.jsdelivr.net/npm/ol-ext@4.0.31/dist/ol-ext.min.js"></script>
-      <script src="https://cdn.jsdelivr.net/npm/jsts@2.11.3/dist/jsts.min.js"></script>
-      <script src="https://cdn.jsdelivr.net/npm/dxf-parser@1.1.2/dist/dxf-parser.min.js"></script>
-      <script src="https://unpkg.com/proj4@2.9.0/dist/proj4.js"></script>
-    <% end %>
+    <%# Bibliotecile OpenLayers/proj4/jsts/ol-ext/dxf-parser sunt încărcate
+        UNCONDIȚIONAT: orice pagină GIS le poate folosi, iar costul e mic
+        (cache browser după prima vizită). Decizia anterioară de a le încărca
+        condiționat (content_for :map) a generat erori subtile când vreo
+        pagină GIS uita marker-ul. Cf. discuție din 2026-05-11. %>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.5.0/ol.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol-ext@4.0.31/dist/ol-ext.min.css" />
+    <script src="https://cdn.jsdelivr.net/npm/ol@10.5.0/dist/ol.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ol-ext@4.0.31/dist/ol-ext.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsts@2.11.3/dist/jsts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dxf-parser@1.1.2/dist/dxf-parser.min.js"></script>
+    <script src="https://unpkg.com/proj4@2.9.0/dist/proj4.js"></script>
 
     <%= javascript_importmap_tags %>
   </head>
