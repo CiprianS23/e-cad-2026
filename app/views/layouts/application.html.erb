@@ -43,13 +43,25 @@
     <% unless content_for?(:fullpage) %>
       <div class="container">
         <% flash.each do |type, message| %>
-          <div class="flash <%= type %>"><%= message %></div>
+          <div class="flash <%= type %>"
+               data-controller="flash"
+               data-flash-sticky="<%= %w[alert error].include?(type.to_s) %>">
+            <span class="flash-msg"><%= message %></span>
+            <button type="button" class="flash-close" aria-label="Închide"
+                    data-action="click->flash#dismiss">✕</button>
+          </div>
         <% end %>
         <%= yield %>
       </div>
     <% else %>
       <% flash.each do |type, message| %>
-        <div class="flash-overlay <%= type %>"><%= message %></div>
+        <div class="flash-overlay <%= type %>"
+             data-controller="flash"
+             data-flash-sticky="<%= %w[alert error].include?(type.to_s) %>">
+          <span class="flash-msg"><%= message %></span>
+          <button type="button" class="flash-close" aria-label="Închide"
+                  data-action="click->flash#dismiss">✕</button>
+        </div>
       <% end %>
       <%= yield %>
     <% end %>

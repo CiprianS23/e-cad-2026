@@ -37,12 +37,20 @@ export default class extends Controller {
     this._gcps       = []     // GCP-uri persistate (server-side)
     this._registerProjection()
 
-    // Detectează dimensiunile imaginii dacă nu sunt setate
-    this._ensureDimensions().then(() => {
+    // Construim AMÂNDOUĂ pane-urile imediat, fără să așteptăm detectarea
+    // dimensiunilor (care poate eșua pentru formate nesuportate browser).
+    // Harta de referință e independentă de imaginea sursă.
+    this._buildReferenceMap()
+    this._loadGcps()
+
+    // Pane-ul sursă: dacă dimensiunile sunt deja cunoscute (setate la upload
+    // prin gdalinfo), construim direct. Altfel încercăm detectarea client-side
+    // cu timeout de siguranță (fallback dacă onerror nu se declanșează).
+    if (this.originalWidthValue > 0 && this.originalHeightValue > 0) {
       this._buildSourceMap()
-      this._buildReferenceMap()
-      this._loadGcps()
-    })
+    } else {
+      this._ensureDimensions().finally(() => this._buildSourceMap())
+    }
   }
 
   // ── Setup ────────────────────────────────────────────────────────────────
@@ -71,15 +79,23 @@ export default class extends Controller {
     if (this.originalWidthValue > 0 && this.originalHeightValue > 0) return
     if (!this.rasterUrlValue) return
     return new Promise((resolve) => {
+      let resolved = false
+      const finish = () => { if (!resolved) { resolved = true; resolve() } }
+      // Timeout de siguranță — unele formate (TIFF) pot să nu declanșeze
+      // onerror corect, ceea ce blochează la nesfârșit fluxul.
+      const safety = setTimeout(() => {
+        console.warn("Timeout la încărcarea imaginii pentru detectare dimensiuni")
+        finish()
+      }, 5000)
       const img = new Image()
       img.crossOrigin = "anonymous"
       img.onload = async () => {
+        clearTimeout(safety)
         this.originalWidthValue  = img.naturalWidth
         this.originalHeightValue = img.naturalHeight
         if (this.hasSrcDimsTarget) {
           this.srcDimsTarget.textContent = `${img.naturalWidth} × ${img.naturalHeight} px`
         }
-        // Persistă dimensiunile pe plan (PATCH)
         await fetch(this.planUrlValue, {
           method: "PATCH",
           credentials: "same-origin",
@@ -87,10 +103,14 @@ export default class extends Controller {
           body: JSON.stringify({ gis_georef_plan: {
             original_width: img.naturalWidth, original_height: img.naturalHeight
           }})
-        })
-        resolve()
+        }).catch(() => {})
+        finish()
       }
-      img.onerror = () => resolve()
+      img.onerror = (e) => {
+        clearTimeout(safety)
+        console.warn("Imaginea sursă nu se poate afișa în browser (probabil format neacceptat: TIFF/PDF). Folosește varianta de preview server-side.")
+        finish()
+      }
       img.src = this.rasterUrlValue
     })
   }

@@ -22,10 +22,11 @@ module Gis
       plan = GisGeorefPlan.new(plan_params.merge(owner_token: @owner_token, state: "draft"))
       file = params.dig(:gis_georef_plan, :raster_file)
       plan.raster_file.attach(file) if file.present?
-      # original_width / height — detectate client-side din `<img>.naturalWidth`
-      # imediat după upload și trimise prin PATCH pe `edit`.
 
       if plan.save
+        # Generăm preview PNG (din TIFF/PDF) + citim dimensiunile reale.
+        # Operație sincronă — pentru fișiere mari ar trebui mutată în Sidekiq.
+        plan.prepare_for_display! if plan.raster_file.attached?
         redirect_to edit_gis_georef_plan_path(plan), notice: "Plan încărcat. Adaugă puncte de control pentru georeferențiere."
       else
         flash.now[:alert] = plan.errors.full_messages.join(", ")

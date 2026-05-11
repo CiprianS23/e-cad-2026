@@ -4,7 +4,7 @@
 <div class="georef-page"
      data-controller="georef-editor"
      data-georef-editor-plan-id-value="<%= @plan.id %>"
-     data-georef-editor-raster-url-value="<%= @plan.raster_url %>"
+     data-georef-editor-raster-url-value="<%= @plan.raster_preview_url || @plan.raster_url %>"
      data-georef-editor-original-width-value="<%= @plan.original_width || 0 %>"
      data-georef-editor-original-height-value="<%= @plan.original_height || 0 %>"
      data-georef-editor-cps-url-value="<%= gis_georef_plan_control_points_path(@plan) %>"

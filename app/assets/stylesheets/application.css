@@ -30,9 +30,24 @@ nav.topnav a:hover { color: #fff; }
 .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
 
 /* ── Flash ── */
-.flash { padding: 10px 16px; border-radius: 6px; margin-bottom: 16px; font-size: 13px; }
-.flash.notice { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
-.flash.alert  { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+.flash, .flash-overlay {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; border-radius: 6px; font-size: 13px;
+  transition: opacity .25s, transform .25s;
+}
+.flash { margin-bottom: 16px; }
+.flash--dismissing,
+.flash-overlay.flash--dismissing { opacity: 0; transform: translateY(-4px); }
+.flash.notice           { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+.flash.alert,
+.flash.error            { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+.flash-msg              { flex: 1 1 auto; }
+.flash-close {
+  background: transparent; border: 0; color: currentColor;
+  font-size: 16px; line-height: 1; cursor: pointer; padding: 2px 4px;
+  border-radius: 3px; opacity: .7;
+}
+.flash-close:hover { opacity: 1; background: rgba(0,0,0,.05); }
 
 /* ── Page header ── */
 .page-header {

@@ -6,8 +6,9 @@ class GisGeorefPlan < ApplicationRecord
   # `owner_token` — identificator stabil per browser (cookie semnat), aceeași
   # convenție ca la `GisUserLayerPref`. La integrarea în e-CAD prod se va
   # înlocui cu `user_id`.
-  has_one_attached :raster_file    # imaginea originală încărcată de utilizator
-  has_one_attached :warped_file    # GeoTIFF georeferențiat în EPSG:3844 (rezultat gdalwarp)
+  has_one_attached :raster_file          # imaginea originală încărcată de utilizator
+  has_one_attached :raster_preview_file  # PNG generat la upload — pentru afișare în browser (TIFF nu e suportat nativ)
+  has_one_attached :warped_file          # GeoTIFF georeferențiat în EPSG:3844 (rezultat gdalwarp)
   has_many :control_points,
            -> { order(:ordinal, :id) },
            class_name: "GisGeorefControlPoint",
@@ -111,6 +112,16 @@ class GisGeorefPlan < ApplicationRecord
     Rails.application.routes.url_helpers.rails_blob_path(raster_file, only_path: true)
   end
 
+  # URL al variantei PNG pentru afișare în browser (TIFF/PDF nu sunt suportate
+  # nativ). Fallback la raster_url când e deja PNG/JPG.
+  def raster_preview_url
+    if raster_preview_file.attached?
+      Rails.application.routes.url_helpers.rails_blob_path(raster_preview_file, only_path: true)
+    else
+      raster_url
+    end
+  end
+
   def warped_url
     return nil unless warped_file.attached?
     Rails.application.routes.url_helpers.rails_blob_path(warped_file, only_path: true)
@@ -122,6 +133,40 @@ class GisGeorefPlan < ApplicationRecord
   # - altfel → raster_file original cu bounds calculate prin afină
   def display_url
     warped_url || raster_url
+  end
+
+  # Rulează (la upload) un pipeline GDAL pentru a:
+  #   1. Citi dimensiunile reale ale imaginii sursă (original_width/height)
+  #   2. Genera o variantă PNG pentru afișare în browser (raster_preview_file)
+  # Se apelează din controller după `raster_file.attach`.
+  def prepare_for_display!
+    return unless raster_file.attached?
+    raster_file.blob.open do |tempfile|
+      src = tempfile.path
+
+      # 1. Dimensiuni
+      dims = Gis::RasterPreviewer.dimensions(src)
+      if dims
+        self.original_width  = dims[0]
+        self.original_height = dims[1]
+      end
+
+      # 2. Preview PNG (dacă e cazul)
+      ext = File.extname(raster_file.filename.to_s).downcase
+      unless Gis::RasterPreviewer::BROWSER_FORMATS.include?(ext)
+        png_path = Gis::RasterPreviewer.to_png(src)
+        raster_preview_file.attach(
+          io:           File.open(png_path, "rb"),
+          filename:     "#{name.parameterize}_preview.png",
+          content_type: "image/png"
+        )
+        File.delete(png_path) if File.exist?(png_path) && png_path != src
+      end
+
+      save! if changed?
+    end
+  rescue Gis::RasterPreviewer::PreviewError => e
+    Rails.logger.warn "Plan ##{id}: nu pot genera preview (#{e.message})"
   end
 
   # Rulează pipeline-ul gdalwarp pentru a produce un GeoTIFF georeferențiat
