@@ -338,7 +338,7 @@ Convenția pentru scara DPI 96: `scale ≈ resolution × 3779.5`.
 
 ---
 
-## Sumar fișiere atinse — sesiunea 11 mai
+## Sumar fișiere atinse — sesiunea 11 mai (partea 1)
 
 ```
 config/routes.rb
@@ -349,4 +349,199 @@ app/javascript/controllers/digitizare_controller.js
 app/javascript/controllers/harta_map_controller.js
 ```
 
-**Niciun model existent nu a fost modificat în 11 mai. Schema bazei de date nu a fost atinsă în 11 mai.**
+**Niciun model existent nu a fost modificat în prima parte a zilei. Schema nu a fost atinsă.**
+
+---
+
+# SESIUNEA 2026‑05‑11 (partea 2) — Georeferențiere planuri vechi
+
+**Context:** primitiva nouă „upload imagine cadastrală scanată/PDF + plasare GCP-uri pe imagine și pe harta de referință → produce GeoTIFF georeferențiat în Stereo70 + afișare pe harta principală". Spec §6 din `1_modul_gis.md`. Toate tabelele noi au prefix `gis_` pentru a fi ușor de identificat la livrare.
+
+## 1. Modele și schema — `gis_georef_plans` + `gis_georef_control_points`
+
+**Cerință:** persistă planuri raster + GCP-urile (puncte de control pixel↔world).
+
+**Fișiere create:**
+
+- `db/migrate/20260511190001_enable_postgis_raster.rb` — `CREATE EXTENSION postgis_raster` (opțional, pentru viitoare stocare raster nativă în DB).
+- `db/migrate/20260511190002_create_gis_georef_plans.rb` — tabelă plan (owner_token din cookie semnat ca placeholder pentru user_id la integrare; coloane: name, description, state, original_width/height, transform_type, transform_params jsonb, residual_rms, bounds_geom geometry(Polygon, 3844)).
+- `db/migrate/20260511190003_create_gis_georef_control_points.rb` — tabelă GCP (FK plan, pixel_x/y, world_x/y, ordinal, residual, note).
+- `db/migrate/20260511190004_create_active_storage_tables.active_storage.rb` — sistem ActiveStorage (raster_file + warped_file + previewuri).
+- `app/models/gis_georef_plan.rb` — model cu has_one_attached pentru `raster_file`, `raster_preview_file`, `warped_file`, `warped_preview_file`. States: `draft | georeferenced | finalized`. Metode: `prepare_for_display!` (rulează la upload pentru a citi dimensiuni + genera preview browser), `recompute_georeference!` (preview afină rapidă), `finalize_warp!` (rulează `RasterWarper`).
+- `app/models/gis_georef_control_point.rb` — model GCP cu validări (pixel/world numerice, ordinal>=0, world_not_duplicate_in_plan pentru a preveni „Transform is not solvable" în gdalwarp).
+
+---
+
+## 2. Servicii GDAL — `RasterPreviewer` + `RasterWarper` + transformări
+
+**Cerință:** browser-ele nu suportă nativ TIFF/PDF — avem nevoie de conversie + de un pipeline robust de georeferențiere care să accepte diverse configurări de benzi.
+
+**Fișiere create:**
+
+- `app/services/gis/raster_previewer.rb` — `to_web_preview(source_path, max_dim:, quality:, preserve_alpha:)` cu detecție automată de benzi (Palette → expand RGB, Byte vs alte tipuri → `-ot Byte -scale`); încearcă JPEG, fallback PNG; opțiunea `preserve_alpha: true` forțează PNG pentru a păstra margins transparente (warped output cu `-dstalpha`).
+- `app/services/gis/affine_transform.rb` — fit afin 6 parametri din ≥3 GCP-uri (least-squares); folosit pentru preview rapid în-browser (`recompute_georeference!`).
+- `app/services/gis/similarity_transform.rb` — fit Helmert improper 4 parametri (translate + rotate + scale uniform) cu y-flip explicit (`Y = b·col − a·row + ty`); modelul corect pentru planuri cadastrale scanate care nu au distorsiuni interne.
+- `app/services/gis/raster_warper.rb` — pipeline GDAL: `gdal_translate -expand rgba` (pentru palette indexed scans) → VRT cu GCP-uri SAU GeoTransform similitudine → `gdalwarp -t_srs <proj4_stereo70>` → `gdaladdo` overviews 2/4/8/16/32×. Constantă `STEREO70_PROJ4` folosită direct (codul EPSG:3844 are axă oficială X=north,Y=east care diferă de proj4/OL X=east,Y=north). Default method: `"similarity"`. Output LZW + TILED + BIGTIFF (693MB → 17-52MB).
+
+---
+
+## 3. Controllere și rute REST
+
+**Fișiere create:**
+
+- `app/controllers/gis/georef_plans_controller.rb` — CRUD complet: `index/new/create/show/edit/update/destroy/georeference/finalize/regenerate_preview`. Upload via multipart; `prepare_for_display!` rulat sincron după save (pentru >100MB e nevoie de Sidekiq job — deferat). `display_url` returnează preview-ul când există, altfel TIFF brut.
+- `app/controllers/gis/georef_control_points_controller.rb` — CRUD pentru GCP-uri (create/update/destroy). `:ordinal` SCOS din permit — server-authoritative (model îl atribuie via before_validation).
+- `config/routes.rb` — resources `gis/georef_plans` cu member routes `georeference` și `finalize`; nested resources `:control_points`.
+
+---
+
+## 4. Editor dual-viewport — `georef_editor_controller.js`
+
+**Cerință:** ecran cu două panouri: stânga = imaginea sursă (în coord pixel), dreapta = harta de referință în Stereo70. Click pe sursă → marker pending. Click pe referință SAU coord manuale → GCP-ul se salvează.
+
+**Fișier creat:** `app/javascript/controllers/georef_editor_controller.js` (~880 linii).
+
+**Funcționalități cheie:**
+
+- **Source pane** (`_buildSourceMap`): OL Map cu proiecție custom `PLAN-PIXEL` (units: pixels, extent [0, -H, W, 0]); afișează preview-ul PNG/JPG via `ol.source.ImageStatic`; rotație animată (slider 0-360° + butoane ±90°) — doar vizual, coords pixel rămân autoritare.
+- **Reference pane** (`_buildReferenceMap`): OL Map în EPSG:3844 cu base layers (OSM direct, Google Sat/Hybrid, Esri World Imagery, Ortofoto ANCPI via MapProxy); overlay-uri vector pentru parcele/clădiri/UAT/CGXML; grid Stereo70 1:5000 cu spațiere configurabilă (500m/1000m/2000m/5000m) și etichete X/Y la intersecții; auto-fit pe extent-ul datelor reale.
+- **Snap inteligent** (`_findNearestVertex` + `_snapToGridIntersection`): la click pe referință, prioritate (1) vertex cel mai apropiat de o geometrie vizibilă în limita ~15px, (2) intersecție grid Stereo70 dacă grid vizibil, (3) coord click direct. Înlocuiește comportamentul anterior de „centroid parcelă" care făcea ca toate click-urile pe aceeași parcelă să producă același world.
+- **Coordonate manuale**: input X/Y în Stereo70 pentru cazurile când utilizatorul cunoaște coordonatele exacte (de ex. de pe planul vechi marcat cu coords).
+- **Marker style**: cerc roșu radius 12 cu numărul GCP-ului (cifre albe pe outline negru). În-flight pendingul e galben.
+- **Anti-duplicate preflight**: înainte de POST verifică dacă world-ul ales coincide cu un GCP existent (tol 1cm) → eroare clară fără cerere de rețea.
+
+---
+
+## 5. Afișare pe harta principală — `harta_map_controller.js` (extensii)
+
+**Cerință:** planurile cu `state ∈ {georeferenced, finalized}` apar automat pe `/harta` ca image overlays.
+
+**Fișiere modificate:**
+
+- `app/javascript/controllers/harta_map_controller.js`
+  - `_loadGeorefPlans()` — fetch `/gis/georef_plans`, filter `state` finalized/georeferenced, pentru fiecare apelează `_addGeorefLayer(planId)`.
+  - `_addGeorefLayer(planId)` — fetch detalii plan, creează `ol.layer.Image` cu `ol.source.ImageStatic({url: display_url, imageExtent: bounds_extent, projection: EPSG:3844})` și `zIndex: 90`. Salvează în `this._georefLayers[planId]` pentru control individual.
+  - `_makeGeorefSource(url, bounds, bgTransparent)` — fabrică pentru sursa OL; când `bgTransparent=true` injectează un `imageLoadFunction` care procesează canvas pixel-cu-pixel (pixelii R,G,B toți ≥230 → alpha=0).
+  - `_resolveLayer(key)` — recunoaște cheia `georef_plan_<id>` și mapează la layer-ul corespunzător.
+  - Eveniment `harta-map:georef-loaded` dispatched după ce toate planurile sunt încărcate → notifică Layer Manager să re-fetch prefs.
+
+---
+
+## 6. Layer Manager — categoria „raster" + toggle bg_transparent
+
+**Cerință:** fiecare plan georeferențiat apare ca rând distinct în Layer Manager cu controale (vizibilitate, opacitate, toggle „ascunde fundal alb").
+
+**Fișiere modificate:**
+
+- `app/models/gis_user_layer_pref.rb`
+  - Chei dinamice `georef_plan_<id>` în plus față de cele statice (`STATIC_KEYS`). `valid_key?` acceptă regex `\Ageoref_plan_\d+\z`.
+  - `full_prefs_for(owner_token)` includ automat planurile finalizate ale utilizatorului prin `GisGeorefPlan.for_owner(owner_token).where(state: %w[georeferenced finalized])`.
+  - `georef_plan_defaults(plan, index)` — config implicit pentru un raster: `category: "raster"`, `opacity: 1.0`, `bg_transparent: true`, `z_index: 75 - index` (sub UAT 100, peste base 50).
+- `db/migrate/20260511210001_add_bg_transparent_to_gis_user_layer_prefs.rb` — coloană nouă booleană (default nil, fallback la default-ul layer-ului).
+- `app/javascript/controllers/layer_manager_controller.js`
+  - `_rowHtml` — pentru `category === "raster"` afișează doar controalele de vizibilitate + opacitate + checkbox „Ascunde fundalul alb"; ascunde controalele stroke/fill/dash (irelevante pentru raster).
+  - Listener pentru `harta-map:georef-loaded` → re-fetch prefs (planurile vin async după inițializarea hărții).
+  - `changeBgTransparent` action → PATCH `/gis/layer_prefs/georef_plan_<id>` cu `bg_transparent: bool` → `applyLayerConfig` în harta_map_controller recreează sursa cu/fără filtru.
+
+---
+
+## 7. Bug-fixe critice (după primul testing utilizator)
+
+### 7.1 GCP ordinals toate ord=0
+**Simptom:** după click + plasare GCP, markerii apăreau corect inițial, apoi toate se renumiseau la „1".
+**Cauză:** modelul folosea `self.ordinal ||= ...`; coloana avea `default: 0` în DB, deci `cp.ordinal` la `.new()` returna 0 (nu nil), iar `||=` nu suprascrie 0 (truthy în Ruby).
+**Fix:** migrare nouă `20260511200001_fix_gis_gcp_ordinals.rb` — `change_column_default :ordinal, nil` + backfill rândurile existente cu valori secvențiale per plan. Plus model: `self.ordinal = ...` (atribuire necondiționată), robust și la schema cache stale pe server-ul deja pornit.
+
+### 7.2 GCP duplicate → gdalwarp eșuat
+**Simptom:** `gdalwarp eșuat: Transform is not solvable`.
+**Cauză:** click pe aceeași parcelă în reference pane folosea centroidul ei ca țintă → toate GCP-urile aveau același (world_x, world_y) → matrice singulară.
+**Fix dublu:**
+- Snap la vertex în loc de centroid (vezi §4 — `_findNearestVertex`).
+- Validare server-side `world_not_duplicate_in_plan` (tol 1 cm).
+
+### 7.3 Preview warped negru
+**Simptom:** TIFF-ul finalizat afișa pixel negri în loc de detaliile cadastrale.
+**Cauză:** sursa BERESTI.tif e palette indexed (1 bandă Palette + 1 bandă Alpha). gdalwarp `-r bilinear` interpola indecșii paletei = garbage.
+**Fix:** `prepare_source(source_path, dir)` în `RasterWarper` — detectează palette și rulează `gdal_translate -expand rgba` ÎNAINTE de resample. Output curat RGBA.
+
+### 7.4 Distorsiune polinomială
+**Simptom:** la 6 GCP-uri, `choose_order(6) = 2` (polinom grad 2) îndoia imaginea.
+**Fix:** `choose_order` returnează acum mereu `"similarity"`. Polinomul rămâne opțional în dropdown pentru planuri cu distorsiuni interne reale (≥10 GCP-uri).
+
+### 7.5 Rotație 90° pe raster afișat
+**Simptom:** planul apărea rotit la 90° spre stânga față de nord.
+**Cauză:** modelul `SimilarityTransform` original presupunea Y-up în spațiul pixel, dar row-ul imaginii merge în jos. Rezultatul: matricea fitată avea reflexie inversă.
+**Fix:** model rescris cu y-flip explicit: `X = a·col + b·row + tx`, `Y = b·col − a·row + ty` (al doilea rând al matricei e reflexie `(b, −a)`, nu rotație pură `(b, a)`). GeoTransform corespunzător: `[c, a, b, f, d, e]` cu `e = -a_p` → GT[5] negativ → north scade cu row crescător (north-up corect).
+
+### 7.6 Bounds X/Y swapped
+**Simptom:** după prima încercare similarity, bounds-ul ieșea `[524K, 664K, 525K, 666K]` în loc de `[664K, 524K, 666K, 525K]` (X/Y inversate).
+**Cauză:** VRT scria `<SRS>EPSG:3844</SRS>`; GDAL respectă axa oficială EPSG (X=north, Y=east) iar restul aplicației folosește convenția proj4 (X=east, Y=north).
+**Fix:** `STEREO70_PROJ4` (string proj4 complet) folosit în VRT și ca `-t_srs` la gdalwarp în loc de codul EPSG. Convenția GIS tradițională uniformă în tot stack-ul.
+
+### 7.7 Preview JPEG cu margins negre
+**Simptom:** preview-ul JPG generat de RasterPreviewer drop-a alpha (`-b 1 -b 2 -b 3`) → zonele transparente (pixeli RGB=0,0,0 cu alpha=0 puși de gdalwarp) deveneau negru solid în JPEG.
+**Fix:** parametru `preserve_alpha: true` la `to_web_preview` → forțează PNG (păstrează alpha, marginile rămân transparente). Apelat din `finalize_warp!` cu `max_dim: 4000` pentru file size acceptabil (~4MB).
+
+### 7.8 Plan delete blocat de redirect
+**Simptom:** ștergerea planului din UI răspundea cu 404.
+**Fix:** controller `destroy` returnează `redirect_to gis_georef_plans_path, status: :see_other` pentru HTML (303 = method change OK după DELETE).
+
+---
+
+## 8. Funcționalitate „ascunde fundalul alb"
+
+**Cerință:** „Se poate introduce posibilitatea ca să fie vizibil doar ceea ce este scris/desenat iar fundalul să fie eliminat. Trebuie inactivate benzile de fundal de culoare albă."
+
+**Fișiere modificate:**
+
+- `db/migrate/20260511210001_add_bg_transparent_to_gis_user_layer_prefs.rb` — coloană bool nouă (default nil).
+- `app/models/gis_user_layer_pref.rb` — `georef_plan_defaults` setează `bg_transparent: true` (default ON pentru raster — pentru scanări cadastrale fundalul alb e zgomot, vrei doar liniile peste parcele).
+- `app/javascript/controllers/harta_map_controller.js`
+  - `_loadKeyed(image, src)` — procesează imaginea client-side: încarcă PNG/JPEG în `<Image>`, desenează pe `<canvas>`, parcurge `imageData.data` și pune `alpha=0` pentru pixelii cu R,G,B toți ≥230 (threshold ridicat acoperă scanări ușor îngălbenite + anti-aliasing pe muchii); `canvas.toBlob()` → `URL.createObjectURL` → set ca src pe image-ul OL.
+  - `applyLayerConfig` — toggle `bg_transparent` recreează sursa via `layer.setSource(_makeGeorefSource(...))`. Reversibil instant, fără regenerare server-side.
+- `app/javascript/controllers/layer_manager_controller.js` — checkbox „Ascunde fundalul alb (păstrează doar liniile/textul)" în props-ul layer-ului raster; `changeBgTransparent` action.
+
+---
+
+## Sumar fișiere atinse — sesiunea 11 mai (partea 2: georef)
+
+```
+# Migrări (5)
+db/migrate/20260511190001_enable_postgis_raster.rb
+db/migrate/20260511190002_create_gis_georef_plans.rb
+db/migrate/20260511190003_create_gis_georef_control_points.rb
+db/migrate/20260511190004_create_active_storage_tables.active_storage.rb
+db/migrate/20260511200001_fix_gis_gcp_ordinals.rb
+db/migrate/20260511210001_add_bg_transparent_to_gis_user_layer_prefs.rb
+
+# Modele (3)
+app/models/gis_georef_plan.rb
+app/models/gis_georef_control_point.rb
+app/models/gis_user_layer_pref.rb              # extins cu chei georef_plan_<id> + bg_transparent
+
+# Controllere (3)
+app/controllers/gis/georef_plans_controller.rb
+app/controllers/gis/georef_control_points_controller.rb
+app/controllers/gis/layer_prefs_controller.rb  # extins cu pref_params bg_transparent + valid_key? dinamic
+
+# Servicii (4)
+app/services/gis/affine_transform.rb
+app/services/gis/similarity_transform.rb
+app/services/gis/raster_previewer.rb
+app/services/gis/raster_warper.rb
+
+# Frontend (3)
+app/javascript/controllers/georef_editor_controller.js
+app/javascript/controllers/harta_map_controller.js          # extensii: _loadGeorefPlans, _addGeorefLayer, _loadKeyed
+app/javascript/controllers/layer_manager_controller.js      # extensii: raster category, bg_transparent toggle
+
+# Views (3)
+app/views/gis/georef_plans/index.html.erb
+app/views/gis/georef_plans/new.html.erb
+app/views/gis/georef_plans/edit.html.erb
+
+# Rute
+config/routes.rb
+```
+
+**Schema e-CAD existentă: neatinsă. Toate tabelele noi au prefix `gis_`.**
