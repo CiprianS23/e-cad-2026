@@ -1,5 +1,7 @@
 <% content_for :title, "Georeferențiere — #{@plan.name}" %>
 <% content_for :fullpage, true %>
+<% content_for :map, true %><!-- încarcă OpenLayers + proj4 + ol-ext + jsts în <head> -->
+
 
 <div class="georef-page"
      data-controller="georef-editor"
@@ -13,6 +15,8 @@
      data-georef-editor-plan-url-value="<%= gis_georef_plan_path(@plan) %>"
      data-georef-editor-cgxml-geojson-url-value="<%= cgxml_geojson_harta_path %>"
      data-georef-editor-parcele-geojson-url-value="<%= geojson_parcele_cadastrale_path %>"
+     data-georef-editor-cladiri-geojson-url-value="<%= geojson_cladiri_cadastrale_index_path %>"
+     data-georef-editor-uat-geojson-url-value="<%= uat_boundaries_geojson_path %>"
      data-georef-editor-mapproxy-url-value="http://localhost:8080">
 
   <header class="georef-header">
@@ -26,23 +30,23 @@
     </div>
     <div class="georef-actions">
       <select class="input input-sm" data-georef-editor-target="warpMethod"
-              title="Metoda de transformare folosită la Finalize">
-        <option value="auto">Auto (alege după nr GCP)</option>
-        <option value="affine">Afină (ordin 1, min 3 GCP)</option>
-        <option value="polynomial2">Polinomială ordin 2 (min 6 GCP, corectează distorsiuni)</option>
-        <option value="polynomial3">Polinomială ordin 3 (min 10 GCP)</option>
-        <option value="tps">Thin-Plate Spline (exact prin GCP)</option>
+              title="Metoda de transformare la Finalize">
+        <option value="auto">Auto</option>
+        <option value="affine">Afină (ordin 1)</option>
+        <option value="polynomial2">Polinomială ordin 2</option>
+        <option value="polynomial3">Polinomială ordin 3</option>
+        <option value="tps">TPS (exact prin GCP)</option>
       </select>
       <button type="button" class="btn btn-primary"
               data-action="click->georef-editor#computeGeoreference"
               data-georef-editor-target="computeBtn"
-              title="Calculează doar transformarea afină — preview rapid în browser">
-        ▶ Recalculează (afină preview)
+              title="Calculează doar afina — preview rapid">
+        ▶ Recalculează (preview)
       </button>
       <button type="button" class="btn btn-success"
               data-action="click->georef-editor#finalize"
               data-georef-editor-target="finalizeBtn"
-              title="Rulează gdalwarp și produce GeoTIFF georeferențiat (poate dura câteva secunde)">
+              title="Rulează gdalwarp și produce GeoTIFF georeferențiat">
         ✓ Finalize (gdalwarp)
       </button>
       <%= link_to "← Înapoi", gis_georef_plans_path, class: "btn btn-secondary" %>
@@ -50,13 +54,14 @@
   </header>
 
   <div class="georef-status" data-georef-editor-target="status"></div>
+  <div class="georef-diag" data-georef-editor-target="diag" title="Diagnostic încărcare hărți"></div>
 
   <div class="georef-grid">
     <!-- VIEWPORT STÂNGA — imaginea sursă -->
     <section class="georef-pane">
       <header class="georef-pane-head">
         <h3>1. Plan vechi (sursă)</h3>
-        <span class="georef-mode" data-georef-editor-target="leftMode">Click pentru a plasa primul punct (sursă)</span>
+        <span class="georef-mode" data-georef-editor-target="leftMode">Click pe imagine pentru a începe un punct</span>
       </header>
       <div id="georef-map-src" class="georef-canvas"
            data-georef-editor-target="srcMap"></div>
@@ -72,34 +77,67 @@
     <section class="georef-pane">
       <header class="georef-pane-head">
         <h3>2. Hartă referință (Stereo70)</h3>
-        <span class="georef-mode" data-georef-editor-target="rightMode">Apoi click pe harta de referință (țintă)</span>
+        <span class="georef-mode" data-georef-editor-target="rightMode">Click pe hartă SAU pe o geometrie existentă</span>
       </header>
       <div id="georef-map-ref" class="georef-canvas"
            data-georef-editor-target="refMap"></div>
       <footer class="georef-pane-foot">
         <span data-georef-editor-target="refCoord">X, Y: —</span>
-        <label class="georef-base-toggle">
-          <input type="radio" name="georef-base" value="osm" checked
-                 data-action="change->georef-editor#changeBase"> OSM
-        </label>
-        <label class="georef-base-toggle">
-          <input type="radio" name="georef-base" value="ortofotoplan"
-                 data-action="change->georef-editor#changeBase"> Ortofoto
-        </label>
+        <span class="georef-base-toggles">
+          <label class="georef-base-toggle">
+            <input type="radio" name="georef-base" value="osm" checked
+                   data-action="change->georef-editor#changeBase"> OSM
+          </label>
+          <label class="georef-base-toggle">
+            <input type="radio" name="georef-base" value="ortofotoplan"
+                   data-action="change->georef-editor#changeBase"> Ortofoto
+          </label>
+        </span>
       </footer>
     </section>
 
-    <!-- LISTĂ GCP -->
+    <!-- SIDEBAR — GCP + layer toggles + input manual -->
     <aside class="georef-sidebar">
-      <h3>Puncte de control (GCP)</h3>
-      <p class="subtle">
-        Minim 3 puncte pentru transformare afină.
-        4+ puncte → precizia crește (least squares).
-      </p>
-      <ol class="georef-gcp-list" data-georef-editor-target="gcpList"></ol>
-      <p class="form-hint" data-georef-editor-target="gcpHint">
-        Click pe planul vechi pentru a începe primul punct.
-      </p>
+      <details open class="georef-section">
+        <summary>Layere de referință</summary>
+        <div class="georef-layer-toggles">
+          <label><input type="checkbox" data-layer="uat"     checked data-action="change->georef-editor#toggleLayer"> Limite UAT</label>
+          <label><input type="checkbox" data-layer="parcele" checked data-action="change->georef-editor#toggleLayer"> Parcele cadastrale</label>
+          <label><input type="checkbox" data-layer="cladiri" checked data-action="change->georef-editor#toggleLayer"> Clădiri</label>
+          <label><input type="checkbox" data-layer="cgxml"   checked data-action="change->georef-editor#toggleLayer"> CGXML (CF existente)</label>
+        </div>
+        <p class="form-hint">Click pe orice geometrie din hartă = folosește centroidul ei ca țintă.</p>
+      </details>
+
+      <details class="georef-section">
+        <summary>Coordonate manuale (Stereo70)</summary>
+        <div class="georef-manual-coord">
+          <label>X (E):
+            <input type="number" step="0.01" placeholder="500000.00" class="input input-sm"
+                   data-georef-editor-target="manualX"
+                   data-action="keydown->georef-editor#onManualKey">
+          </label>
+          <label>Y (N):
+            <input type="number" step="0.01" placeholder="500000.00" class="input input-sm"
+                   data-georef-editor-target="manualY"
+                   data-action="keydown->georef-editor#onManualKey">
+          </label>
+          <button type="button" class="btn btn-sm btn-primary"
+                  data-action="click->georef-editor#applyManualCoord"
+                  data-georef-editor-target="manualApply">
+            ➕ Aplică ca țintă
+          </button>
+        </div>
+        <p class="form-hint">După ce ai un punct pending pe planul vechi, introdu X/Y direct dacă știi coordonatele exacte.</p>
+      </details>
+
+      <details open class="georef-section">
+        <summary>Puncte de control (GCP)</summary>
+        <ol class="georef-gcp-list" data-georef-editor-target="gcpList"></ol>
+        <p class="form-hint" data-georef-editor-target="gcpHint">
+          Click pe planul vechi pentru a începe primul punct.
+        </p>
+      </details>
     </aside>
   </div>
 </div>
