@@ -200,24 +200,24 @@ export default class extends Controller {
   _buildReferenceMap() {
     if (!this.hasRefMapTarget) return
 
-    // Sursa OSM via MapProxy (când e online) cu fallback direct la OSM.
-    const osmFallback = () => new ol.source.OSM()
-    let osmSource
-    if (this.mapproxyUrlValue) {
-      osmSource = new ol.source.XYZ({
-        url: `${this.mapproxyUrlValue}/tms/1.0.0/osm_3857/webmercator/{z}/{x}/{-y}.png`,
-        crossOrigin: null
-      })
-      osmSource.on("tileloaderror", () => {
-        this._appendDiag("MapProxy offline — fallback OSM 3857 direct")
-        this._refOsm.setSource(osmFallback())
-      })
-    } else {
-      osmSource = osmFallback()
-    }
+    // OSM direct (fără MapProxy) cu crossOrigin: null (același pattern ca /harta
+    // care merge). `ol.source.OSM()` setează implicit crossOrigin: "anonymous",
+    // ceea ce poate eșua când browser-ul a cached tile-uri fără CORS headers.
+    this._refOsm = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        url:          "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        attributions: "© OpenStreetMap contributors",
+        crossOrigin:  null
+      }),
+      visible: true
+    })
+    // Diagnostic: o singură dată dacă OSM eșuează la încărcare.
+    this._refOsm.getSource().once("tileloaderror", () => {
+      this._appendDiag("OSM tiles nu se încarcă (network/firewall/ad-blocker?)")
+    })
 
-    this._refOsm = new ol.layer.Tile({ source: osmSource, visible: true })
-
+    // Ortofoto via MapProxy — opt-in (utilizatorul comută din radio).
+    // Dacă MapProxy e offline, tile-urile eșuează silent fără spam.
     this._refOrtofoto = new ol.layer.Tile({
       source: new ol.source.XYZ({
         url: `${this.mapproxyUrlValue}/tms/1.0.0/ortofotoplan_3857/webmercator/{z}/{x}/{-y}.jpeg`,
@@ -257,14 +257,20 @@ export default class extends Controller {
         minZoom:    -2,
         maxZoom:    18
       }),
+      // .filter(Boolean) elimină layer-ele null (când URL-urile geojson lipsesc)
       layers: [
         this._refOsm, this._refOrtofoto,
         this._uatLayer, this._parceleLayer, this._cladiriLayer, this._cgxmlLayer,
         this._refGcpLayer
-      ]
+      ].filter(Boolean)
     })
 
-    // Fit pe primele date încărcate (UAT sau parcele).
+    // Fit inițial pe România (estimativ în EPSG:3844) ca să avem un viewport
+    // valid chiar înainte să se încarce datele.
+    const ROMANIA_EXTENT_3844 = [165000, 220000, 870000, 800000]
+    this._refMap.getView().fit(ROMANIA_EXTENT_3844, { padding: [10, 10, 10, 10] })
+
+    // Re-fit când datele se încarcă (focus pe zona cu geometrii reale).
     this._parceleLayer?.getSource().once("featuresloadend", () => this._fitOnExistingData())
     this._uatLayer?.getSource().once("featuresloadend",     () => this._fitOnExistingData())
 
