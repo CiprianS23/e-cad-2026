@@ -588,6 +588,10 @@ legend { font-size: 13px; font-weight: 700; color: #374151; padding: 0 6px; }
 }
 .layer-manager .lm-group--ungrouped > .lm-group-body { padding: 4px 0; }
 
+.layer-manager .lm-add-group-wrap {
+  list-style: none;
+  padding: 0; margin: 0;
+}
 .layer-manager .lm-add-group {
   margin-top: 6px;
   background: #f3f4f6; border: 1px dashed #9ca3af; border-radius: 5px;
