@@ -30,12 +30,12 @@
     </div>
     <div class="georef-actions">
       <select class="input input-sm" data-georef-editor-target="warpMethod"
-              title="Metoda de transformare la Finalize">
-        <option value="auto">Auto</option>
-        <option value="affine">Afină (ordin 1)</option>
-        <option value="polynomial2">Polinomială ordin 2</option>
-        <option value="polynomial3">Polinomială ordin 3</option>
-        <option value="tps">TPS (exact prin GCP)</option>
+              title="Metoda de transformare la Finalize. Similitudine = doar scalează și rotește (recomandat pentru planuri cadastrale fără distorsiuni interne).">
+        <option value="similarity" selected>Similitudine (rotate + scale uniform)</option>
+        <option value="affine">Afină (6 DOF, permite shear)</option>
+        <option value="polynomial2">Polinomială ordin 2 (curbează — necesită ≥6 GCP)</option>
+        <option value="polynomial3">Polinomială ordin 3 (curbează puternic — ≥10 GCP)</option>
+        <option value="tps">TPS (fit exact prin GCP — distorsiuni locale)</option>
       </select>
       <button type="button" class="btn btn-primary"
               data-action="click->georef-editor#computeGeoreference"
@@ -135,7 +135,7 @@
           <label><input type="checkbox" data-layer="cladiri" checked data-action="change->georef-editor#toggleLayer"> Clădiri</label>
           <label><input type="checkbox" data-layer="cgxml"   checked data-action="change->georef-editor#toggleLayer"> CGXML (CF existente)</label>
         </div>
-        <p class="form-hint">Click pe orice geometrie din hartă = folosește centroidul ei ca țintă.</p>
+        <p class="form-hint">Click pe hartă în apropierea unui colț de parcelă/UAT/clădire → snap automat la acel vertex. În zona goală → click direct.</p>
       </details>
 
       <details open class="georef-section">

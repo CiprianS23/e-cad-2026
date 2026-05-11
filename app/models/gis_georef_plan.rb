@@ -6,9 +6,10 @@ class GisGeorefPlan < ApplicationRecord
   # `owner_token` — identificator stabil per browser (cookie semnat), aceeași
   # convenție ca la `GisUserLayerPref`. La integrarea în e-CAD prod se va
   # înlocui cu `user_id`.
-  has_one_attached :raster_file          # imaginea originală încărcată de utilizator
-  has_one_attached :raster_preview_file  # PNG generat la upload — pentru afișare în browser (TIFF nu e suportat nativ)
-  has_one_attached :warped_file          # GeoTIFF georeferențiat în EPSG:3844 (rezultat gdalwarp)
+  has_one_attached :raster_file           # imaginea originală încărcată de utilizator
+  has_one_attached :raster_preview_file   # PNG generat la upload — pentru afișare în browser (TIFF nu e suportat nativ)
+  has_one_attached :warped_file           # GeoTIFF georeferențiat în EPSG:3844 (rezultat gdalwarp)
+  has_one_attached :warped_preview_file   # JPEG/PNG downsampled al warped-ului — pentru afișare pe harta principală (browserele nu suportă TIFF)
   has_many :control_points,
            -> { order(:ordinal, :id) },
            class_name: "GisGeorefControlPoint",
@@ -16,7 +17,7 @@ class GisGeorefPlan < ApplicationRecord
            dependent: :destroy
 
   STATES = %w[draft georeferenced finalized].freeze
-  WARP_METHODS = %w[auto affine polynomial2 polynomial3 tps].freeze
+  WARP_METHODS = %w[auto similarity affine polynomial2 polynomial3 tps].freeze
 
   validates :name,        presence: true, length: { maximum: 200 }
   validates :owner_token, presence: true
@@ -127,12 +128,18 @@ class GisGeorefPlan < ApplicationRecord
     Rails.application.routes.url_helpers.rails_blob_path(warped_file, only_path: true)
   end
 
-  # Map URL preferat pentru afișarea pe harta principală:
-  # - dacă există warped_file → folosim asta (corect georeferențiat în Stereo70
-  #   cu posibile distorsiuni polinomiale corectate)
-  # - altfel → raster_file original cu bounds calculate prin afină
+  def warped_preview_url
+    return nil unless warped_preview_file.attached?
+    Rails.application.routes.url_helpers.rails_blob_path(warped_preview_file, only_path: true)
+  end
+
+  # Map URL preferat pentru afișarea pe harta principală. Ordinea:
+  # 1. `warped_preview_file` — JPEG/PNG downsampled, browser-friendly
+  # 2. `warped_file` — GeoTIFF (browser-ele moderne nu îl pot decodifica direct,
+  #    dar îl lăsăm ca fallback dacă preview-ul nu s-a generat)
+  # 3. `raster_file` — original (când warp n-a rulat încă)
   def display_url
-    warped_url || raster_url
+    warped_preview_url || warped_url || raster_url
   end
 
   # Rulează (la upload) un pipeline GDAL pentru a:
@@ -200,6 +207,7 @@ class GisGeorefPlan < ApplicationRecord
 
     order = case method
             when "auto"         then Gis::RasterWarper.choose_order(cps.size)
+            when "similarity"   then "similarity"
             when "affine"       then 1
             when "polynomial2"  then 2
             when "polynomial3"  then 3
@@ -216,6 +224,21 @@ class GisGeorefPlan < ApplicationRecord
       gcps_args = cps.map { |c| { px: c.pixel_x, py: c.pixel_y, wx: c.world_x, wy: c.world_y } }
       result = Gis::RasterWarper.new(source_path: source_path, gcps: gcps_args, order: order).call
 
+      # Generăm preview JPEG/PNG al warped-ului ÎNAINTE de tranzacție (operațiune
+      # I/O lentă pe fișier mare; o ținem afară din lock-ul de DB). Preview-ul
+      # are aceleași bounds geografice, doar pixel-data e downsampled la <6000px
+      # pe latura lungă. Crossbrowser-rendering vs TIFF.
+      preview_path = nil
+      begin
+        # preserve_alpha: true → PNG (margins transparente vs negru sub JPEG).
+        # max_dim 4000 e suficient pentru afișare pe harta principală — la
+        # zoom mare utilizatorul poate vedea în continuare detaliile în pagina
+        # /gis/georef_plans/X/edit care folosește preview-ul sursei.
+        preview_path = Gis::RasterPreviewer.to_web_preview(result.warped_path, preserve_alpha: true, max_dim: 4000)
+      rescue Gis::RasterPreviewer::PreviewError => e
+        Rails.logger.warn "Plan ##{id}: preview warped eșuat — #{e.message}. Browserul va încerca să afișeze TIFF direct."
+      end
+
       ActiveRecord::Base.transaction do
         # Atașează GeoTIFF-ul rezultat
         warped_file.attach(
@@ -223,6 +246,18 @@ class GisGeorefPlan < ApplicationRecord
           filename:     "#{name.parameterize}_warped.tif",
           content_type: "image/tiff"
         )
+
+        # Atașează preview-ul (când există)
+        if preview_path
+          preview_ext  = File.extname(preview_path).downcase
+          content_type = preview_ext == ".png" ? "image/png" : "image/jpeg"
+          warped_preview_file.purge if warped_preview_file.attached?
+          warped_preview_file.attach(
+            io:           File.open(preview_path, "rb"),
+            filename:     "#{name.parameterize}_warped_preview#{preview_ext}",
+            content_type: content_type
+          )
+        end
 
         # Bounds-ul real (după warp) — poligon închis în 3844
         ext = result.bounds_3844
@@ -249,6 +284,7 @@ class GisGeorefPlan < ApplicationRecord
           state:            "finalized"
         )
         File.delete(result.warped_path) if File.exist?(result.warped_path)
+        File.delete(preview_path) if preview_path && File.exist?(preview_path)
       end
 
       { ok: true, method: result.method, bounds: result.bounds_3844, width: result.width, height: result.height }

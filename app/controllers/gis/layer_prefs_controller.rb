@@ -13,7 +13,7 @@ module Gis
     # PATCH /gis/layer_prefs/:layer_key
     def update
       key = params[:layer_key].to_s
-      unless GisUserLayerPref::VALID_KEYS.include?(key)
+      unless GisUserLayerPref.valid_key?(key)
         return render json: { error: "Layer necunoscut: #{key}" }, status: :unprocessable_entity
       end
 
@@ -21,7 +21,7 @@ module Gis
       pref.assign_attributes(pref_params)
 
       if pref.save
-        defaults = GisUserLayerPref::DEFAULTS[key]
+        defaults = resolve_defaults(key)
         render json: { layer: GisUserLayerPref.merged_config(key, defaults, pref) }
       else
         render json: { errors: pref.errors.full_messages }, status: :unprocessable_entity
@@ -36,10 +36,21 @@ module Gis
 
     private
 
+    # Default-ul pentru cheia primită — static din DEFAULTS sau dinamic pentru
+    # planuri raster georef (`georef_plan_<id>`).
+    def resolve_defaults(key)
+      return GisUserLayerPref::DEFAULTS[key] if GisUserLayerPref::DEFAULTS.key?(key)
+      if (m = key.match(GisUserLayerPref::GEOREF_PLAN_KEY_RE))
+        plan = GisGeorefPlan.for_owner(@owner_token).find_by(id: m[1].to_i)
+        return GisUserLayerPref.georef_plan_defaults(plan) if plan
+      end
+      {}
+    end
+
     def pref_params
       params.permit(:visible, :locked, :opacity,
                     :stroke_color, :fill_color, :stroke_width, :stroke_dash,
-                    :z_index, :color_by_category,
+                    :z_index, :color_by_category, :bg_transparent,
                     :min_resolution, :max_resolution)
     end
 

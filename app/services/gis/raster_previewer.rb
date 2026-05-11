@@ -20,30 +20,27 @@ module Gis
     DEFAULT_MAX_DIM  = 6000   # px pe latura lungă; pentru zoom mai detaliat
     DEFAULT_QUALITY  = 92     # JPEG quality (1-100); 92 = scanări claritate ridicată
 
-    # Generează o variantă JPEG (sau PNG fallback) pentru afișare în browser.
-    # - Detectează benzi și tipul de date din sursă (gdalinfo)
-    # - JPEG: necesită Byte + 1 sau 3 benzi → adăugăm `-ot Byte -scale` și
-    #   `-b 1 -b 2 -b 3` când e cazul (drop alpha sau benzi suplimentare)
-    # - Dacă JPEG eșuează (configurare neobișnuită), fallback la PNG
-    # - Downscale la `max_dim` px pe latura lungă
-    #
-    # IMPORTANT: dim originale (W × H) ale rasterului sursă rămân autoritare —
-    # frontend-ul afișează preview-ul în coordonate pixel ORIGINALE (OL îl
-    # upscalează vizual). Coords click pe preview = sistem original.
-    def self.to_web_preview(source_path, max_dim: DEFAULT_MAX_DIM, quality: DEFAULT_QUALITY)
+    # Generează o variantă JPEG sau PNG pentru afișare în browser.
+    # - `preserve_alpha: true` → forțează PNG (păstrează canalul alpha pentru
+    #   imagini cu zone transparente, e.g. warped GeoTIFF). PNG la 6000px e
+    #   ~1MB, încărcare acceptabilă în browser.
+    # - Default (alpha nu contează) → încearcă JPEG (mai mic, mai rapid),
+    #   fallback PNG.
+    def self.to_web_preview(source_path, max_dim: DEFAULT_MAX_DIM, quality: DEFAULT_QUALITY, preserve_alpha: false)
       info = gdalinfo_json(source_path)
       raise PreviewError, "gdalinfo nu poate citi #{source_path}" unless info
 
-      w          = info["size"]&.[](0)    || info["rasterXSize"]
-      h          = info["size"]&.[](1)    || info["rasterYSize"]
+      w          = info["size"]&.[](0) || info["rasterXSize"]
+      h          = info["size"]&.[](1) || info["rasterYSize"]
       bands      = info["bands"] || []
       band_count = bands.length
       data_type  = bands[0]&.[]("type") || "Byte"
-      color_interp = bands[0]&.[]("colorInterpretation")  # "Palette" / "Red" / "Gray" / ...
+      color_interp = bands[0]&.[]("colorInterpretation")
+      has_alpha    = bands.any? { |b| b["colorInterpretation"] == "Alpha" }
       long_side  = [w, h].max
       raise PreviewError, "dimensiuni invalide w=#{w} h=#{h}" if w.nil? || h.nil?
 
-      Rails.logger.info "RasterPreviewer: src=#{source_path} w=#{w} h=#{h} bands=#{band_count} type=#{data_type} color=#{color_interp.inspect}"
+      Rails.logger.info "RasterPreviewer: src=#{source_path} w=#{w} h=#{h} bands=#{band_count} type=#{data_type} color=#{color_interp.inspect} alpha=#{has_alpha}"
 
       outsize_args = []
       if long_side > max_dim
@@ -51,10 +48,22 @@ module Gis
         outsize_args = ["-outsize", (w * scale).round.to_s, (h * scale).round.to_s, "-r", "bilinear"]
       end
 
-      # Palette (indexed color) → expandare la RGB înainte de conversie
       expand_args = color_interp == "Palette" ? ["-expand", "rgb"] : []
 
-      # Încercare 1: JPEG (mic, ideal pentru scanări)
+      # Pentru imagini cu alpha (warped GeoTIFFs) → PNG direct, ca margins
+      # transparente să rămână transparente (nu să devină negru sub JPEG).
+      if preserve_alpha || has_alpha
+        png_path = try_gdal_translate(
+          source_path, ".png",
+          ["-of", "PNG", "-co", "WORLDFILE=NO"] +
+            (color_interp == "Palette" ? ["-expand", "rgba"] : []) +
+            png_type_args(data_type) +
+            outsize_args
+        )
+        return png_path if png_path
+      end
+
+      # Drum standard pentru imagini fără alpha: JPEG (mic), fallback PNG.
       jpg_path = try_gdal_translate(
         source_path, ".jpg",
         ["-of", "JPEG", "-co", "QUALITY=#{quality}", "-co", "WORLDFILE=NO"] +
@@ -64,7 +73,6 @@ module Gis
       )
       return jpg_path if jpg_path
 
-      # Fallback: PNG (acceptă orice configurare de benzi incl. palette)
       png_path = try_gdal_translate(
         source_path, ".png",
         ["-of", "PNG", "-co", "WORLDFILE=NO"] +

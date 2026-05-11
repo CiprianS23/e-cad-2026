@@ -438,34 +438,23 @@ export default class extends Controller {
       this.leftModeTarget.textContent = "Click ÎNTÂI pe planul vechi pentru a începe un punct."
       return
     }
-    // Prioritate țintă: 1) snap la intersecție grid (dacă activ), 2) geometrie
-    // existentă (parcelă/UAT/etc.), 3) coord click direct.
+    // Prioritate țintă pentru georef:
+    //   1. VERTEX (colț) al unei geometrii vizibile, în limita ~15 px →
+    //      e comportamentul corect: repere = colțuri de parcelă, nu centre.
+    //   2. Intersecție grid Stereo70 (dacă grid vizibil)
+    //   3. Coord click direct (când plan nou, fără geometrii sub cursor)
     let coord = evt.coordinate
     let usedSource = "click direct"
 
-    // 1. Geometrii existente — priority înaintea grid, ca user să poată
-    //    clica intenționat pe o parcelă
-    let foundFeature = false
-    this._refMap.forEachFeatureAtPixel(evt.pixel, (feature, layer) => {
-      if (layer === this._gridLayer || layer === this._refGcpLayer) return  // skip propriile layers
-      const geom = feature.getGeometry()
-      if (!geom) return
-      if (geom.getType() === "Point") {
-        coord = geom.getCoordinates(); foundFeature = true; return true
-      }
-      try {
-        coord = geom.getInteriorPoint ? geom.getInteriorPoint().getCoordinates()
-                                       : ol.extent.getCenter(geom.getExtent())
-      } catch (e) {
-        coord = ol.extent.getCenter(geom.getExtent())
-      }
-      foundFeature = true
-      return true
-    }, { hitTolerance: 4 })
-    if (foundFeature) usedSource = "geometrie existentă"
-
-    // 2. Snap la grid (doar dacă NU am dat de o geometrie clickabilă)
-    if (!foundFeature) {
+    // 1. Snap la vertex
+    const resolution = this._refMap.getView().getResolution() || 1
+    const worldTol   = 15 * resolution  // 15 pixeli convertiți la metri
+    const vertex     = this._findNearestVertex(evt.coordinate, worldTol)
+    if (vertex) {
+      coord = vertex
+      usedSource = "vertex parcelă/clădire/UAT (snap)"
+    } else {
+      // 2. Snap la grid (când nu am vertex în apropiere)
       const snapped = this._snapToGridIntersection(coord)
       if (snapped !== coord) {
         coord = snapped
@@ -473,8 +462,59 @@ export default class extends Controller {
       }
     }
 
+    // Verificare anti-degenerare: nu permite GCP cu world identic cu unul existent.
+    // gdalwarp eșuează cu "Transform is not solvable" dacă toate world coords sunt
+    // egale sau coliniare.
+    const TOL = 0.01  // 1 cm — practic identice
+    const dup = this._gcps.find(cp =>
+      Math.abs(cp.world_x - coord[0]) < TOL && Math.abs(cp.world_y - coord[1]) < TOL)
+    if (dup) {
+      this._setStatus(
+        `Acest world (${coord[0].toFixed(2)}, ${coord[1].toFixed(2)}) coincide cu GCP #${dup.ordinal + 1}. ` +
+        `Alege un alt punct — gdalwarp nu poate rezolva transformarea cu puncte duplicate.`,
+        "error"
+      )
+      return
+    }
+
     this._appendDiag(`GCP: ${usedSource} → (${coord[0].toFixed(2)}, ${coord[1].toFixed(2)})`)
     this._submitGcp(coord[0], coord[1])
+  }
+
+  // Caută vertexul (colțul) cel mai apropiat de `coord` în toate layerele vector
+  // VIZIBILE (parcele/clădiri/UAT/CGXML). Returnează `[x, y]` sau `null`.
+  _findNearestVertex(coord, tol) {
+    let best = null
+    let bestDist = Infinity
+    const layers = [this._parceleLayer, this._cladiriLayer, this._uatLayer, this._cgxmlLayer]
+      .filter(l => l && l.getVisible())
+    const extent = [coord[0] - tol, coord[1] - tol, coord[0] + tol, coord[1] + tol]
+
+    for (const layer of layers) {
+      const src = layer.getSource()
+      if (!src) continue
+      src.forEachFeatureInExtent(extent, (feature) => {
+        const geom = feature.getGeometry()
+        if (!geom) return
+        const verts = this._flattenCoords(geom.getCoordinates())
+        for (const [vx, vy] of verts) {
+          const dx = vx - coord[0], dy = vy - coord[1]
+          const d  = Math.sqrt(dx * dx + dy * dy)
+          if (d < bestDist && d <= tol) { bestDist = d; best = [vx, vy] }
+        }
+      })
+    }
+    return best
+  }
+
+  // Aplatizează coordonatele OL (orice tip): [x,y] → [[x,y]];
+  // [[x,y],...] → identic; [[[x,y],...]] (Polygon) → [[x,y],...]; etc.
+  _flattenCoords(arr) {
+    if (!Array.isArray(arr)) return []
+    if (typeof arr[0] === "number") return [arr]
+    const out = []
+    for (const item of arr) out.push(...this._flattenCoords(item))
+    return out
   }
 
   // Trigger din input manual: țintă X, Y în Stereo70 — fără click pe hartă.

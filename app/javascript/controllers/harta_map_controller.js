@@ -288,6 +288,14 @@ export default class extends Controller {
       for (const p of georeferenced) {
         await this._addGeorefLayer(p.id)
       }
+      // Notifică layer-manager ca să re-aplice config-ul pe layer-ele noi.
+      // (Layer-manager poate fi conectat înainte ca planurile să fie create
+      //  async, deci applyLayerConfig anterior pentru `georef_plan_<id>`
+      //  a fost no-op).
+      this.element.dispatchEvent(new CustomEvent("harta-map:georef-loaded", {
+        bubbles: true,
+        detail: { planIds: georeferenced.map(p => p.id) }
+      }))
     } catch (e) {
       console.warn("Nu pot încărca planurile georeferențiate:", e)
     }
@@ -300,27 +308,80 @@ export default class extends Controller {
         headers: { Accept: "application/json" }
       })
       const d = await r.json()
-      // Preferăm warped_url (GeoTIFF din gdalwarp, polinomial corectat) când
-      // există; altfel fallback la raster_url cu bounds calculate prin afină.
       const url    = d.display_url || d.warped_url || d.raster_url
       const bounds = d.bounds_extent
       if (!url || !bounds) return
+
+      // Salvăm config-ul nativ pe layer pentru a-l recrea la toggle bg_transparent
       const layer = new ol.layer.Image({
-        opacity:    0.7,
-        source:     new ol.source.ImageStatic({
-          url:           url,
-          imageExtent:   bounds,  // [minX, minY, maxX, maxY] în 3844
-          projection:    "EPSG:3844",
-          crossOrigin:   "anonymous"
-        }),
-        zIndex:     90,  // sub UAT și restul (sub plan_vechi în spec)
-        properties: { name: `georef_plan_${planId}`, plan_name: d.name, plan_state: d.state }
+        opacity:    1.0,
+        source:     this._makeGeorefSource(url, bounds, /* bgTransparent */ true),
+        zIndex:     90,
+        properties: {
+          name:        `georef_plan_${planId}`,
+          plan_name:   d.name,
+          plan_state:  d.state,
+          source_url:  url,
+          bounds_3844: bounds
+        }
       })
       this.map.addLayer(layer)
       this._georefLayers[planId] = layer
     } catch (e) {
       console.warn(`Nu pot adăuga planul #${planId}:`, e)
     }
+  }
+
+  // Construiește o sursă ImageStatic pentru un plan raster. Dacă `bgTransparent`
+  // = true, aplică filtru pixel pe canvas pentru a face pixelii albi (sub
+  // pragul de threshold) transparenți → vezi doar liniile/textul desenat.
+  _makeGeorefSource(url, bounds, bgTransparent) {
+    const opts = {
+      url,
+      imageExtent: bounds,
+      projection:  "EPSG:3844",
+      crossOrigin: "anonymous"
+    }
+    if (bgTransparent) {
+      opts.imageLoadFunction = (image, src) => this._loadKeyed(image, src)
+    }
+    return new ol.source.ImageStatic(opts)
+  }
+
+  // Procesează imaginea client-side pe canvas: pixelii albi (R,G,B toți ≥ 230)
+  // devin transparenți. Pragul 230 acoperă scanări cu hârtie ușor îngălbenită
+  // sau anti-aliasing pe margini. Pentru praguri diferite se poate adăuga
+  // ulterior un slider în layer manager.
+  _loadKeyed(image, src) {
+    const img = new Image()
+    img.crossOrigin = "anonymous"
+    img.onload = () => {
+      const canvas = document.createElement("canvas")
+      canvas.width  = img.naturalWidth
+      canvas.height = img.naturalHeight
+      const ctx = canvas.getContext("2d", { willReadFrequently: false })
+      ctx.drawImage(img, 0, 0)
+      try {
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+        const data = imgData.data
+        const T = 230  // threshold: 230..255 = considerat fundal alb
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i] >= T && data[i + 1] >= T && data[i + 2] >= T) {
+            data[i + 3] = 0
+          }
+        }
+        ctx.putImageData(imgData, 0, 0)
+      } catch (e) {
+        console.warn("Filter white-removal eșuat (CORS?):", e)
+      }
+      canvas.toBlob((blob) => {
+        if (!blob) { image.getImage().src = src; return }
+        const blobUrl = URL.createObjectURL(blob)
+        image.getImage().src = blobUrl
+      }, "image/png")
+    }
+    img.onerror = () => { image.getImage().src = src }
+    img.src = src
   }
 
   // ── API public — folosit de layer-manager prin Stimulus outlet ────────────
@@ -357,8 +418,19 @@ export default class extends Controller {
     if (typeof merged.opacity  === "number")  layer.setOpacity(merged.opacity)
     if (typeof merged.z_index  === "number")  layer.setZIndex(merged.z_index)
 
-    // Sincronizare label-uri cu layer-ul părinte pentru vizibilitate "implicită"
-    // (rămâne sub controlul explicit al layer-ului dedicat *_labels din DB).
+    // Pentru layere raster (georef_plan_*): toggle bg_transparent → recreăm
+    // sursa cu/fără filtru de eliminare fundal alb.
+    if (typeof merged.bg_transparent === "boolean" && layerKey.startsWith("georef_plan_")) {
+      const props = layer.getProperties()
+      const currentBg = !!props._bg_transparent
+      if (currentBg !== merged.bg_transparent) {
+        layer.setSource(this._makeGeorefSource(
+          props.source_url, props.bounds_3844, merged.bg_transparent
+        ))
+        layer.set("_bg_transparent", merged.bg_transparent)
+      }
+    }
+
     layer.changed()
   }
 
@@ -396,7 +468,11 @@ export default class extends Controller {
       cladiri_labels: this.cladiriLabelsLayer,
       cgxml_labels:   this.cgxmlLabelsLayer
     }
-    return map[key]
+    if (map[key]) return map[key]
+    // Planurile raster georef sunt cheiate ca `georef_plan_<id>`
+    const m = key && key.match(/^georef_plan_(\d+)$/)
+    if (m) return this._georefLayers?.[parseInt(m[1], 10)] || null
+    return null
   }
 
   setDigitizing(active) {

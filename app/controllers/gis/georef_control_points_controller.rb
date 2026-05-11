@@ -39,8 +39,11 @@ module Gis
       @point = @plan.control_points.find(params[:id])
     end
 
+    # Ordinal NU e permis dinspre client — server-ul îl calculează în model
+    # (before_validation). Permițând `:ordinal` ar permite clienților să trimită
+    # accidental 0 și să ocolească logica de auto-increment.
     def point_params
-      params.require(:gis_georef_control_point).permit(:pixel_x, :pixel_y, :world_x, :world_y, :ordinal, :note)
+      params.require(:gis_georef_control_point).permit(:pixel_x, :pixel_y, :world_x, :world_y, :note)
     end
 
     def cp_json(cp)

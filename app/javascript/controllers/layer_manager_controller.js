@@ -28,6 +28,11 @@ export default class extends Controller {
   hartaMapOutletConnected(outlet) {
     if (outlet.map) this._onMapReady()
     else outlet.element.addEventListener("harta-map:ready", () => this._onMapReady(), { once: true })
+    // Planurile raster georeferențiate se încarcă async — re-aplicăm config-ul
+    // și re-render listă când sosesc.
+    outlet.element.addEventListener("harta-map:georef-loaded", () => {
+      this._fetchPrefs()  // re-render lista (include planurile noi în UI)
+    })
   }
 
   _onMapReady() {
@@ -89,7 +94,8 @@ export default class extends Controller {
     const strokeWidth    = cfg.stroke_width != null ? cfg.stroke_width : 1.5
     const strokeDash     = cfg.stroke_dash || "solid"
     const colorByCat     = !!cfg.color_by_category
-    const isLabelsLayer  = key.endsWith("_labels")  // (nu mai apare ca rând, dar funcția e generală)
+    const isLabelsLayer  = key.endsWith("_labels")
+    const isRaster       = category === "raster"
     const labelsSubHtml  = this._labelsSubHtml(key)
 
     return `
@@ -124,7 +130,14 @@ export default class extends Controller {
                    data-action="input->layer-manager#changeOpacity">
             <output>${opacityPct}%</output>
           </label>
-          ${ isLabelsLayer ? "" : `
+          ${ isRaster ? `
+          <label class="lm-prop lm-prop--checkbox">
+            <input type="checkbox" ${cfg.bg_transparent !== false ? "checked" : ""}
+                   data-action="change->layer-manager#changeBgTransparent">
+            <span>Ascunde fundalul alb (păstrează doar liniile/textul)</span>
+          </label>
+          ` : "" }
+          ${ (isLabelsLayer || isRaster) ? "" : `
           <label class="lm-prop">
             <span>Culoare contur</span>
             <input type="color" value="${strokeColor}"
@@ -270,6 +283,11 @@ export default class extends Controller {
     const key = this._keyOf(event.target)
     this._patch(key, { color_by_category: event.target.checked })
     this._refreshSwatch(key)
+  }
+
+  changeBgTransparent(event) {
+    const key = this._keyOf(event.target)
+    this._patch(key, { bg_transparent: event.target.checked })
   }
 
   zoomToLayer(event) {
