@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_11_190004) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_11_200001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -202,7 +202,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_190004) do
     t.datetime "created_at", null: false
     t.bigint "gis_georef_plan_id", null: false
     t.string "note"
-    t.integer "ordinal", default: 0, null: false
+    t.integer "ordinal", null: false
     t.float "pixel_x", null: false
     t.float "pixel_y", null: false
     t.float "residual"

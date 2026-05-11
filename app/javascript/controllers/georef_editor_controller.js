@@ -315,6 +315,18 @@ export default class extends Controller {
       stroke: "#92400e", fillRgba: "rgba(252,211,77,.25)", width: 1.5
     })
 
+    // Grid Stereo70 — pentru georeferențiere după repere cartografice clasice
+    // (1:5000 = 1km grid; 1:2000 = 500m; 1:10000 = 2km). Pe planurile vechi
+    // românești există markeri amplasați la intersecțiile gridului.
+    this._gridLayer = new ol.layer.Vector({
+      source: new ol.source.Vector(),
+      style:  this._gridStyle.bind(this),
+      zIndex: 200,
+      visible: false  // toggle din UI
+    })
+    this._gridSpacing = 1000  // metri — implicit 1km (corespunzător 1:5000)
+    this._gridShowLabels = true
+
     this._refGcpSource = new ol.source.Vector()
     this._refGcpLayer  = new ol.layer.Vector({
       source: this._refGcpSource,
@@ -336,8 +348,13 @@ export default class extends Controller {
       layers: [
         this._refOsm, this._refGoogleSat, this._refGoogleHybrid, this._refEsri, this._refOrtofoto,
         this._uatLayer, this._parceleLayer, this._cladiriLayer, this._cgxmlLayer,
-        this._refGcpLayer
+        this._gridLayer, this._refGcpLayer
       ].filter(Boolean)
+    })
+
+    // Regenerare grid la fiecare schimbare de viewport (extinde să acopere zona vizibilă)
+    this._refMap.on("moveend", () => {
+      if (this._gridLayer?.getVisible()) this._regenGrid()
     })
 
     // Fit inițial pe România (estimativ în EPSG:3844) ca să avem un viewport
@@ -421,28 +438,42 @@ export default class extends Controller {
       this.leftModeTarget.textContent = "Click ÎNTÂI pe planul vechi pentru a începe un punct."
       return
     }
-    // Verifică dacă a fost click pe o geometrie existentă — folosim centroidul ei.
+    // Prioritate țintă: 1) snap la intersecție grid (dacă activ), 2) geometrie
+    // existentă (parcelă/UAT/etc.), 3) coord click direct.
     let coord = evt.coordinate
+    let usedSource = "click direct"
+
+    // 1. Geometrii existente — priority înaintea grid, ca user să poată
+    //    clica intenționat pe o parcelă
+    let foundFeature = false
     this._refMap.forEachFeatureAtPixel(evt.pixel, (feature, layer) => {
+      if (layer === this._gridLayer || layer === this._refGcpLayer) return  // skip propriile layers
       const geom = feature.getGeometry()
       if (!geom) return
       if (geom.getType() === "Point") {
-        coord = geom.getCoordinates()
-        return true
+        coord = geom.getCoordinates(); foundFeature = true; return true
       }
-      // Pentru poligoane luăm interior point (mai consistent decât centroid pentru forme convexe)
       try {
-        if (geom.getInteriorPoint) {
-          coord = geom.getInteriorPoint().getCoordinates()
-        } else {
-          coord = ol.extent.getCenter(geom.getExtent())
-        }
+        coord = geom.getInteriorPoint ? geom.getInteriorPoint().getCoordinates()
+                                       : ol.extent.getCenter(geom.getExtent())
       } catch (e) {
         coord = ol.extent.getCenter(geom.getExtent())
       }
+      foundFeature = true
       return true
     }, { hitTolerance: 4 })
+    if (foundFeature) usedSource = "geometrie existentă"
 
+    // 2. Snap la grid (doar dacă NU am dat de o geometrie clickabilă)
+    if (!foundFeature) {
+      const snapped = this._snapToGridIntersection(coord)
+      if (snapped !== coord) {
+        coord = snapped
+        usedSource = "intersecție grid Stereo70"
+      }
+    }
+
+    this._appendDiag(`GCP: ${usedSource} → (${coord[0].toFixed(2)}, ${coord[1].toFixed(2)})`)
     this._submitGcp(coord[0], coord[1])
   }
 
@@ -564,6 +595,111 @@ export default class extends Controller {
     this._refGcpLayer?.changed()  // force redraw
     // Diagnostic — dacă markerii nu apar dar count > 0, problema e style/zIndex
     this._appendDiag(`Ref markers actualizați: ${this._refGcpSource.getFeatures().length}`)
+  }
+
+  // ── Grid Stereo70 (pentru repere cartografice 1:5000 / 1:2000 / etc.) ────
+
+  _regenGrid() {
+    if (!this._refMap || !this._gridLayer) return
+    const src = this._gridLayer.getSource()
+    src.clear()
+    const ext = this._refMap.getView().calculateExtent(this._refMap.getSize())
+    if (!ext || !isFinite(ext[0])) return
+    const [xmin, ymin, xmax, ymax] = ext
+    const sp = this._gridSpacing
+
+    // Limit defensive: nu generăm peste 500 linii (riscă să blocheze)
+    const nx = Math.ceil((xmax - xmin) / sp)
+    const ny = Math.ceil((ymax - ymin) / sp)
+    if (nx + ny > 500) {
+      this._appendDiag(`Grid prea dens pentru viewport curent (${nx + ny} linii) — zoom in sau mărește spațierea`)
+      return
+    }
+
+    const features = []
+    const x0 = Math.ceil(xmin / sp) * sp
+    for (let x = x0; x <= xmax; x += sp) {
+      const f = new ol.Feature(new ol.geom.LineString([[x, ymin], [x, ymax]]))
+      f.set("kind", "vline"); f.set("coord", x)
+      features.push(f)
+    }
+    const y0 = Math.ceil(ymin / sp) * sp
+    for (let y = y0; y <= ymax; y += sp) {
+      const f = new ol.Feature(new ol.geom.LineString([[xmin, y], [xmax, y]]))
+      f.set("kind", "hline"); f.set("coord", y)
+      features.push(f)
+    }
+    // Etichete la intersecții (numai pentru intersecții vizibile, mai puține)
+    if (this._gridShowLabels) {
+      const maxLabels = 60
+      const stepX = Math.max(1, Math.ceil(nx / Math.sqrt(maxLabels)))
+      const stepY = Math.max(1, Math.ceil(ny / Math.sqrt(maxLabels)))
+      let ix = 0
+      for (let x = x0; x <= xmax; x += sp) {
+        if (ix++ % stepX !== 0) continue
+        let iy = 0
+        for (let y = y0; y <= ymax; y += sp) {
+          if (iy++ % stepY !== 0) continue
+          const f = new ol.Feature(new ol.geom.Point([x, y]))
+          f.set("kind", "label"); f.set("label", `${x.toFixed(0)}\n${y.toFixed(0)}`)
+          features.push(f)
+        }
+      }
+    }
+    src.addFeatures(features)
+  }
+
+  _gridStyle(feature) {
+    const kind = feature.get("kind")
+    if (kind === "label") {
+      return new ol.style.Style({
+        text: new ol.style.Text({
+          text:    feature.get("label"),
+          font:    "10px ui-monospace, SFMono-Regular, monospace",
+          fill:    new ol.style.Fill({ color: "#1f2937" }),
+          stroke:  new ol.style.Stroke({ color: "rgba(255,255,255,.85)", width: 3 }),
+          offsetY: -6
+        }),
+        image: new ol.style.Circle({
+          radius: 2,
+          fill:   new ol.style.Fill({ color: "#1f2937" })
+        })
+      })
+    }
+    // vline / hline
+    return new ol.style.Style({
+      stroke: new ol.style.Stroke({
+        color:    "rgba(31, 41, 55, 0.45)",  // gri închis semitransparent
+        width:    0.8,
+        lineDash: [4, 3]
+      })
+    })
+  }
+
+  // Toggle vizibilitate grid (din UI)
+  toggleGrid(event) {
+    if (!this._gridLayer) return
+    this._gridLayer.setVisible(event.target.checked)
+    if (event.target.checked) this._regenGrid()
+    else this._gridLayer.getSource().clear()
+  }
+
+  // Schimbă spațierea (500/1000/2000/5000 m) — UI dropdown
+  changeGridSpacing(event) {
+    this._gridSpacing = parseInt(event.target.value, 10) || 1000
+    if (this._gridLayer?.getVisible()) this._regenGrid()
+  }
+
+  // Snap la cea mai apropiată intersecție de grid (în limita spacing/4)
+  _snapToGridIntersection(coord) {
+    if (!this._gridLayer?.getVisible()) return coord
+    const sp = this._gridSpacing
+    const sx = Math.round(coord[0] / sp) * sp
+    const sy = Math.round(coord[1] / sp) * sp
+    const dx = coord[0] - sx, dy = coord[1] - sy
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    if (dist <= sp / 4) return [sx, sy]
+    return coord
   }
 
   _gcpStyle(feature) {

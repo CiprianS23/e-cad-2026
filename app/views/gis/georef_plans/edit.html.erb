@@ -138,6 +138,26 @@
         <p class="form-hint">Click pe orice geometrie din hartă = folosește centroidul ei ca țintă.</p>
       </details>
 
+      <details open class="georef-section">
+        <summary>Grid Stereo70 (reper 1:5000)</summary>
+        <div class="georef-layer-toggles">
+          <label>
+            <input type="checkbox" data-action="change->georef-editor#toggleGrid">
+            Afișează grid peste referință
+          </label>
+        </div>
+        <label class="lm-prop" style="margin-top:6px">
+          <span>Spațiere:</span>
+          <select data-action="change->georef-editor#changeGridSpacing" class="input-sm">
+            <option value="500">500 m (1:2500)</option>
+            <option value="1000" selected>1000 m (1:5000)</option>
+            <option value="2000">2000 m (1:10 000)</option>
+            <option value="5000">5000 m (1:25 000)</option>
+          </select>
+        </label>
+        <p class="form-hint">Click pe hartă lângă o intersecție → snap automat la coordonata exactă a gridului. Util pentru planuri cadastrale vechi cu markeri de grid trasate.</p>
+      </details>
+
       <details class="georef-section">
         <summary>Coordonate manuale (Stereo70)</summary>
         <div class="georef-manual-coord">
