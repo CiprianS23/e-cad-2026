@@ -54,7 +54,8 @@ export default class extends Controller {
         headers: { Accept: "application/json" }
       })
       const data = await r.json()
-      this._prefs = data.layers || {}
+      this._prefs  = data.layers || {}
+      this._groups = data.groups || []
       this._loaded = true
       this._render()
       if (this._mapReady) this._applyAllToMap()
@@ -72,14 +73,103 @@ export default class extends Controller {
 
   _render() {
     if (!this.hasListTarget) return
-    // Layer-ele de etichete (parcele_labels etc.) NU apar ca rânduri separate —
-    // sunt randate ca sub-secțiune în props-ul layer-ului părinte.
+    // Layer-ele de etichete NU apar ca rânduri separate — sunt randate ca
+    // sub-secțiune în props-ul layer-ului părinte.
     const isLabelKey = (k) => k.endsWith("_labels")
     const entries = Object.entries(this._prefs)
       .filter(([k]) => !isLabelKey(k))
       .sort((a, b) => (b[1].z_index || 0) - (a[1].z_index || 0))
-    this.listTarget.innerHTML = entries.map(([key, cfg]) => this._rowHtml(key, cfg)).join("")
+
+    // Grupare după group_id
+    const byGroup = new Map()
+    const ungrouped = []
+    const groupsById = new Map((this._groups || []).map(g => [g.id, g]))
+    for (const [key, cfg] of entries) {
+      if (cfg.group_id && groupsById.has(cfg.group_id)) {
+        const arr = byGroup.get(cfg.group_id) || []
+        arr.push([key, cfg])
+        byGroup.set(cfg.group_id, arr)
+      } else {
+        ungrouped.push([key, cfg])
+      }
+    }
+
+    // Render: grupuri în ordinea position, apoi "Layere fără grup"
+    const sortedGroups = (this._groups || []).slice().sort((a, b) => a.position - b.position)
+    const parts = []
+    for (const g of sortedGroups) {
+      const items = byGroup.get(g.id) || []
+      parts.push(this._groupHtml(g, items))
+    }
+    parts.push(this._ungroupedHtml(ungrouped))
+    parts.push(`
+      <button type="button" class="lm-add-group"
+              data-action="click->layer-manager#addGroup">
+        📁 + Grup nou
+      </button>`)
+    this.listTarget.innerHTML = parts.join("")
     this._bindRowEvents()
+  }
+
+  // HTML pentru un grup colapsibil cu header + listă layere
+  _groupHtml(group, items) {
+    const collapsed = group.collapsed
+    const count     = items.length
+    return `
+      <li class="lm-group ${collapsed ? "lm-group--collapsed" : ""}"
+          data-group-id="${group.id}"
+          draggable="true"
+          data-action="dragstart->layer-manager#onGroupDragStart dragover->layer-manager#onGroupDragOver drop->layer-manager#onGroupDrop dragend->layer-manager#onGroupDragEnd">
+        <div class="lm-group-head">
+          <span class="lm-group-handle" title="Trage pentru reordonare">☰</span>
+          <button type="button" class="lm-group-toggle"
+                  data-action="click->layer-manager#toggleGroup"
+                  title="${collapsed ? "Expandează" : "Colapsează"}">
+            ${collapsed ? "▸" : "▾"}
+          </button>
+          <span class="lm-group-name"
+                contenteditable="true" spellcheck="false"
+                data-action="blur->layer-manager#renameGroup keydown->layer-manager#onGroupNameKey">${this._escape(group.name)}</span>
+          <span class="lm-group-count">(${count})</span>
+          <button type="button" class="lm-group-delete"
+                  data-action="click->layer-manager#deleteGroup"
+                  title="Șterge grupul (layerele devin fără grup)">🗑</button>
+        </div>
+        <ol class="lm-group-body" data-group-drop-zone="${group.id}"
+            data-action="dragover->layer-manager#onZoneDragOver drop->layer-manager#onZoneDrop">
+          ${items.map(([key, cfg]) => this._rowHtml(key, cfg)).join("")}
+        </ol>
+      </li>`
+  }
+
+  _ungroupedHtml(items) {
+    if (items.length === 0 && (this._groups || []).length > 0) {
+      // Când există grupuri dar nimic ungrouped, totuși afișăm zona ca target
+      // de drop pentru a permite scoaterea layerelor din grup.
+      return `
+        <li class="lm-group lm-group--ungrouped">
+          <div class="lm-group-head lm-group-head--ungrouped">
+            <span class="lm-group-name lm-group-name--readonly">Fără grup</span>
+          </div>
+          <ol class="lm-group-body lm-group-body--empty" data-group-drop-zone=""
+              data-action="dragover->layer-manager#onZoneDragOver drop->layer-manager#onZoneDrop">
+            <li class="lm-empty-hint">Trage aici layere pentru a le scoate din grup</li>
+          </ol>
+        </li>`
+    }
+    if (items.length === 0) return ""  // nu avem nici layere ungrouped nici grupuri
+    return `
+      <li class="lm-group lm-group--ungrouped">
+        ${(this._groups || []).length > 0 ? '<div class="lm-group-head lm-group-head--ungrouped"><span class="lm-group-name lm-group-name--readonly">Fără grup</span></div>' : ""}
+        <ol class="lm-group-body" data-group-drop-zone=""
+            data-action="dragover->layer-manager#onZoneDragOver drop->layer-manager#onZoneDrop">
+          ${items.map(([key, cfg]) => this._rowHtml(key, cfg)).join("")}
+        </ol>
+      </li>`
+  }
+
+  _escape(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]))
   }
 
   _rowHtml(key, cfg) {
@@ -323,29 +413,44 @@ export default class extends Controller {
     }).then(() => this._fetchPrefs())
   }
 
-  // ── Drag & drop reordonare ──────────────────────────────────────────────
+  // ── Drag & drop reordonare layere ────────────────────────────────────────
 
   onDragStart(event) {
     this._draggedKey = event.currentTarget.dataset.key
     event.currentTarget.classList.add("lm-row--dragging")
     event.dataTransfer.effectAllowed = "move"
+    event.stopPropagation()  // împiedică ridicarea la grupul părinte (drag de grup)
   }
 
   onDragOver(event) {
     event.preventDefault()
+    event.stopPropagation()
     event.dataTransfer.dropEffect = "move"
     event.currentTarget.classList.add("lm-row--drop-target")
   }
 
   onDrop(event) {
     event.preventDefault()
+    event.stopPropagation()
     event.currentTarget.classList.remove("lm-row--drop-target")
     const fromKey = this._draggedKey
     const toKey   = event.currentTarget.dataset.key
     if (!fromKey || !toKey || fromKey === toKey) return
 
-    // Calculează noi z-index-uri: orderea vizuală se mapează la valori
-    // descrescătoare (sus = z mare). Reordonăm array-ul de chei vizibile.
+    // Determină grupul țintă: parent <ol data-group-drop-zone="X"> al rândului
+    // țintă. "" = ungrouped (group_id NULL).
+    const targetZone = event.currentTarget.closest("[data-group-drop-zone]")
+    const newGroupId = targetZone?.dataset.groupDropZone || ""
+    const fromCfg    = this._prefs[fromKey] || {}
+    const oldGroupId = fromCfg.group_id ? String(fromCfg.group_id) : ""
+
+    // Cross-group: actualizează group_id
+    const patch = {}
+    if (newGroupId !== oldGroupId) {
+      patch.group_id = newGroupId === "" ? null : parseInt(newGroupId, 10)
+    }
+
+    // Z-index reorder (same logic): calculează ordinea în noua poziție
     const rows = Array.from(this.listTarget.querySelectorAll(".lm-row"))
     const keys = rows.map(r => r.dataset.key)
     const fromIdx = keys.indexOf(fromKey)
@@ -353,12 +458,13 @@ export default class extends Controller {
     if (fromIdx === -1 || toIdx === -1) return
     keys.splice(fromIdx, 1)
     keys.splice(toIdx, 0, fromKey)
-    // Reasignăm z-index: primul în listă (sus) primește valoarea maximă
+
     const maxZ = 1500
     const step = 100
     keys.forEach((k, i) => {
       const newZ = maxZ - i * step
-      this._patch(k, { z_index: newZ }, { silent: true })
+      const merged = k === fromKey ? { z_index: newZ, ...patch } : { z_index: newZ }
+      this._patch(k, merged, { silent: true })
     })
     this._render()
   }
@@ -366,7 +472,173 @@ export default class extends Controller {
   onDragEnd(event) {
     event.currentTarget.classList.remove("lm-row--dragging")
     this.element.querySelectorAll(".lm-row--drop-target").forEach(el => el.classList.remove("lm-row--drop-target"))
+    this.element.querySelectorAll(".lm-zone--drop-target").forEach(el => el.classList.remove("lm-zone--drop-target"))
     this._draggedKey = null
+  }
+
+  // Drop pe zona goală a unui grup (când lista lui e goală sau drop sub
+  // ultimul rând)
+  onZoneDragOver(event) {
+    if (!this._draggedKey) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = "move"
+    event.currentTarget.classList.add("lm-zone--drop-target")
+  }
+
+  onZoneDrop(event) {
+    if (!this._draggedKey) return
+    // Doar dacă target-ul e zona goală (nu un rând specific) — altfel onDrop
+    // a rulat deja prin event delegation.
+    if (event.target.closest(".lm-row")) return
+    event.preventDefault()
+    event.currentTarget.classList.remove("lm-zone--drop-target")
+    const fromKey = this._draggedKey
+    if (!fromKey) return
+    const newGroupId = event.currentTarget.dataset.groupDropZone || ""
+    const fromCfg    = this._prefs[fromKey] || {}
+    const oldGroupId = fromCfg.group_id ? String(fromCfg.group_id) : ""
+    if (newGroupId === oldGroupId) return
+    this._patch(fromKey, { group_id: newGroupId === "" ? null : parseInt(newGroupId, 10) })
+    this._render()
+  }
+
+  // ── Acțiuni grupuri ──────────────────────────────────────────────────────
+
+  async addGroup() {
+    try {
+      const r = await fetch("/gis/layer_groups", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": this._csrf, Accept: "application/json" },
+        body: JSON.stringify({ name: "Grup nou" })
+      })
+      if (!r.ok) throw new Error(r.status)
+      const g = await r.json()
+      this._groups.push(g)
+      this._render()
+    } catch (e) {
+      console.error("Layer Manager: nu pot crea grup", e)
+    }
+  }
+
+  toggleGroup(event) {
+    const li      = event.currentTarget.closest(".lm-group")
+    const groupId = parseInt(li?.dataset.groupId, 10)
+    if (!groupId) return
+    const group = (this._groups || []).find(g => g.id === groupId)
+    if (!group) return
+    group.collapsed = !group.collapsed
+    li.classList.toggle("lm-group--collapsed", group.collapsed)
+    event.currentTarget.textContent = group.collapsed ? "▸" : "▾"
+    this._patchGroup(groupId, { collapsed: group.collapsed })
+  }
+
+  renameGroup(event) {
+    const li      = event.currentTarget.closest(".lm-group")
+    const groupId = parseInt(li?.dataset.groupId, 10)
+    if (!groupId) return
+    const newName = event.currentTarget.textContent.trim()
+    const group = (this._groups || []).find(g => g.id === groupId)
+    if (!group || group.name === newName) return
+    if (!newName) {
+      event.currentTarget.textContent = group.name  // revert
+      return
+    }
+    group.name = newName
+    this._patchGroup(groupId, { name: newName })
+  }
+
+  onGroupNameKey(event) {
+    if (event.key === "Enter") {
+      event.preventDefault()
+      event.currentTarget.blur()
+    } else if (event.key === "Escape") {
+      event.preventDefault()
+      const li      = event.currentTarget.closest(".lm-group")
+      const groupId = parseInt(li?.dataset.groupId, 10)
+      const group   = (this._groups || []).find(g => g.id === groupId)
+      if (group) event.currentTarget.textContent = group.name
+      event.currentTarget.blur()
+    }
+  }
+
+  async deleteGroup(event) {
+    const li      = event.currentTarget.closest(".lm-group")
+    const groupId = parseInt(li?.dataset.groupId, 10)
+    if (!groupId) return
+    if (!confirm("Șterge grupul? Layerele din grup vor deveni „fără grup".")) return
+    try {
+      await fetch(`/gis/layer_groups/${groupId}`, {
+        method: "DELETE", credentials: "same-origin",
+        headers: { "X-CSRF-Token": this._csrf }
+      })
+      this._groups = (this._groups || []).filter(g => g.id !== groupId)
+      // Curăță group_id local pentru layerele care erau în grup
+      Object.values(this._prefs).forEach(cfg => {
+        if (cfg.group_id === groupId) cfg.group_id = null
+      })
+      this._render()
+    } catch (e) {
+      console.error("Layer Manager: nu pot șterge grupul", e)
+    }
+  }
+
+  _patchGroup(groupId, attrs) {
+    fetch(`/gis/layer_groups/${groupId}`, {
+      method: "PATCH", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": this._csrf, Accept: "application/json" },
+      body: JSON.stringify(attrs)
+    }).catch(e => console.warn("Layer Manager: PATCH grup eșuat", e))
+  }
+
+  // ── Drag&drop reordonare GRUPURI (din header) ────────────────────────────
+
+  onGroupDragStart(event) {
+    // Permite drag de grup DOAR de pe handle, nu din zona body unde sunt
+    // layerele (acolo trebuie să meargă drag-ul individual de layer).
+    if (!event.target.classList.contains("lm-group-handle")) {
+      event.preventDefault()
+      return
+    }
+    this._draggedGroupId = parseInt(event.currentTarget.dataset.groupId, 10)
+    event.currentTarget.classList.add("lm-group--dragging")
+    event.dataTransfer.effectAllowed = "move"
+  }
+
+  onGroupDragOver(event) {
+    if (!this._draggedGroupId) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = "move"
+  }
+
+  onGroupDrop(event) {
+    if (!this._draggedGroupId) return
+    event.preventDefault()
+    const fromId = this._draggedGroupId
+    const toId   = parseInt(event.currentTarget.dataset.groupId, 10)
+    if (!toId || fromId === toId) return
+    const ids = (this._groups || []).slice().sort((a, b) => a.position - b.position).map(g => g.id)
+    const fromIdx = ids.indexOf(fromId)
+    const toIdx   = ids.indexOf(toId)
+    if (fromIdx === -1 || toIdx === -1) return
+    ids.splice(fromIdx, 1)
+    ids.splice(toIdx, 0, fromId)
+    // Update local position
+    ids.forEach((id, i) => {
+      const g = (this._groups || []).find(x => x.id === id)
+      if (g) g.position = i
+    })
+    // Persist server-side
+    fetch("/gis/layer_groups/reorder", {
+      method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": this._csrf, Accept: "application/json" },
+      body: JSON.stringify({ order: ids })
+    }).catch(e => console.warn("Layer Manager: reorder grupuri eșuat", e))
+    this._render()
+  }
+
+  onGroupDragEnd(event) {
+    event.currentTarget.classList.remove("lm-group--dragging")
+    this._draggedGroupId = null
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────

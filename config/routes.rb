@@ -62,6 +62,13 @@ Rails.application.routes.draw do
     patch  "/layer_prefs/:layer_key", to: "layer_prefs#update",      as: :layer_pref
     delete "/layer_prefs",            to: "layer_prefs#destroy_all", as: :reset_layer_prefs
 
+    # Grupuri configurabile pentru Layer Manager (QGIS-like)
+    resources :layer_groups, only: [:create, :update, :destroy] do
+      collection do
+        post :reorder   # body { order: [id1, id2, ...] } → setează `position`
+      end
+    end
+
     resources :georef_plans do
       member do
         post :georeference        # recalculează afină rapidă (preview, fără warp)

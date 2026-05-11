@@ -2,6 +2,7 @@ class GisUserLayerPref < ApplicationRecord
   # Preferință de afișare per utilizator/sesiune și per cheie layer.
   # `owner_token` = identificator stabil din cookie semnat (placeholder pentru
   # `user_id` la integrarea în aplicația e-CAD principală cu sistem de auth).
+  belongs_to :group, class_name: "GisUserLayerGroup", optional: true
 
   # Definiția layer-elor cunoscute + valori implicite (sursa de adevăr server-side).
   # Spec §4.1 din `1_modul_gis.md` adaptat la layer-ele existente în aplicație.
@@ -95,6 +96,16 @@ class GisUserLayerPref < ApplicationRecord
     static_layers.merge(georef_layers)
   end
 
+  # Răspuns combinat pentru Layer Manager: layere + grupuri.
+  # Folosit de LayerPrefsController#index pentru a returna totul într-o
+  # singură cerere (în loc să facă două round-trip-uri).
+  def self.full_state_for(owner_token)
+    {
+      layers: full_prefs_for(owner_token),
+      groups: GisUserLayerGroup.for_owner(owner_token).ordered.map(&:to_h)
+    }
+  end
+
   # Default config pentru un plan raster georeferențiat.
   # `category: "raster"` semnalează UI-ului să ascundă controalele de
   # stroke/fill/dash (irelevante pentru raster).
@@ -137,6 +148,7 @@ class GisUserLayerPref < ApplicationRecord
       z_index:           pref.z_index                    || defaults[:z_index],
       color_by_category: pref.color_by_category.nil? ? defaults[:color_by_category] : pref.color_by_category,
       bg_transparent:    pref.bg_transparent.nil?    ? defaults[:bg_transparent]    : pref.bg_transparent,
+      group_id:          pref.group_id,
       min_resolution:    pref.min_resolution,
       max_resolution:    pref.max_resolution
     )

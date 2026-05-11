@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_11_210001) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_11_220001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -217,11 +217,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_210001) do
 #   Unknown type 'raster' for column 'raster'
 
 
+  create_table "gis_user_layer_groups", force: :cascade do |t|
+    t.boolean "collapsed", default: false
+    t.datetime "created_at", null: false
+    t.string "name", limit: 100, null: false
+    t.string "owner_token", null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.index ["owner_token", "position"], name: "index_gis_user_layer_groups_on_owner_token_and_position"
+  end
+
   create_table "gis_user_layer_prefs", force: :cascade do |t|
     t.boolean "bg_transparent"
     t.boolean "color_by_category"
     t.datetime "created_at", null: false
     t.string "fill_color"
+    t.bigint "group_id"
     t.string "layer_key", null: false
     t.boolean "locked"
     t.float "max_resolution"
@@ -234,6 +245,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_210001) do
     t.datetime "updated_at", null: false
     t.boolean "visible"
     t.integer "z_index"
+    t.index ["group_id"], name: "index_gis_user_layer_prefs_on_group_id"
     t.index ["owner_token", "layer_key"], name: "ix_gis_user_layer_prefs_owner_key", unique: true
     t.index ["owner_token"], name: "index_gis_user_layer_prefs_on_owner_token"
   end
@@ -450,6 +462,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_210001) do
   add_foreign_key "contested_x_entities", "lands"
   add_foreign_key "deeds", "file_descriptions"
   add_foreign_key "gis_georef_control_points", "gis_georef_plans"
+  add_foreign_key "gis_user_layer_prefs", "gis_user_layer_groups", column: "group_id", on_delete: :nullify
   add_foreign_key "individual_units", "buildings"
   add_foreign_key "lands", "addresses"
   add_foreign_key "lands", "file_descriptions"

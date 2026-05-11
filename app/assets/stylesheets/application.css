@@ -244,23 +244,84 @@ legend { font-size: 13px; font-weight: 700; color: #374151; padding: 0 6px; }
   overflow: hidden;
 }
 
+/* ── Sidebar stânga: layout cu toggle bar (mirror pattern .digi-panel) ── */
 .harta-sidebar {
-  width: 280px;
-  min-width: 280px;
+  flex-shrink: 0;
   background: #fff;
   border-right: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: row;
+  z-index: 1000;
+  height: 100%;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.04);
+}
+.harta-sidebar-body {
+  width: 280px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
   padding: 16px;
   gap: 16px;
-  z-index: 1000;
+  background: #fff;
 }
+.harta-sidebar--collapsed .harta-sidebar-body { display: none; }
+
+.harta-sidebar-toggle {
+  width: 36px;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+  color: #e5e7eb;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
+  gap: 10px;
+  border-left: 1px solid #2d2d4a;
+  transition: background 0.15s;
+}
+.harta-sidebar-toggle:hover {
+  background: linear-gradient(180deg, #2d2d4a 0%, #1e2a4a 100%);
+  color: #fff;
+}
+.harta-sidebar-toggle-icon { font-size: 16px; line-height: 1; }
+.harta-sidebar-toggle-label {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 .sidebar-header { display: flex; align-items: center; justify-content: space-between; }
 .sidebar-header h2 { font-size: 15px; font-weight: 700; }
 .sidebar-filters { display: flex; flex-direction: column; gap: 6px; }
 .sidebar-link { margin-top: auto; }
 .input-sm { padding: 5px 8px; font-size: 12px; width: 100%; }
+
+/* Hartă de bază mutată jos — secțiune colapsibilă via <details>/<summary> */
+.lm-section--collapsible summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.lm-section--collapsible summary::-webkit-details-marker { display: none; }
+.lm-section--collapsible summary h3 {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+.lm-section--collapsible summary h3::before {
+  content: "▸";
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 0.15s;
+}
+.lm-section--collapsible[open] summary h3::before { transform: rotate(90deg); }
 
 /* ── Centru: hartă + linia de comandă + status bar ── */
 .harta-center {
@@ -442,7 +503,101 @@ legend { font-size: 13px; font-weight: 700; color: #374151; padding: 0 6px; }
 
 .layer-manager .lm-list {
   list-style: none; padding: 0; margin: 0;
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+
+/* ── Grupuri configurabile (QGIS-like) ── */
+.layer-manager .lm-group {
+  list-style: none;
+  background: #f9fafb;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  overflow: hidden;
+}
+.layer-manager .lm-group--dragging { opacity: .4; }
+.layer-manager .lm-group-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px;
+  background: #e5e7eb;
+  border-bottom: 1px solid #d1d5db;
+  font-weight: 600; font-size: 12px;
+  cursor: default;
+}
+.layer-manager .lm-group--collapsed .lm-group-head { border-bottom-color: transparent; }
+.layer-manager .lm-group-handle {
+  cursor: grab; color: #9ca3af; user-select: none;
+  font-size: 14px;
+}
+.layer-manager .lm-group-handle:active { cursor: grabbing; }
+.layer-manager .lm-group-toggle {
+  background: transparent; border: none; cursor: pointer;
+  width: 16px; height: 16px;
+  padding: 0; font-size: 10px; line-height: 1;
+  color: #4b5563;
+}
+.layer-manager .lm-group-name {
+  flex: 1;
+  outline: none;
+  padding: 1px 3px;
+  border-radius: 3px;
+  cursor: text;
+}
+.layer-manager .lm-group-name:focus {
+  background: #fff;
+  box-shadow: 0 0 0 2px #93c5fd;
+}
+.layer-manager .lm-group-name--readonly {
+  cursor: default;
+  color: #6b7280;
+  font-weight: 500;
+  font-style: italic;
+}
+.layer-manager .lm-group-count {
+  color: #6b7280; font-weight: 400; font-size: 11px;
+}
+.layer-manager .lm-group-delete {
+  background: transparent; border: none; cursor: pointer;
+  padding: 0 4px; font-size: 12px;
+  color: #9ca3af;
+  opacity: .5; transition: opacity .15s;
+}
+.layer-manager .lm-group-head:hover .lm-group-delete { opacity: 1; }
+.layer-manager .lm-group-delete:hover { color: #dc2626; }
+.layer-manager .lm-group-body {
+  list-style: none; padding: 4px; margin: 0;
+  display: flex; flex-direction: column; gap: 3px;
+  min-height: 10px;
+}
+.layer-manager .lm-group--collapsed .lm-group-body { display: none; }
+.layer-manager .lm-group-body--empty { padding: 8px; }
+.layer-manager .lm-empty-hint {
+  list-style: none;
+  font-size: 11px; color: #9ca3af; font-style: italic;
+  text-align: center; padding: 6px;
+  border: 1px dashed #d1d5db; border-radius: 4px;
+}
+.layer-manager .lm-zone--drop-target {
+  background: #eff6ff !important;
+  outline: 2px dashed #1d4ed8;
+}
+
+.layer-manager .lm-group--ungrouped { background: transparent; border: none; }
+.layer-manager .lm-group--ungrouped > .lm-group-head--ungrouped {
+  background: transparent; border-bottom: 1px solid #e5e7eb;
+  padding: 4px 4px 4px 0;
+}
+.layer-manager .lm-group--ungrouped > .lm-group-body { padding: 4px 0; }
+
+.layer-manager .lm-add-group {
+  margin-top: 6px;
+  background: #f3f4f6; border: 1px dashed #9ca3af; border-radius: 5px;
+  padding: 6px 10px; font-size: 12px;
+  cursor: pointer; color: #4b5563;
+  width: 100%;
+  transition: background .15s, border-color .15s;
+}
+.layer-manager .lm-add-group:hover {
+  background: #e5e7eb; border-color: #6b7280; color: #1f2937;
 }
 .layer-manager .lm-row {
   background: #fff; border: 1px solid #e5e7eb; border-radius: 4px;
@@ -695,12 +850,6 @@ legend { font-size: 13px; font-weight: 700; color: #374151; padding: 0 6px; }
   text-decoration: none;
 }
 .lm-georef-link:hover { background: #dbeafe; }
-
-/* ── Legendă ── */
-.legenda h3 { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
-.legenda-grid { display: flex; flex-direction: column; gap: 4px; }
-.legenda-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #374151; }
-.legenda-dot { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
 
 /* ── OpenLayers popup container ── */
 .ol-popup-content {

@@ -7,7 +7,7 @@ module Gis
 
     # GET /gis/layer_prefs
     def index
-      render json: { layers: GisUserLayerPref.full_prefs_for(@owner_token) }
+      render json: GisUserLayerPref.full_state_for(@owner_token)
     end
 
     # PATCH /gis/layer_prefs/:layer_key
@@ -48,10 +48,14 @@ module Gis
     end
 
     def pref_params
-      params.permit(:visible, :locked, :opacity,
-                    :stroke_color, :fill_color, :stroke_width, :stroke_dash,
-                    :z_index, :color_by_category, :bg_transparent,
-                    :min_resolution, :max_resolution)
+      # group_id: trimitem `null` ca să scoatem layer-ul din grup; `nil` în params
+      # nu funcționează direct cu .permit, deci permitem string și-l convertim.
+      cleaned = params.permit(:visible, :locked, :opacity,
+                              :stroke_color, :fill_color, :stroke_width, :stroke_dash,
+                              :z_index, :color_by_category, :bg_transparent, :group_id,
+                              :min_resolution, :max_resolution).to_h
+      cleaned[:group_id] = nil if cleaned.key?(:group_id) && cleaned[:group_id].blank?
+      cleaned
     end
 
     # Cookie semnat persistent (1 an), regenerat dacă lipsește.

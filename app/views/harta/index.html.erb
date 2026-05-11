@@ -13,97 +13,84 @@
      data-digitizare-edit-kind-value="<%= params[:edit_kind] %>"
      data-digitizare-edit-id-value="<%= params[:edit_id] %>"
      data-digitizare-save-batch-url-value="<%= digitizare_save_batch_path %>">
-  <!-- ── Sidebar stânga: filtre + legendă ────────────────────────────────── -->
-  <aside class="harta-sidebar">
-    <div class="sidebar-header">
-      <h2>Parcele Cadastrale</h2>
-      <%= link_to "Adaugă parcelă", new_parcela_cadastrala_path, class: "btn btn-primary btn-sm" %>
-    </div>
+  <!-- ── Sidebar stânga: filtre + layer manager + base layers (colapsibil) ── -->
+  <aside class="harta-sidebar" data-controller="sidebar-toggle">
 
-    <div class="sidebar-filters">
-      <%= form_with url: harta_path, method: :get do |f| %>
-        <%= f.text_field :q, value: params[:q], placeholder: "Caută număr cadastral…", class: "input input-sm" %>
-        <%= f.select :status,
-              [["Toate", ""], ["Activ", "activ"], ["Inactiv", "inactiv"], ["Litigiu", "litigiu"]],
-              {}, { class: "input input-sm", data: { action: "change->harta-map#reloadParcele" } } %>
-        <%= f.submit "Filtrează", class: "btn btn-sm" %>
-      <% end %>
-    </div>
-
-    <div class="layer-manager"
-         data-controller="layer-manager"
-         data-layer-manager-harta-map-outlet="#harta-map">
-      <div class="lm-section">
-        <h3>Hartă de bază</h3>
-        <div class="layer-group" data-layer-manager-target="baseLayers">
-          <label class="layer-radio">
-            <input type="radio" name="base-layer" value="osm" checked
-                   data-action="change->layer-manager#selectBase">
-            <span>OpenStreetMap</span>
-          </label>
-          <label class="layer-radio">
-            <input type="radio" name="base-layer" value="google_sat"
-                   data-action="change->layer-manager#selectBase">
-            <span>Google Satellite</span>
-          </label>
-          <label class="layer-radio">
-            <input type="radio" name="base-layer" value="google_hybrid"
-                   data-action="change->layer-manager#selectBase">
-            <span>Google Hybrid (sat + drumuri)</span>
-          </label>
-          <label class="layer-radio">
-            <input type="radio" name="base-layer" value="esri"
-                   data-action="change->layer-manager#selectBase">
-            <span>Esri World Imagery</span>
-          </label>
-          <label class="layer-radio">
-            <input type="radio" name="base-layer" value="ortofotoplan"
-                   data-action="change->layer-manager#selectBase">
-            <span>Ortofotoplan (ANCPI)</span>
-          </label>
-        </div>
+    <div class="harta-sidebar-body">
+      <div class="sidebar-header">
+        <h2>Parcele Cadastrale</h2>
+        <%= link_to "Adaugă parcelă", new_parcela_cadastrala_path, class: "btn btn-primary btn-sm" %>
       </div>
 
-      <div class="lm-section">
-        <div class="lm-section-head">
-          <h3>Straturi (Layer Manager)</h3>
-          <button type="button" class="lm-reset-all"
-                  title="Restaurează valorile implicite pentru toate layer-ele"
-                  data-action="click->layer-manager#resetAll">↺ Reset</button>
-        </div>
-        <ol class="lm-list" data-layer-manager-target="list"></ol>
-        <p class="lm-hint">Trage rândurile pentru a schimba ordinea de afișare. Click pe pătrat de culoare pentru a edita stilul.</p>
-        <%= link_to "🗺  Planuri vechi (georeferențiere)", gis_georef_plans_path, class: "lm-georef-link" %>
-      </div>
-    </div>
-
-    <div class="legenda">
-      <h3>Legendă</h3>
-      <div class="legenda-grid">
-        <% {
-          "Arabil"            => "#22c55e",
-          "Pășune"            => "#84cc16",
-          "Fânețe"            => "#a3e635",
-          "Vie"               => "#a855f7",
-          "Livadă"            => "#f97316",
-          "Pădure"            => "#15803d",
-          "Curți/construcții" => "#f59e0b",
-          "Ape"               => "#38bdf8",
-          "Neproductiv"       => "#9ca3af"
-        }.each do |label, color| %>
-          <span class="legenda-item">
-            <span class="legenda-dot" style="background:<%= color %>"></span>
-            <%= label %>
-          </span>
+      <div class="sidebar-filters">
+        <%= form_with url: harta_path, method: :get do |f| %>
+          <%= f.text_field :q, value: params[:q], placeholder: "Caută număr cadastral…", class: "input input-sm" %>
+          <%= f.select :status,
+                [["Toate", ""], ["Activ", "activ"], ["Inactiv", "inactiv"], ["Litigiu", "litigiu"]],
+                {}, { class: "input input-sm", data: { action: "change->harta-map#reloadParcele" } } %>
+          <%= f.submit "Filtrează", class: "btn btn-sm" %>
         <% end %>
-        <span class="legenda-item">
-          <span class="legenda-dot" style="background:#dc2626;border:2px dashed #dc2626;background:transparent"></span>
-          Litigiu
-        </span>
       </div>
+
+      <div class="layer-manager"
+           data-controller="layer-manager"
+           data-layer-manager-harta-map-outlet="#harta-map">
+        <!-- Straturi sus (atenția principală) -->
+        <div class="lm-section">
+          <div class="lm-section-head">
+            <h3>Straturi (Layer Manager)</h3>
+            <button type="button" class="lm-reset-all"
+                    title="Restaurează valorile implicite pentru toate layer-ele"
+                    data-action="click->layer-manager#resetAll">↺ Reset</button>
+          </div>
+          <ol class="lm-list" data-layer-manager-target="list"></ol>
+          <p class="lm-hint">Trage rândurile pentru a schimba ordinea. Click pe pătratul de culoare pentru a edita stilul.</p>
+          <%= link_to "🗺  Planuri vechi (georeferențiere)", gis_georef_plans_path, class: "lm-georef-link" %>
+        </div>
+
+        <!-- Harta de bază mutată jos (acțiune mai rar utilizată) -->
+        <details class="lm-section lm-section--collapsible" data-layer-manager-target="baseSection">
+          <summary><h3>Hartă de bază</h3></summary>
+          <div class="layer-group" data-layer-manager-target="baseLayers">
+            <label class="layer-radio">
+              <input type="radio" name="base-layer" value="osm" checked
+                     data-action="change->layer-manager#selectBase">
+              <span>OpenStreetMap</span>
+            </label>
+            <label class="layer-radio">
+              <input type="radio" name="base-layer" value="google_sat"
+                     data-action="change->layer-manager#selectBase">
+              <span>Google Satellite</span>
+            </label>
+            <label class="layer-radio">
+              <input type="radio" name="base-layer" value="google_hybrid"
+                     data-action="change->layer-manager#selectBase">
+              <span>Google Hybrid (sat + drumuri)</span>
+            </label>
+            <label class="layer-radio">
+              <input type="radio" name="base-layer" value="esri"
+                     data-action="change->layer-manager#selectBase">
+              <span>Esri World Imagery</span>
+            </label>
+            <label class="layer-radio">
+              <input type="radio" name="base-layer" value="ortofotoplan"
+                     data-action="change->layer-manager#selectBase">
+              <span>Ortofotoplan (ANCPI)</span>
+            </label>
+          </div>
+        </details>
+      </div>
+
+      <%= link_to "Listă parcele", parcele_cadastrale_path, class: "btn btn-secondary btn-sm sidebar-link" %>
     </div>
 
-    <%= link_to "Listă parcele", parcele_cadastrale_path, class: "btn btn-secondary btn-sm sidebar-link" %>
+    <!-- Toggle bar — colapsare/expansiune sidebar -->
+    <button type="button" class="harta-sidebar-toggle"
+            data-action="click->sidebar-toggle#toggle"
+            title="Închide / Deschide panoul Layere">
+      <span class="harta-sidebar-toggle-icon">📋</span>
+      <span class="harta-sidebar-toggle-label">Layere</span>
+    </button>
   </aside>
 
   <!-- ── Zona hartă (centru): hartă + linia de comandă + status bar ───────── -->
