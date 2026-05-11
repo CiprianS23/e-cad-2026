@@ -67,8 +67,11 @@ export default class extends Controller {
 
   _render() {
     if (!this.hasListTarget) return
-    // Ordonăm după z_index descrescător (z mare = sus în listă, ca în QGIS)
+    // Layer-ele de etichete (parcele_labels etc.) NU apar ca rânduri separate —
+    // sunt randate ca sub-secțiune în props-ul layer-ului părinte.
+    const isLabelKey = (k) => k.endsWith("_labels")
     const entries = Object.entries(this._prefs)
+      .filter(([k]) => !isLabelKey(k))
       .sort((a, b) => (b[1].z_index || 0) - (a[1].z_index || 0))
     this.listTarget.innerHTML = entries.map(([key, cfg]) => this._rowHtml(key, cfg)).join("")
     this._bindRowEvents()
@@ -86,7 +89,8 @@ export default class extends Controller {
     const strokeWidth    = cfg.stroke_width != null ? cfg.stroke_width : 1.5
     const strokeDash     = cfg.stroke_dash || "solid"
     const colorByCat     = !!cfg.color_by_category
-    const isLabelsLayer  = key.endsWith("_labels")
+    const isLabelsLayer  = key.endsWith("_labels")  // (nu mai apare ca rând, dar funcția e generală)
+    const labelsSubHtml  = this._labelsSubHtml(key)
 
     return `
       <li class="lm-row" draggable="true"
@@ -106,7 +110,10 @@ export default class extends Controller {
           <button type="button" class="lm-swatch" title="Stil layer"
                   style="background:${this._swatchBackground(cfg)};border-color:${strokeColor}"
                   data-action="click->layer-manager#toggleProps"></button>
-          <span class="lm-name" title="${displayName}">${displayName}</span>
+          <span class="lm-name" title="Click pentru stil layer"
+                data-action="click->layer-manager#toggleProps">${displayName}</span>
+          <button type="button" class="lm-expand" title="Extinde proprietăți"
+                  data-action="click->layer-manager#toggleProps">▸</button>
           <button type="button" class="lm-zoom" title="Zoom la layer"
                   data-action="click->layer-manager#zoomToLayer">⌖</button>
         </div>
@@ -150,10 +157,53 @@ export default class extends Controller {
           </label>
           ` : "" }
           `}
+          ${labelsSubHtml}
           <button type="button" class="lm-prop-reset"
                   data-action="click->layer-manager#resetLayer">↺ Default</button>
         </div>
       </li>`
+  }
+
+  // Sub-secțiune "Etichete" în props-ul layer-ului părinte (vizibilitate +
+  // opacitate). Tratează `<parent>_labels` ca o configurație inclusă, nu un
+  // layer separat în lista vizibilă.
+  _labelsSubHtml(parentKey) {
+    const labelKey = `${parentKey}_labels`
+    const cfg      = this._prefs[labelKey]
+    if (!cfg) return ""
+    const visible    = cfg.visible !== false
+    const opacityPct = Math.round((cfg.opacity != null ? cfg.opacity : 1) * 100)
+    return `
+      <div class="lm-sub" data-sub-key="${labelKey}">
+        <div class="lm-sub-head">
+          <label class="lm-toggle lm-vis" title="Etichete vizibile">
+            <input type="checkbox" data-action="change->layer-manager#toggleSubVisible" ${visible ? "checked" : ""}>
+            <span>👁</span>
+          </label>
+          <span class="lm-sub-name">Etichete (nr cad + supraf.)</span>
+        </div>
+        <label class="lm-prop">
+          <span>Opacitate etichete</span>
+          <input type="range" min="0" max="100" value="${opacityPct}"
+                 data-action="input->layer-manager#changeSubOpacity">
+          <output>${opacityPct}%</output>
+        </label>
+      </div>`
+  }
+
+  toggleSubVisible(event) {
+    const subKey = event.target.closest(".lm-sub")?.dataset.subKey
+    if (!subKey) return
+    this._patch(subKey, { visible: event.target.checked })
+  }
+
+  changeSubOpacity(event) {
+    const subKey = event.target.closest(".lm-sub")?.dataset.subKey
+    if (!subKey) return
+    const pct = parseInt(event.target.value, 10)
+    const out = event.target.parentElement.querySelector("output")
+    if (out) out.textContent = `${pct}%`
+    this._patch(subKey, { opacity: pct / 100 })
   }
 
   _bindRowEvents() {
@@ -164,10 +214,13 @@ export default class extends Controller {
   // ── Event handlers ───────────────────────────────────────────────────────
 
   toggleProps(event) {
-    const row   = event.currentTarget.closest(".lm-row")
-    const props = row?.querySelector(".lm-props")
+    const row    = event.currentTarget.closest(".lm-row")
+    const props  = row?.querySelector(".lm-props")
+    const arrow  = row?.querySelector(".lm-expand")
     if (!props) return
     props.hidden = !props.hidden
+    if (arrow) arrow.textContent = props.hidden ? "▸" : "▾"
+    row.classList.toggle("lm-row--expanded", !props.hidden)
   }
 
   toggleVisible(event) {

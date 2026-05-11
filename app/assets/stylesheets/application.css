@@ -466,12 +466,25 @@ legend { font-size: 13px; font-weight: 700; color: #374151; padding: 0 6px; }
   cursor: pointer; padding: 0 2px; border-radius: 2px;
 }
 .layer-manager .lm-zoom:hover { color: #1d4ed8; background: #eff6ff; }
+.layer-manager .lm-expand {
+  background: transparent; border: 0; color: #9ca3af; font-size: 10px;
+  cursor: pointer; padding: 0 2px; border-radius: 2px;
+  width: 14px; text-align: center;
+}
+.layer-manager .lm-expand:hover { color: #1d4ed8; }
+.layer-manager .lm-row--expanded .lm-expand { color: #1d4ed8; }
+.layer-manager .lm-name { cursor: pointer; }
+.layer-manager .lm-name:hover { color: #1d4ed8; }
 
 .layer-manager .lm-props {
   margin-top: 6px; padding: 6px; border-top: 1px solid #e5e7eb;
   display: flex; flex-direction: column; gap: 6px;
   background: #fafafa; border-radius: 0 0 3px 3px;
 }
+/* HTML `hidden` are display:none în UA stylesheet, dar e suprascris de
+   `display: flex` din clasă. Acest selector cu specificitate mai mare
+   garantează că proprietățile sunt cu adevărat ascunse când au atributul. */
+.layer-manager .lm-props[hidden] { display: none; }
 .layer-manager .lm-prop {
   display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px;
   font-size: 11px; color: #4b5563;
@@ -501,6 +514,14 @@ legend { font-size: 13px; font-weight: 700; color: #374151; padding: 0 6px; }
   padding: 2px 6px; cursor: pointer; align-self: flex-start;
 }
 .layer-manager .lm-prop-reset:hover { background: #f3f4f6; color: #b91c1c; }
+
+/* Sub-secțiune Etichete în props-ul layer-ului părinte */
+.layer-manager .lm-sub {
+  margin-top: 4px; padding: 6px 0; border-top: 1px dashed #e5e7eb;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.layer-manager .lm-sub-head { display: flex; align-items: center; gap: 6px; }
+.layer-manager .lm-sub-name { font-size: 11px; color: #4b5563; font-weight: 500; }
 
 .layer-manager .lm-hint {
   font-size: 10px; color: #9ca3af; margin: 6px 0 0;
