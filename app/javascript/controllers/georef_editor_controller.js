@@ -211,13 +211,56 @@ export default class extends Controller {
       }),
       visible: true
     })
-    // Diagnostic: o singură dată dacă OSM eșuează la încărcare.
     this._refOsm.getSource().once("tileloaderror", () => {
       this._appendDiag("OSM tiles nu se încarcă (network/firewall/ad-blocker?)")
     })
 
-    // Ortofoto via MapProxy — opt-in (utilizatorul comută din radio).
-    // Dacă MapProxy e offline, tile-urile eșuează silent fără spam.
+    // Google Satellite (endpoint neoficial mt{0-3}). Util în dev; pentru
+    // producție recomandat Esri sau o cheie comercială Google Maps Tile API.
+    this._refGoogleSat = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        urls: [
+          "https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+          "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+          "https://mt2.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+          "https://mt3.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
+        ],
+        attributions: "© Google",
+        crossOrigin:  null,
+        maxZoom:      20
+      }),
+      visible: false
+    })
+
+    // Google Hybrid (satelit + drumuri + etichete)
+    this._refGoogleHybrid = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        urls: [
+          "https://mt0.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+          "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+          "https://mt2.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+          "https://mt3.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
+        ],
+        attributions: "© Google",
+        crossOrigin:  null,
+        maxZoom:      20
+      }),
+      visible: false
+    })
+
+    // Esri World Imagery — gratuit pentru non-commercial, fără API key.
+    // Alternativă "legală" la Google Satellite în producție.
+    this._refEsri = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        url:          "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attributions: "Tiles © Esri",
+        crossOrigin:  null,
+        maxZoom:      19
+      }),
+      visible: false
+    })
+
+    // Ortofoto ANCPI via MapProxy — opt-in. Silent error când offline.
     this._refOrtofoto = new ol.layer.Tile({
       source: new ol.source.XYZ({
         url: `${this.mapproxyUrlValue}/tms/1.0.0/ortofotoplan_3857/webmercator/{z}/{x}/{-y}.jpeg`,
@@ -259,7 +302,7 @@ export default class extends Controller {
       }),
       // .filter(Boolean) elimină layer-ele null (când URL-urile geojson lipsesc)
       layers: [
-        this._refOsm, this._refOrtofoto,
+        this._refOsm, this._refGoogleSat, this._refGoogleHybrid, this._refEsri, this._refOrtofoto,
         this._uatLayer, this._parceleLayer, this._cladiriLayer, this._cgxmlLayer,
         this._refGcpLayer
       ].filter(Boolean)
@@ -561,6 +604,9 @@ export default class extends Controller {
   changeBase(event) {
     const choice = event.target.value
     this._refOsm?.setVisible(choice === "osm")
+    this._refGoogleSat?.setVisible(choice === "google_sat")
+    this._refGoogleHybrid?.setVisible(choice === "google_hybrid")
+    this._refEsri?.setVisible(choice === "esri")
     this._refOrtofoto?.setVisible(choice === "ortofotoplan")
   }
 

@@ -42,6 +42,21 @@
             <span>OpenStreetMap</span>
           </label>
           <label class="layer-radio">
+            <input type="radio" name="base-layer" value="google_sat"
+                   data-action="change->layer-manager#selectBase">
+            <span>Google Satellite</span>
+          </label>
+          <label class="layer-radio">
+            <input type="radio" name="base-layer" value="google_hybrid"
+                   data-action="change->layer-manager#selectBase">
+            <span>Google Hybrid (sat + drumuri)</span>
+          </label>
+          <label class="layer-radio">
+            <input type="radio" name="base-layer" value="esri"
+                   data-action="change->layer-manager#selectBase">
+            <span>Esri World Imagery</span>
+          </label>
+          <label class="layer-radio">
             <input type="radio" name="base-layer" value="ortofotoplan"
                    data-action="change->layer-manager#selectBase">
             <span>Ortofotoplan (ANCPI)</span>

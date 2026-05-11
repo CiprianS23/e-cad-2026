@@ -151,6 +151,42 @@ export default class extends Controller {
       this._baseLayers.osm = osmFallback()
     }
 
+    // Layere de bază alternative — încărcate direct din surse publice (3857)
+    // cu reproject pe Stereo70 făcut de OL on-the-fly.
+    this._baseLayers.google_sat = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        urls: [
+          "https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+          "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+          "https://mt2.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+          "https://mt3.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
+        ],
+        attributions: "© Google", crossOrigin: null, maxZoom: 20
+      }),
+      properties: { name: "Google Satellite" }
+    })
+
+    this._baseLayers.google_hybrid = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        urls: [
+          "https://mt0.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+          "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+          "https://mt2.google.com/vt/lyrs=y&x={x}&y={y}&z={z}",
+          "https://mt3.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
+        ],
+        attributions: "© Google", crossOrigin: null, maxZoom: 20
+      }),
+      properties: { name: "Google Hybrid" }
+    })
+
+    this._baseLayers.esri = new ol.layer.Tile({
+      source: new ol.source.XYZ({
+        url:          "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attributions: "Tiles © Esri", crossOrigin: null, maxZoom: 19
+      }),
+      properties: { name: "Esri World Imagery" }
+    })
+
     this.map.addLayer(this._baseLayers.osm)
 
     // ── Layere vectoriale (overlays) ──
