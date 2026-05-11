@@ -80,10 +80,27 @@ export default class extends Controller {
       .filter(([k]) => !isLabelKey(k))
       .sort((a, b) => (b[1].z_index || 0) - (a[1].z_index || 0))
 
-    // Grupare după group_id
+    const hasGroups = (this._groups || []).length > 0
+
+    // Fast-path: când nu există grupuri, randăm flat (ca înainte) ca să
+    // evităm orice complexitate suplimentară. Plus butonul "+ Grup nou" sub.
+    if (!hasGroups) {
+      const rows = entries.map(([key, cfg]) => this._rowHtml(key, cfg)).join("")
+      this.listTarget.innerHTML = rows + `
+        <li class="lm-add-group-wrap">
+          <button type="button" class="lm-add-group"
+                  data-action="click->layer-manager#addGroup">
+            📁 + Grup nou
+          </button>
+        </li>`
+      return
+    }
+
+    // Slow-path: cu grupuri existente, randăm grupul → layere + secțiunea
+    // ungrouped + buton "+ Grup nou".
     const byGroup = new Map()
     const ungrouped = []
-    const groupsById = new Map((this._groups || []).map(g => [g.id, g]))
+    const groupsById = new Map(this._groups.map(g => [g.id, g]))
     for (const [key, cfg] of entries) {
       if (cfg.group_id && groupsById.has(cfg.group_id)) {
         const arr = byGroup.get(cfg.group_id) || []
@@ -94,21 +111,20 @@ export default class extends Controller {
       }
     }
 
-    // Render: grupuri în ordinea position, apoi "Layere fără grup"
-    const sortedGroups = (this._groups || []).slice().sort((a, b) => a.position - b.position)
+    const sortedGroups = this._groups.slice().sort((a, b) => a.position - b.position)
     const parts = []
     for (const g of sortedGroups) {
-      const items = byGroup.get(g.id) || []
-      parts.push(this._groupHtml(g, items))
+      parts.push(this._groupHtml(g, byGroup.get(g.id) || []))
     }
     parts.push(this._ungroupedHtml(ungrouped))
     parts.push(`
-      <button type="button" class="lm-add-group"
-              data-action="click->layer-manager#addGroup">
-        📁 + Grup nou
-      </button>`)
+      <li class="lm-add-group-wrap">
+        <button type="button" class="lm-add-group"
+                data-action="click->layer-manager#addGroup">
+          📁 + Grup nou
+        </button>
+      </li>`)
     this.listTarget.innerHTML = parts.join("")
-    this._bindRowEvents()
   }
 
   // HTML pentru un grup colapsibil cu header + listă layere
@@ -565,7 +581,7 @@ export default class extends Controller {
     const li      = event.currentTarget.closest(".lm-group")
     const groupId = parseInt(li?.dataset.groupId, 10)
     if (!groupId) return
-    if (!confirm("Șterge grupul? Layerele din grup vor deveni „fără grup".")) return
+    if (!confirm("Șterge grupul? Layerele din grup vor deveni „fără grup”.")) return
     try {
       await fetch(`/gis/layer_groups/${groupId}`, {
         method: "DELETE", credentials: "same-origin",
