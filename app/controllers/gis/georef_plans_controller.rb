@@ -93,8 +93,12 @@ module Gis
 
     # DELETE /gis/georef_plans/:id
     def destroy
+      name = @plan.name
       @plan.destroy
-      head :no_content
+      respond_to do |format|
+        format.html { redirect_to gis_georef_plans_path, status: :see_other, notice: "Plan „#{name}” șters." }
+        format.json { head :no_content }
+      end
     end
 
     # POST /gis/georef_plans/:id/regenerate_preview
