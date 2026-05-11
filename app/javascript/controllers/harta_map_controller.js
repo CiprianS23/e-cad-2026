@@ -154,12 +154,24 @@ export default class extends Controller {
     this.map.addLayer(this._baseLayers.osm)
 
     // ── Layere vectoriale (overlays) ──
+    // Store dinamic pentru config-ul aplicat de Layer Manager (overrides peste default-uri).
+    this._layerConfig = this._layerConfig || {}
+
     this.uatLayer = new ol.layer.Vector({
       source: new ol.source.Vector(),
-      style: () => new ol.style.Style({
-        stroke: new ol.style.Stroke({ color: "#6b21a8", width: 1.2, lineDash: [4, 3] }),
-        fill:   new ol.style.Fill({ color: "rgba(168, 85, 247, 0.06)" })
-      }),
+      style: () => {
+        const cfg = this._layerConfig?.uat || {}
+        return new ol.style.Style({
+          stroke: new ol.style.Stroke({
+            color:    cfg.stroke_color || "#6b21a8",
+            width:    cfg.stroke_width || 1.2,
+            lineDash: this._dashArray(cfg.stroke_dash, "dashed")
+          }),
+          fill: new ol.style.Fill({
+            color: this._toRgba(cfg.fill_color || "rgba(168, 85, 247, 0.06)", 1)
+          })
+        })
+      },
       properties: { name: "uat" }
     })
 
@@ -219,7 +231,7 @@ export default class extends Controller {
     this.map.addLayer(this.cgxmlLabelsLayer)
   }
 
-  // ── API public (folosit de layer-switcher prin Stimulus outlet) ──────────
+  // ── API public — folosit de layer-manager prin Stimulus outlet ────────────
 
   setBaseLayer(name) {
     if (!this._baseLayers) return
@@ -234,6 +246,65 @@ export default class extends Controller {
     if (name === "parcele") this.parcelLabelsLayer?.setVisible(visible)
     if (name === "cladiri") this.cladiriLabelsLayer?.setVisible(visible)
     if (name === "cgxml")   this.cgxmlLabelsLayer?.setVisible(visible)
+  }
+
+  // Layer Manager API — aplicăm un set de proprietăți de stil per layer cunoscut.
+  // `config` = { visible, locked, opacity, stroke_color, fill_color,
+  //              stroke_width, stroke_dash, z_index, color_by_category }
+  // Toate proprietățile sunt opționale.
+  applyLayerConfig(layerKey, config) {
+    if (!config) return
+    if (!this._layerConfig) this._layerConfig = {}
+    // Merge cu config existent (update incremental, nu overwrite total)
+    this._layerConfig[layerKey] = { ...(this._layerConfig[layerKey] || {}), ...config }
+    const merged = this._layerConfig[layerKey]
+    const layer  = this._resolveLayer(layerKey)
+    if (!layer) return
+
+    if (typeof merged.visible  === "boolean") layer.setVisible(merged.visible)
+    if (typeof merged.opacity  === "number")  layer.setOpacity(merged.opacity)
+    if (typeof merged.z_index  === "number")  layer.setZIndex(merged.z_index)
+
+    // Sincronizare label-uri cu layer-ul părinte pentru vizibilitate "implicită"
+    // (rămâne sub controlul explicit al layer-ului dedicat *_labels din DB).
+    layer.changed()
+  }
+
+  // Întoarce extent-ul (bbox) features-urilor unui layer — pentru "zoom la layer".
+  getLayerExtent(layerKey) {
+    const layer = this._resolveLayer(layerKey)
+    if (!layer || !layer.getSource) return null
+    const src = layer.getSource()
+    if (!src || typeof src.getExtent !== "function") return null
+    const ext = src.getExtent()
+    if (!ext || !isFinite(ext[0])) return null
+    return ext
+  }
+
+  zoomToLayer(layerKey, padding = 60) {
+    const ext = this.getLayerExtent(layerKey)
+    if (!ext) return false
+    this.map.getView().fit(ext, { duration: 400, padding: [padding, padding, padding, padding] })
+    return true
+  }
+
+  // Întoarce true dacă layer-ul e marcat ca "locked" (editarea blocată din UI).
+  // Folosit de digitizare_controller pentru a refuza editarea pe layere blocate.
+  isLayerLocked(layerKey) {
+    return !!this._layerConfig?.[layerKey]?.locked
+  }
+
+  _resolveLayer(key) {
+    const map = {
+      uat:            this.uatLayer,
+      parcele:        this.parcelLayer,
+      cladiri:        this.cladiriLayer,
+      cgxml:          this.cgxmlLayer,
+      parcele_labels: this.parcelLabelsLayer,
+      cladiri_labels: this.cladiriLabelsLayer,
+      cgxml_labels:   this.cgxmlLabelsLayer
+    }
+    return map[key]
   }
 
   setDigitizing(active) {
@@ -289,23 +360,50 @@ export default class extends Controller {
   // ── Stiluri ──────────────────────────────────────────────────────────────
 
   _parcelStyle(feature) {
-    const status = feature.get("status")
-    const cat    = feature.get("categoria_folosinta")
-    const fill   = PARCEL_COLORS[cat] || "#6b7280"
+    const status   = feature.get("status")
+    const cat      = feature.get("categoria_folosinta")
+    const cfg      = this._layerConfig?.parcele || {}
+    const useCat   = cfg.color_by_category !== false  // implicit: colorare pe categorie ON
+    const baseFill = useCat ? (PARCEL_COLORS[cat] || "#6b7280") : (cfg.fill_color || "#ffffff")
+    const strokeC  = status === "litigiu" ? "#dc2626" : (cfg.stroke_color || "#1d4ed8")
+    const strokeW  = status === "litigiu" ? 2.5 : (cfg.stroke_width || 1.5)
     return new ol.style.Style({
       stroke: new ol.style.Stroke({
-        color:    status === "litigiu" ? "#dc2626" : "#1d4ed8",
-        width:    status === "litigiu" ? 2.5 : 1.5,
-        lineDash: status === "inactiv" ? [6, 4] : null
+        color:    strokeC,
+        width:    strokeW,
+        lineDash: this._dashArray(cfg.stroke_dash, status === "inactiv" ? "dashed" : null)
       }),
-      fill: new ol.style.Fill({ color: hexToRgba(fill, 0.35) })
+      fill: new ol.style.Fill({ color: this._toRgba(baseFill, useCat ? 0.35 : 1) })
     })
+  }
+
+  // Convertește numele de pattern dash în array OL (sau null pentru continuă).
+  _dashArray(pattern, fallback) {
+    const p = pattern || fallback
+    switch (p) {
+      case "dashed":  return [6, 4]
+      case "dotted":  return [2, 3]
+      case "dash-dot": return [6, 3, 1, 3]
+      case "solid":
+      default:        return null
+    }
+  }
+
+  // Acceptă atât #RRGGBB cât și rgba(...) — întoarce string color valid CSS/OL.
+  _toRgba(color, alpha) {
+    if (!color)                                  return `rgba(107,114,128,${alpha ?? 1})`
+    if (color === "transparent")                 return "rgba(0,0,0,0)"
+    if (color.startsWith("rgba"))                return color
+    if (color.startsWith("rgb("))                return color.replace("rgb(", "rgba(").replace(")", `,${alpha ?? 1})`)
+    if (color.startsWith("#") && color.length === 7) return hexToRgba(color, alpha ?? 1)
+    return color
   }
 
   // Style pentru layer-ul de etichete (separat ca să fie deasupra
   // overlay-urilor de audit/topology/edit-vertices). Suprafața recalculată
   // din geom curentă → update dinamic la edit.
   _parcelLabelStyle(feature, resolution) {
+    if (this._layerConfig?.parcele_labels?.visible === false) return null
     if (resolution > LABEL_MAX_RESOLUTION) return null
     const nrCad = feature.get("numar_cadastral") || ""
     const geom  = feature.getGeometry()
@@ -364,13 +462,19 @@ export default class extends Controller {
   }
 
   _cladireStyle(feature) {
+    const cfg = this._layerConfig?.cladiri || {}
     return new ol.style.Style({
-      stroke: new ol.style.Stroke({ color: "#b45309", width: 1.5 }),
-      fill:   new ol.style.Fill({ color: "rgba(251, 191, 36, 0.3)" })
+      stroke: new ol.style.Stroke({
+        color:    cfg.stroke_color || "#b45309",
+        width:    cfg.stroke_width || 1.5,
+        lineDash: this._dashArray(cfg.stroke_dash, null)
+      }),
+      fill: new ol.style.Fill({ color: this._toRgba(cfg.fill_color || "rgba(251, 191, 36, 0.3)", 1) })
     })
   }
 
   _cladireLabelStyle(feature, resolution) {
+    if (this._layerConfig?.cladiri_labels?.visible === false) return null
     if (resolution > LABEL_MAX_RESOLUTION_CLADIRI) return null
     const nrCad = feature.get("numar_cadastral") || ""
     const geom  = feature.getGeometry()
@@ -394,6 +498,7 @@ export default class extends Controller {
   }
 
   _cgxmlLabelStyle(feature, resolution) {
+    if (this._layerConfig?.cgxml_labels?.visible === false) return null
     const isBld   = feature.get("entity_type") === "building"
     const maxRes  = isBld ? LABEL_MAX_RESOLUTION_CLADIRI : LABEL_MAX_RESOLUTION
     if (resolution > maxRes) return null
@@ -419,13 +524,15 @@ export default class extends Controller {
 
   _cgxmlStyle(feature) {
     const isBuilding = feature.get("entity_type") === "building"
+    const cfg        = this._layerConfig?.cgxml || {}
     return new ol.style.Style({
       stroke: new ol.style.Stroke({
-        color: isBuilding ? "#b91c1c" : "#92400e",
-        width: isBuilding ? 1.5 : 2
+        color:    cfg.stroke_color || (isBuilding ? "#b91c1c" : "#92400e"),
+        width:    cfg.stroke_width || (isBuilding ? 1.5 : 2),
+        lineDash: this._dashArray(cfg.stroke_dash, null)
       }),
       fill: new ol.style.Fill({
-        color: isBuilding ? "rgba(252, 165, 165, 0.45)" : "rgba(252, 211, 77, 0.45)"
+        color: this._toRgba(cfg.fill_color || (isBuilding ? "rgba(252, 165, 165, 0.45)" : "rgba(252, 211, 77, 0.45)"), 1)
       })
     })
   }

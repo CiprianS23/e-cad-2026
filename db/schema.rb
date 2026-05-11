@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_09_220003) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_11_180002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -167,6 +167,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_09_220003) do
     t.integer "validation_warnings_count", default: 0, null: false
     t.index ["content_hash"], name: "index_file_descriptions_on_content_hash", unique: true
     t.index ["validation_status"], name: "index_file_descriptions_on_validation_status"
+  end
+
+  create_table "gis_user_layer_prefs", force: :cascade do |t|
+    t.boolean "color_by_category"
+    t.datetime "created_at", null: false
+    t.string "fill_color"
+    t.string "layer_key", null: false
+    t.boolean "locked"
+    t.float "max_resolution"
+    t.float "min_resolution"
+    t.float "opacity"
+    t.string "owner_token", null: false
+    t.string "stroke_color"
+    t.string "stroke_dash"
+    t.float "stroke_width"
+    t.datetime "updated_at", null: false
+    t.boolean "visible"
+    t.integer "z_index"
+    t.index ["owner_token", "layer_key"], name: "ix_gis_user_layer_prefs_owner_key", unique: true
+    t.index ["owner_token"], name: "index_gis_user_layer_prefs_on_owner_token"
   end
 
   create_table "individual_units", force: :cascade do |t|

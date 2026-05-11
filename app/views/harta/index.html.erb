@@ -30,49 +30,34 @@
       <% end %>
     </div>
 
-    <div class="layer-panel"
-         data-controller="layer-switcher"
-         data-layer-switcher-harta-map-outlet="#harta-map">
-      <h3>Hartă de bază</h3>
-      <div class="layer-group">
-        <label class="layer-radio">
-          <input type="radio" name="base-layer" value="osm" checked
-                 data-action="change->layer-switcher#selectBase">
-          <span>OpenStreetMap</span>
-        </label>
-        <label class="layer-radio">
-          <input type="radio" name="base-layer" value="ortofotoplan"
-                 data-action="change->layer-switcher#selectBase">
-          <span>Ortofotoplan (ANCPI)</span>
-        </label>
+    <div class="layer-manager"
+         data-controller="layer-manager"
+         data-layer-manager-harta-map-outlet="#harta-map">
+      <div class="lm-section">
+        <h3>Hartă de bază</h3>
+        <div class="layer-group" data-layer-manager-target="baseLayers">
+          <label class="layer-radio">
+            <input type="radio" name="base-layer" value="osm" checked
+                   data-action="change->layer-manager#selectBase">
+            <span>OpenStreetMap</span>
+          </label>
+          <label class="layer-radio">
+            <input type="radio" name="base-layer" value="ortofotoplan"
+                   data-action="change->layer-manager#selectBase">
+            <span>Ortofotoplan (ANCPI)</span>
+          </label>
+        </div>
       </div>
 
-      <h3>Straturi vectoriale</h3>
-      <div class="layer-group">
-        <label class="layer-check">
-          <input type="checkbox" data-overlay="uat" checked
-                 data-action="change->layer-switcher#toggleOverlay">
-          <span class="layer-swatch layer-swatch--uat"></span>
-          <span>Limite UAT</span>
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-overlay="parcele" checked
-                 data-action="change->layer-switcher#toggleOverlay">
-          <span class="layer-swatch layer-swatch--parcele"></span>
-          <span>Parcele cadastrale</span>
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-overlay="cladiri" checked
-                 data-action="change->layer-switcher#toggleOverlay">
-          <span class="layer-swatch layer-swatch--cladiri"></span>
-          <span>Clădiri cadastrale</span>
-        </label>
-        <label class="layer-check">
-          <input type="checkbox" data-overlay="cgxml" checked
-                 data-action="change->layer-switcher#toggleOverlay">
-          <span class="layer-swatch layer-swatch--cgxml"></span>
-          <span>Imobile CGXML</span>
-        </label>
+      <div class="lm-section">
+        <div class="lm-section-head">
+          <h3>Straturi (Layer Manager)</h3>
+          <button type="button" class="lm-reset-all"
+                  title="Restaurează valorile implicite pentru toate layer-ele"
+                  data-action="click->layer-manager#resetAll">↺ Reset</button>
+        </div>
+        <ol class="lm-list" data-layer-manager-target="list"></ol>
+        <p class="lm-hint">Trage rândurile pentru a schimba ordinea de afișare. Click pe pătrat de culoare pentru a edita stilul.</p>
       </div>
     </div>
 

@@ -400,32 +400,112 @@ legend { font-size: 13px; font-weight: 700; color: #374151; padding: 0 6px; }
   color: #1d4ed8;
 }
 
-/* ── Panou layere (sidebar stâng) ── */
-.layer-panel h3 {
+/* ── Layer Manager (sidebar stâng, stil QGIS) ── */
+.layer-manager .lm-section { margin-bottom: 14px; }
+.layer-manager .lm-section h3 {
   font-size: 11px; font-weight: 700; color: #6b7280;
   text-transform: uppercase; letter-spacing: .05em;
   margin: 0 0 6px;
 }
-.layer-panel h3:not(:first-child) { margin-top: 12px; }
-.layer-group { display: flex; flex-direction: column; gap: 4px; }
-.layer-radio,
-.layer-check {
+.layer-manager .lm-section-head {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.layer-manager .lm-reset-all {
+  font-size: 10px; color: #6b7280; background: transparent;
+  border: 1px solid #e5e7eb; border-radius: 3px;
+  padding: 1px 6px; cursor: pointer;
+}
+.layer-manager .lm-reset-all:hover { background: #f3f4f6; color: #1f2937; }
+.layer-manager .layer-group { display: flex; flex-direction: column; gap: 4px; }
+.layer-manager .layer-radio {
   display: flex; align-items: center; gap: 8px;
   font-size: 12px; color: #374151;
   cursor: pointer; padding: 3px 4px; border-radius: 4px;
 }
-.layer-radio:hover,
-.layer-check:hover { background: #f3f4f6; }
-.layer-radio input,
-.layer-check input { accent-color: #1d4ed8; flex-shrink: 0; }
-.layer-swatch {
-  width: 14px; height: 14px; border-radius: 2px; flex-shrink: 0;
-  border: 1px solid rgba(0,0,0,.15);
+.layer-manager .layer-radio:hover { background: #f3f4f6; }
+.layer-manager .layer-radio input { accent-color: #1d4ed8; flex-shrink: 0; }
+
+.layer-manager .lm-list {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 2px;
 }
-.layer-swatch--uat     { background: #a855f7; opacity: .25; border: 1px dashed #6b21a8; }
-.layer-swatch--parcele { background: #93c5fd; border-color: #1d4ed8; }
-.layer-swatch--cladiri { background: #fbbf24; border-color: #b45309; }
-.layer-swatch--cgxml   { background: #fcd34d; border-color: #92400e; }
+.layer-manager .lm-row {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 4px;
+  padding: 4px 6px; font-size: 12px;
+  transition: background .15s, box-shadow .15s, border-color .15s;
+}
+.layer-manager .lm-row:hover { background: #f9fafb; border-color: #d1d5db; }
+.layer-manager .lm-row--dragging   { opacity: .4; }
+.layer-manager .lm-row--drop-target { border-color: #1d4ed8; background: #eff6ff; }
+.layer-manager .lm-row-head {
+  display: flex; align-items: center; gap: 6px;
+}
+.layer-manager .lm-drag-handle {
+  cursor: grab; color: #9ca3af; user-select: none; font-size: 14px;
+  padding: 0 2px;
+}
+.layer-manager .lm-drag-handle:active { cursor: grabbing; }
+.layer-manager .lm-toggle {
+  position: relative; display: inline-flex; align-items: center;
+  cursor: pointer; font-size: 13px;
+}
+.layer-manager .lm-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.layer-manager .lm-toggle span { display: inline-block; width: 18px; text-align: center; }
+.layer-manager .lm-vis  input:not(:checked) + span { opacity: .25; filter: grayscale(1); }
+.layer-manager .lm-swatch {
+  width: 18px; height: 14px; border: 1.5px solid #1d4ed8; border-radius: 3px;
+  cursor: pointer; padding: 0; flex-shrink: 0;
+}
+.layer-manager .lm-swatch:hover { transform: scale(1.1); }
+.layer-manager .lm-name {
+  flex: 1 1 auto; color: #1f2937; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.layer-manager .lm-zoom {
+  background: transparent; border: 0; color: #6b7280; font-size: 13px;
+  cursor: pointer; padding: 0 2px; border-radius: 2px;
+}
+.layer-manager .lm-zoom:hover { color: #1d4ed8; background: #eff6ff; }
+
+.layer-manager .lm-props {
+  margin-top: 6px; padding: 6px; border-top: 1px solid #e5e7eb;
+  display: flex; flex-direction: column; gap: 6px;
+  background: #fafafa; border-radius: 0 0 3px 3px;
+}
+.layer-manager .lm-prop {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 6px;
+  font-size: 11px; color: #4b5563;
+}
+.layer-manager .lm-prop > span:first-child { color: #6b7280; }
+.layer-manager .lm-prop input[type="range"] { width: 100%; grid-column: 1; }
+.layer-manager .lm-prop output {
+  font-size: 10px; color: #1f2937; font-variant-numeric: tabular-nums;
+}
+.layer-manager .lm-prop input[type="color"] {
+  width: 28px; height: 22px; border: 1px solid #d1d5db; border-radius: 3px;
+  cursor: pointer; padding: 1px;
+}
+.layer-manager .lm-prop input[type="number"] {
+  width: 60px; padding: 2px 4px; font-size: 11px;
+  border: 1px solid #d1d5db; border-radius: 3px;
+}
+.layer-manager .lm-prop select {
+  padding: 2px 4px; font-size: 11px;
+  border: 1px solid #d1d5db; border-radius: 3px; background: #fff;
+}
+.layer-manager .lm-prop--checkbox { grid-template-columns: auto 1fr; }
+.layer-manager .lm-prop--checkbox input { margin: 0; }
+.layer-manager .lm-prop-reset {
+  font-size: 10px; color: #6b7280; background: transparent;
+  border: 1px solid #e5e7eb; border-radius: 3px;
+  padding: 2px 6px; cursor: pointer; align-self: flex-start;
+}
+.layer-manager .lm-prop-reset:hover { background: #f3f4f6; color: #b91c1c; }
+
+.layer-manager .lm-hint {
+  font-size: 10px; color: #9ca3af; margin: 6px 0 0;
+  line-height: 1.4;
+}
 
 /* ── Legendă ── */
 .legenda h3 { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
