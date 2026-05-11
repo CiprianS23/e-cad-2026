@@ -509,6 +509,246 @@ export default class extends Controller {
 
   clearSelection() { this._setSelectedFeature(null) }
 
+  // ── Selecție multiplă (pentru ștergere în bloc) ─────────────────────────
+
+  enableMultiSelect() {
+    if (this._multiSelectMode) return
+    this._multiSelectMode = true
+    this.clearSelection()  // închide popup-ul/selecția single ca să nu existe stări mixte
+    this._ensureMultiSelectLayer()
+    this._ensureDragBox()
+    if (this._dragBox) this._dragBox.setActive(true)
+    this.dispatch("multi-select-mode", { detail: { active: true }, bubbles: true })
+  }
+
+  disableMultiSelect() {
+    if (!this._multiSelectMode) return
+    this._multiSelectMode = false
+    if (this._dragBox) this._dragBox.setActive(false)
+    if (this._polySelectDraw) this._endPolygonSelect()
+    this.clearMultiSelection()
+    this.dispatch("multi-select-mode", { detail: { active: false }, bubbles: true })
+  }
+
+  clearMultiSelection() {
+    if (!this._multiSelected) this._multiSelected = new Map()
+    this._multiSelected.clear()
+    this._refreshMultiSelectOverlay()
+    this._dispatchMultiChanged()
+  }
+
+  getMultiSelection() {
+    return Array.from(this._multiSelected?.values() || [])
+  }
+
+  _multiKey(kind, id) { return `${kind}-${id}` }
+
+  _ensureMultiSelectLayer() {
+    if (this._multiSelectLayer) return
+    this._multiSelected = new Map()
+    this._multiSelectLayer = new ol.layer.Vector({
+      source: new ol.source.Vector(),
+      style:  () => new ol.style.Style({
+        stroke: new ol.style.Stroke({ color: "#f97316", width: 3 }),
+        fill:   new ol.style.Fill({ color: "rgba(249, 115, 22, 0.20)" })
+      }),
+      zIndex: 998
+    })
+    this.map.addLayer(this._multiSelectLayer)
+  }
+
+  _ensureDragBox() {
+    if (this._dragBox) return
+    // Shift+drag pentru box-select — convenție GIS standard, nu interferează cu pan.
+    this._dragBox = new ol.interaction.DragBox({
+      condition: ol.events.condition.shiftKeyOnly
+    })
+    this._dragBox.on("boxend", () => {
+      const extent = this._dragBox.getGeometry().getExtent()
+      this._selectFeaturesInExtent(extent)
+    })
+    this._dragBox.setActive(false)
+    this.map.addInteraction(this._dragBox)
+  }
+
+  _selectFeaturesInExtent(extent) {
+    const layers = [
+      { layer: this.parcelLayer,  kind: "parcela" },
+      { layer: this.cladiriLayer, kind: "cladire" }
+    ]
+    let added = 0
+    layers.forEach(({ layer, kind }) => {
+      if (!layer || layer.getVisible?.() === false) return
+      const src = layer.getSource?.()
+      if (!src) return
+      src.forEachFeatureIntersectingExtent(extent, (feature) => {
+        const id = feature.get("id")
+        if (id == null) return
+        const key = this._multiKey(kind, id)
+        if (!this._multiSelected.has(key)) {
+          this._multiSelected.set(key, { kind, feature, layer })
+          added++
+        }
+      })
+    })
+    if (added > 0) {
+      this._refreshMultiSelectOverlay()
+      this._dispatchMultiChanged()
+    }
+  }
+
+  // Inițiază desenarea unui poligon neregulat de selecție.
+  // Click adaugă vertex, dublu-click închide, Esc anulează.
+  // Auto-activează modul multi-select dacă nu e deja activ.
+  startPolygonSelect() {
+    if (this._polySelectDraw) return  // deja în curs
+    if (!this._multiSelectMode) this.enableMultiSelect()
+
+    const source = new ol.source.Vector()
+    if (!this._polySelectLayer) {
+      this._polySelectLayer = new ol.layer.Vector({
+        source,
+        style: new ol.style.Style({
+          stroke: new ol.style.Stroke({ color: "#ea580c", width: 2, lineDash: [6, 4] }),
+          fill:   new ol.style.Fill({ color: "rgba(249, 115, 22, 0.08)" }),
+          image:  new ol.style.Circle({
+            radius: 4,
+            fill:   new ol.style.Fill({ color: "#ea580c" }),
+            stroke: new ol.style.Stroke({ color: "#fff", width: 1.5 })
+          })
+        }),
+        zIndex: 997
+      })
+      this.map.addLayer(this._polySelectLayer)
+    } else {
+      this._polySelectLayer.setSource(source)
+    }
+
+    this._polySelectDraw = new ol.interaction.Draw({
+      source,
+      type: "Polygon"
+    })
+    this._polySelectDraw.on("drawend", (evt) => {
+      const poly = evt.feature.getGeometry()
+      this._selectFeaturesByPolygon(poly)
+      // curățăm imediat — geometria de selecție nu rămâne pe hartă
+      setTimeout(() => this._endPolygonSelect(), 50)
+    })
+    this.map.addInteraction(this._polySelectDraw)
+
+    if (!this._polySelectKeyHandler) {
+      this._polySelectKeyHandler = (e) => {
+        if (e.key === "Escape" && this._polySelectDraw) this._endPolygonSelect()
+      }
+      document.addEventListener("keydown", this._polySelectKeyHandler)
+    }
+
+    this.dispatch("polygon-select-mode", { detail: { active: true }, bubbles: true })
+  }
+
+  _endPolygonSelect() {
+    if (this._polySelectDraw) {
+      this.map.removeInteraction(this._polySelectDraw)
+      this._polySelectDraw = null
+    }
+    if (this._polySelectLayer) {
+      this._polySelectLayer.getSource().clear()
+    }
+    if (this._polySelectKeyHandler) {
+      document.removeEventListener("keydown", this._polySelectKeyHandler)
+      this._polySelectKeyHandler = null
+    }
+    this.dispatch("polygon-select-mode", { detail: { active: false }, bubbles: true })
+  }
+
+  // Selectează parcele/clădiri care intersectează poligonul de selecție.
+  // Folosește JSTS pentru intersecție reală (nu doar bounding box).
+  _selectFeaturesByPolygon(olPolygon) {
+    const parser = this._getJstsParser()
+    if (!parser) {  // JSTS lipsă — fallback la bbox
+      return this._selectFeaturesInExtent(olPolygon.getExtent())
+    }
+    const jstsSelector = parser.read(olPolygon)
+    const extent = olPolygon.getExtent()
+    const layers = [
+      { layer: this.parcelLayer,  kind: "parcela" },
+      { layer: this.cladiriLayer, kind: "cladire" }
+    ]
+    let added = 0
+    layers.forEach(({ layer, kind }) => {
+      if (!layer || layer.getVisible?.() === false) return
+      const src = layer.getSource?.()
+      if (!src) return
+      src.forEachFeatureIntersectingExtent(extent, (feature) => {
+        const id = feature.get("id")
+        if (id == null) return
+        const key = this._multiKey(kind, id)
+        if (this._multiSelected.has(key)) return
+        try {
+          const jstsGeom = parser.read(feature.getGeometry())
+          if (jstsSelector.intersects(jstsGeom)) {
+            this._multiSelected.set(key, { kind, feature, layer })
+            added++
+          }
+        } catch (_e) { /* geometrie invalidă — ignor */ }
+      })
+    })
+    if (added > 0) {
+      this._refreshMultiSelectOverlay()
+      this._dispatchMultiChanged()
+    }
+  }
+
+  _getJstsParser() {
+    if (this._jstsParser !== undefined) return this._jstsParser
+    if (typeof jsts === "undefined" || !jsts.io?.OL3Parser) {
+      this._jstsParser = null
+      return null
+    }
+    const parser = new jsts.io.OL3Parser()
+    parser.inject(
+      ol.geom.Point, ol.geom.LineString, ol.geom.LinearRing,
+      ol.geom.Polygon, ol.geom.MultiPoint,
+      ol.geom.MultiLineString, ol.geom.MultiPolygon
+    )
+    this._jstsParser = parser
+    return parser
+  }
+
+  _toggleFeatureInMulti(sel) {
+    if (!sel) return
+    this._ensureMultiSelectLayer()
+    const id = sel.feature.get("id")
+    if (id == null) return
+    const key = this._multiKey(sel.kind, id)
+    if (this._multiSelected.has(key)) {
+      this._multiSelected.delete(key)
+    } else {
+      this._multiSelected.set(key, sel)
+    }
+    this._refreshMultiSelectOverlay()
+    this._dispatchMultiChanged()
+  }
+
+  _refreshMultiSelectOverlay() {
+    if (!this._multiSelectLayer) return
+    const src = this._multiSelectLayer.getSource()
+    src.clear()
+    this._multiSelected.forEach(({ feature }) => {
+      src.addFeature(new ol.Feature({ geometry: feature.getGeometry().clone() }))
+    })
+  }
+
+  _dispatchMultiChanged() {
+    this.dispatch("multi-selection-changed", {
+      detail: {
+        count: this._multiSelected?.size || 0,
+        items: this.getMultiSelection()
+      },
+      bubbles: true
+    })
+  }
+
   // Zoom contextual: extinde extent-ul ×3.5 pentru a păstra zona vecină
   // vizibilă în jurul poligonului selectat.
   _zoomToFeature(feature) {
@@ -733,6 +973,13 @@ export default class extends Controller {
         if (layerName === "uat")      { html = this._uatPopupHtml(feature) }
         return html ? true : undefined
       }, { hitTolerance: 3 })
+
+      // În modul multi-select: click toggle pe feature în set, fără popup/zoom.
+      if (this._multiSelectMode) {
+        if (selected) this._toggleFeatureInMulti(selected)
+        this._popup.setPosition(undefined)
+        return
+      }
 
       if (html) {
         el.innerHTML = html

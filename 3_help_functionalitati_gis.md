@@ -1,7 +1,7 @@
 # Ghid de utilizare — Funcționalități GIS noi
 
-> Manual rapid pentru funcționalitățile adăugate în modulul GIS al aplicației e‑CAD: import multi‑format, export pe zonă, click‑to‑zoom, audit dinamic, vizibilitate etichete, georeferențiere planuri vechi.
-> Versiune: 2026‑05‑11
+> Manual rapid pentru funcționalitățile adăugate în modulul GIS al aplicației e‑CAD: import multi‑format, export pe zonă, click‑to‑zoom, audit dinamic, vizibilitate etichete, georeferențiere planuri vechi, selecție multiplă + ștergere în bloc.
+> Versiune: 2026‑05‑11 (partea 3)
 
 ---
 
@@ -16,6 +16,7 @@
 7. [Hartă OSM când MapProxy nu rulează](#7-hartă-osm-când-mapproxy-nu-rulează)
 8. [Georeferențiere planuri vechi](#8-georeferențiere-planuri-vechi)
 9. [Layer Manager — controale pentru planuri raster](#9-layer-manager--controale-pentru-planuri-raster)
+10. [Selecție multiplă și ștergere în bloc](#10-selecție-multiplă-și-ștergere-în-bloc)
 
 ---
 
@@ -308,6 +309,57 @@ Controale disponibile pentru fiecare plan raster:
 Pentru a-l face configurabil cu slider per plan, deschide ticket (nu e implementat încă).
 
 **Notă privind performanța:** procesarea pixel-cu-pixel a unui PNG de 4 MB (~27 MP) durează ~200-500 ms one-time la prima încărcare. După, browser-ul afișează direct canvas-ul procesat — fără overhead.
+
+---
+
+## 10. Selecție multiplă și ștergere în bloc
+
+Pentru a șterge mai multe parcele sau clădiri într‑o singură operație. Sunt suportate **trei moduri de selecție** care pot fi combinate (sunt aditive).
+
+### 10.1 Activare
+
+În panoul `/harta` → secțiunea **Acțiuni**:
+
+- **🔲 Selecție multiplă** — buton toggle. Click pentru a intra în mod; click din nou pentru a ieși și curăța selecția.
+- Când modul e activ:
+  - popup‑urile info pe click sunt dezactivate (nu deranjează selecția),
+  - apare un badge portocaliu „N selectate" sub status bar,
+  - butonul **🗑 Șterge selecția (N)** devine vizibil și își afișează contorul live.
+
+### 10.2 Cele trei moduri de selecție
+
+**A. Click pe poligoane (toggle individual)**
+- Click pe o parcelă/clădire → o adaugă în selecție (contur portocaliu).
+- Re‑click pe aceeași → o scoate.
+- Util pentru selecție precisă a câtorva poligoane neînvecinate.
+
+**B. Box‑select (Shift+drag)**
+- Ține apăsat **Shift**, drag pe hartă pentru a desena un dreptunghi.
+- La eliberarea mouse‑ului, toate parcelele/clădirile care **intersectează** dreptunghiul se adaugă.
+- Util pentru zone compacte.
+
+**C. Selecție pe poligon neregulat (lasso click‑to‑draw)**
+- Click pe butonul **🔷 Selecție poligon** (intri automat și în mod selecție multiplă, dacă nu erai).
+- Click pe fiecare vertex al poligonului de selecție.
+- **Dublu‑click** închide poligonul → toate features‑urile care intersectează real poligonul se adaugă.
+- **Esc** anulează desenul în curs (fără efect asupra selecției deja făcute).
+- Intersecția se face cu **JSTS `intersects()`** — nu doar bounding box. O parcelă în formă de L nu se selectează decât dacă desenul tău o atinge geometric.
+
+### 10.3 Ștergere în bloc
+
+1. După ce ai selecția dorită, apasă **🗑 Șterge selecția (N)**.
+2. Apare un dialog cu breakdown: `Ștergi 3 parcele + 1 clădire?`.
+3. Confirmă → DELETE‑urile sunt trimise în paralel către `/parcele_cadastrale/:id` și `/cladiri_cadastrale/:id`.
+4. La final: status `5 geometrii șterse cu succes` (sau breakdown ok/fail dacă vreuna eșuează — ex. constrângere FK).
+5. Layerele Parcele și Clădiri se re‑încarcă automat.
+
+### 10.4 Note operaționale
+
+- **Pan‑ul funcționează normal în mod multi‑select** (drag fără Shift = pan, drag cu Shift = box‑select).
+- **Layerele invizibile sunt sărite** — dacă ai dezactivat „Clădiri" din Layer Manager, nu poți selecta clădiri (logic — nu le vezi).
+- **Selecția nu se păstrează între sesiuni** — nu există persistență server‑side; refresh = selecție goală.
+- **Editarea (✎) și ștergerea single (🗑 Șterge) nu sunt afectate** — folosesc selecția single via click normal, când modul multi e off.
+- **Ireversibilitate** — DELETE‑ul este definitiv (nu există soft delete). Backupul DB e singura cale de revenire.
 
 ---
 

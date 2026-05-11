@@ -236,6 +236,28 @@
             🗑 Șterge
           </button>
           <button class="btn btn-secondary btn-sm"
+                  data-digitizare-target="btnMultiSelect"
+                  data-action="click->digitizare#toggleMultiSelect"
+                  aria-pressed="false"
+                  title="Activează selecția multiplă: click toggle pe poligoane sau Shift+drag pentru zonă">
+            🔲 Selecție multiplă
+          </button>
+          <button class="btn btn-secondary btn-sm"
+                  data-digitizare-target="btnPolygonSelect"
+                  data-action="click->digitizare#startPolygonSelect"
+                  aria-pressed="false"
+                  title="Desenează poligon neregulat: click vertecși, dublu-click închide, Esc anulează">
+            🔷 Selecție poligon
+          </button>
+          <button class="btn btn-danger btn-sm"
+                  data-digitizare-target="btnDeleteMulti"
+                  data-action="click->digitizare#deleteMultiSelected"
+                  hidden
+                  disabled
+                  title="Șterge toate geometriile selectate">
+            🗑 Șterge selecția
+          </button>
+          <button class="btn btn-secondary btn-sm"
                   data-digitizare-target="btnClose"
                   data-action="click->digitizare#closePolygon"
                   disabled>
@@ -255,6 +277,7 @@
         <div class="digi-status" data-digitizare-target="statusBar">
           Apăsați „Digitizare" pentru a începe.
         </div>
+        <div class="digi-multi-info" data-digitizare-target="multiSelectInfo" style="font-size:12px;color:#ea580c;margin-top:4px;"></div>
       </section>
 
       <!-- 3. Parcelă / Clădire (toggle + atribute + salvare) -->

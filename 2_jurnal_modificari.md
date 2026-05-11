@@ -545,3 +545,100 @@ config/routes.rb
 ```
 
 **Schema e-CAD existentă: neatinsă. Toate tabelele noi au prefix `gis_`.**
+
+---
+
+# SESIUNEA 2026‑05‑11 (partea 3) — Dev shared owner + selecție multiplă (box / poligon)
+
+## 1. Owner token partajat în development
+
+**Context:** planurile georeferențiate + preferințele Layer Manager + grupurile de layere sunt scoped pe `owner_token` (cookie semnat per browser). În dezvoltare, două browsere (Safari + Chrome) vedeau seturi diferite — Chrome arăta gol fiindcă plansurile fuseseră încărcate din Safari.
+
+**Decizie:** în `Rails.env.development?` se folosește `@owner_token = "dev-shared"` în toate cele 4 controllere care îl populează. Producția rămâne neatinsă — cookie semnat per browser, exact ca înainte.
+
+**Fișiere modificate:**
+
+- `app/controllers/gis/georef_plans_controller.rb` — guard la `Rails.env.development?` în `ensure_owner_token`.
+- `app/controllers/gis/georef_control_points_controller.rb` — idem.
+- `app/controllers/gis/layer_groups_controller.rb` — idem.
+- `app/controllers/gis/layer_prefs_controller.rb` — idem.
+
+**Migrare date (one‑off):** UPDATE-uri pe `gis_georef_plans`, `gis_user_layer_prefs`, `gis_user_layer_groups` → `owner_token = "dev-shared"`. Conflict pe unique `(owner_token, layer_key)` în `gis_user_layer_prefs` rezolvat prin păstrarea celui mai recent rând per `layer_key` și ștergerea duplicatelor. Operațiunea s-a făcut cu `bin/rails runner`, NU prin migrare (n-ar trebui să ruleze în prod).
+
+---
+
+## 2. Selecție multiplă pe hartă + ștergere în bloc
+
+**Cerință:** „este necesar să existe posibilitatea unei acțiuni de selecție multiplă a geometriilor folosind mouse pe hartă și apoi acestea să se poată șterge în bloc".
+
+**Design:**
+
+- Buton toggle vizibil **🔲 Selecție multiplă** în secțiunea „Acțiuni" a panoului `/harta`.
+- Când e activ: click pe poligon = toggle in/out, **Shift+drag** = box-select (convenție GIS standard, nu intră în conflict cu pan).
+- Buton secundar **🗑 Șterge selecția (N)** care apare dinamic (hidden când N=0 sau modul e off); confirm cu breakdown („3 parcele + 1 clădire") apoi DELETE-uri paralele via `Promise.all` cu un singur `fetch` per feature.
+- Overlay portocaliu (`#f97316`, fill 0.20, stroke 3px) pentru toate poligoanele selectate, layer dedicat `zIndex: 998` (sub overlay-ul single-select 999).
+
+**Fișiere modificate:**
+
+- `app/javascript/controllers/harta_map_controller.js`
+  - State: `_multiSelectMode`, `_multiSelected` (Map cu cheie `${kind}-${id}`).
+  - Layer overlay creat lazy: `_ensureMultiSelectLayer()`.
+  - Interaction box-select: `_ensureDragBox()` cu `ol.interaction.DragBox` + `ol.events.condition.shiftKeyOnly`.
+  - Metode publice: `enableMultiSelect()`, `disableMultiSelect()`, `clearMultiSelection()`, `getMultiSelection()`.
+  - Pe `singleclick`: dacă modul e activ → `_toggleFeatureInMulti(selected)` (în loc de `_setSelectedFeature`), popup-ul info se închide.
+  - Pe `boxend`: `_selectFeaturesInExtent(extent)` iterează `parcelLayer` + `cladiriLayer` și adaugă orice feature din extent.
+  - Evenimente noi: `harta-map:multi-select-mode`, `harta-map:multi-selection-changed` (cu `{ count, items }`).
+- `app/javascript/controllers/digitizare_controller.js`
+  - Targets noi: `btnMultiSelect`, `btnDeleteMulti`, `multiSelectInfo`.
+  - Listenere pentru cele 2 evenimente noi.
+  - Action `toggleMultiSelect`: flip pe mod în harta-map.
+  - Action `deleteMultiSelected`: confirm cu breakdown → `Promise.all` cu DELETE pe `/parcele_cadastrale/:id` / `/cladiri_cadastrale/:id` → reload layerele afectate → status `ok` / `warn`.
+  - Render dinamic: numărul în textul butonului `🗑 Șterge selecția (N)`, badge separat sub status bar.
+- `app/views/harta/index.html.erb` — 2 butoane noi în secțiunea „Acțiuni" + `<div data-digitizare-target="multiSelectInfo">` pentru badge.
+
+---
+
+## 3. Selecție prin poligon neregulat (lasso click‑to‑draw)
+
+**Cerință:** „să fie și prin selecție cu poligon neregulat".
+
+**Design:**
+
+- Buton suplimentar **🔷 Selecție poligon** care lansează un `ol.interaction.Draw type:"Polygon"` cu stil portocaliu dashed. Click adaugă vertex, dublu‑click închide, **Esc** anulează.
+- La `drawend` → intersecție reală cu **JSTS** (`jsts.io.OL3Parser` + `intersects()`), NU doar bounding box. O parcelă în formă de L nu va fi luată decât dacă desenul tău o atinge real.
+- Auto‑activează modul multi‑select dacă nu e deja pornit — un singur click utilizator.
+- Selecția pe poligon e **aditivă** la cea existentă — poți combina box‑drag, click‑toggle și N poligoane.
+
+**Fișiere modificate:**
+
+- `app/javascript/controllers/harta_map_controller.js`
+  - `startPolygonSelect()` / `_endPolygonSelect()` — creează/atașează draw interaction + layer overlay portocaliu dashed (`zIndex: 997`), keydown global pentru Esc.
+  - `_selectFeaturesByPolygon(olPolygon)` — pre‑filtrează cu `forEachFeatureIntersectingExtent` (bbox cheap), apoi confirmă cu JSTS `intersects()`. Fallback la bbox dacă JSTS lipsește.
+  - `_getJstsParser()` — singleton; `parser.inject(ol.geom.Point, LineString, LinearRing, Polygon, MultiPoint, MultiLineString, MultiPolygon)`.
+  - Eveniment nou: `harta-map:polygon-select-mode`.
+  - `disableMultiSelect()` curăță și polygon draw activ.
+- `app/javascript/controllers/digitizare_controller.js`
+  - Target nou: `btnPolygonSelect`.
+  - Action `startPolygonSelect` + listener `_onPolygonSelectMode` (pentru aria‑pressed + status hint).
+- `app/views/harta/index.html.erb` — buton „🔷 Selecție poligon" lângă „🔲 Selecție multiplă".
+
+---
+
+## Sumar fișiere atinse — sesiunea 11 mai (partea 3)
+
+```
+# Backend (4 controllere — guard dev pe ensure_owner_token)
+app/controllers/gis/georef_plans_controller.rb
+app/controllers/gis/georef_control_points_controller.rb
+app/controllers/gis/layer_groups_controller.rb
+app/controllers/gis/layer_prefs_controller.rb
+
+# Frontend (2 controllere Stimulus)
+app/javascript/controllers/harta_map_controller.js     # multi-select + box-select + polygon-select
+app/javascript/controllers/digitizare_controller.js    # actions + listenere + bulk delete
+
+# View
+app/views/harta/index.html.erb                          # 3 butoane noi în secțiunea Acțiuni
+```
+
+**Schema e-CAD existentă: neatinsă.**

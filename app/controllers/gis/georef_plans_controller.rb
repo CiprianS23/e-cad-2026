@@ -159,6 +159,10 @@ module Gis
     end
 
     def ensure_owner_token
+      if Rails.env.development?
+        @owner_token = "dev-shared"
+        return
+      end
       cookies.signed[:gis_owner_token] ||= {
         value:    SecureRandom.uuid,
         expires:  1.year.from_now,

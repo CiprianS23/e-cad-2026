@@ -21,6 +21,7 @@ export default class extends Controller {
     "panel", "panelBody", "editTopoMirror",
     "snapSlider", "snapToleranceVal", "snapModes",
     "btnStart", "btnEdit", "btnDelete", "btnClose", "btnUndo", "btnAudit", "auditList",
+    "btnMultiSelect", "btnPolygonSelect", "btnDeleteMulti", "multiSelectInfo",
     "dxfFileInput", "dxfMapping",
     "btnExportZone", "btnExportZonePoly", "btnExportZoneSubmit", "exportFormat",
     "exportLayerParcele", "exportLayerCladiri", "exportStatus",
@@ -128,6 +129,9 @@ export default class extends Controller {
     // Ascultăm evenimentele de selecție feature de la harta-map
     outlet.element.addEventListener("harta-map:feature-selected",   (e) => this._onFeatureSelected(e.detail))
     outlet.element.addEventListener("harta-map:feature-deselected", ()  => this._onFeatureSelected(null))
+    outlet.element.addEventListener("harta-map:multi-selection-changed", (e) => this._onMultiSelectionChanged(e.detail))
+    outlet.element.addEventListener("harta-map:multi-select-mode",       (e) => this._onMultiSelectMode(e.detail))
+    outlet.element.addEventListener("harta-map:polygon-select-mode",     (e) => this._onPolygonSelectMode(e.detail))
   }
 
   hartaMapOutletDisconnected() { this._teardown() }
@@ -1509,6 +1513,124 @@ export default class extends Controller {
       }
     } catch (e) {
       this._setStatus(`Eroare rețea: ${e.message}`, "warn")
+    }
+  }
+
+  // ── Selecție multiplă + ștergere în bloc ──────────────────────────────
+
+  toggleMultiSelect() {
+    if (!this._hartaMap) return
+    if (this._multiSelectActive) {
+      this._hartaMap.disableMultiSelect()
+    } else {
+      this._hartaMap.enableMultiSelect()
+    }
+  }
+
+  startPolygonSelect() {
+    if (!this._hartaMap) return
+    if (this._polygonSelectActive) {
+      this._hartaMap._endPolygonSelect?.()
+    } else {
+      this._hartaMap.startPolygonSelect()
+    }
+  }
+
+  _onPolygonSelectMode(detail) {
+    this._polygonSelectActive = !!detail?.active
+    if (this.hasBtnPolygonSelectTarget) {
+      const btn = this.btnPolygonSelectTarget
+      btn.classList.toggle("btn-primary", this._polygonSelectActive)
+      btn.classList.toggle("btn-secondary", !this._polygonSelectActive)
+      btn.setAttribute("aria-pressed", String(this._polygonSelectActive))
+    }
+    if (this._polygonSelectActive) {
+      this._setStatus("Desenează poligonul de selecție: click vertecși, dublu-click închide, Esc anulează.", "info")
+    }
+  }
+
+  _onMultiSelectMode(detail) {
+    this._multiSelectActive = !!detail?.active
+    if (this.hasBtnMultiSelectTarget) {
+      const btn = this.btnMultiSelectTarget
+      btn.classList.toggle("btn-primary", this._multiSelectActive)
+      btn.classList.toggle("btn-secondary", !this._multiSelectActive)
+      btn.setAttribute("aria-pressed", String(this._multiSelectActive))
+    }
+    this._renderMultiSelectInfo(0)
+    if (!this._multiSelectActive && this.hasBtnDeleteMultiTarget) {
+      this.btnDeleteMultiTarget.disabled = true
+      this.btnDeleteMultiTarget.hidden = true
+    }
+    if (this._multiSelectActive) {
+      this._setStatus("Mod selecție multiplă: click pe poligoane (toggle) sau Shift+drag pentru zonă.", "info")
+    }
+  }
+
+  _onMultiSelectionChanged(detail) {
+    const count = detail?.count || 0
+    this._renderMultiSelectInfo(count)
+    if (this.hasBtnDeleteMultiTarget) {
+      this.btnDeleteMultiTarget.disabled = count === 0
+      this.btnDeleteMultiTarget.hidden   = !this._multiSelectActive
+      this.btnDeleteMultiTarget.textContent = count > 0
+        ? `🗑 Șterge selecția (${count})`
+        : "🗑 Șterge selecția"
+    }
+  }
+
+  _renderMultiSelectInfo(count) {
+    if (!this.hasMultiSelectInfoTarget) return
+    if (!this._multiSelectActive) { this.multiSelectInfoTarget.textContent = ""; return }
+    this.multiSelectInfoTarget.textContent = count === 0
+      ? "Selecție multiplă activă — 0 selectate"
+      : `${count} selectate`
+  }
+
+  async deleteMultiSelected() {
+    const items = this._hartaMap?.getMultiSelection?.() || []
+    if (items.length === 0) {
+      this._setStatus("Nicio geometrie selectată.", "warn")
+      return
+    }
+    const nParc = items.filter(i => i.kind === "parcela").length
+    const nClad = items.filter(i => i.kind === "cladire").length
+    const parts = []
+    if (nParc) parts.push(`${nParc} parcelă${nParc === 1 ? "" : "(e)"}`)
+    if (nClad) parts.push(`${nClad} clădire${nClad === 1 ? "" : " (i)"}`)
+    if (!confirm(`Ștergi ${parts.join(" + ")}?\n\nAceastă acțiune e ireversibilă.`)) return
+
+    this.btnDeleteMultiTarget && (this.btnDeleteMultiTarget.disabled = true)
+    this._setStatus(`Se șterg ${items.length} geometrii…`, "info")
+
+    const csrf = this._csrf()
+    const results = await Promise.all(items.map(async (it) => {
+      const id  = it.feature.get("id")
+      const url = it.kind === "cladire"
+        ? `/cladiri_cadastrale/${id}`
+        : `/parcele_cadastrale/${id}`
+      try {
+        const res = await fetch(url, {
+          method:  "DELETE",
+          headers: { "X-CSRF-Token": csrf, "Accept": "application/json" }
+        })
+        return { ok: res.ok, id, kind: it.kind, status: res.status }
+      } catch (e) {
+        return { ok: false, id, kind: it.kind, error: e.message }
+      }
+    }))
+
+    const okCount   = results.filter(r => r.ok).length
+    const failCount = results.length - okCount
+
+    this._hartaMap?.clearMultiSelection?.()
+    this._hartaMap?._loadParcele?.()
+    this._hartaMap?._loadCladiri?.()
+
+    if (failCount === 0) {
+      this._setStatus(`${okCount} geometrii șterse cu succes.`, "ok")
+    } else {
+      this._setStatus(`Șterse: ${okCount}. Eșuate: ${failCount}.`, "warn")
     }
   }
 
