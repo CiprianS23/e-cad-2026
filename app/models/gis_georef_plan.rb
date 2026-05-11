@@ -151,21 +151,30 @@ class GisGeorefPlan < ApplicationRecord
         self.original_height = dims[1]
       end
 
-      # 2. Preview JPEG (downscaled la max 4000 px pe latura lungă) — chiar și
-      # pentru PNG/JPG mari, downscaling-ul reduce semnificativ timpul de load
-      # în browser. Generăm preview întotdeauna dacă imaginea sursă e > 4000 px.
+      # 2. Preview pentru afișare browser (JPEG sau PNG fallback).
+      # Generăm preview dacă: sursa nu e format browser, SAU e prea mare,
+      # SAU avem deja un preview vechi care trebuie regenerat.
       long_side = dims ? [dims[0], dims[1]].max : 0
+      src_ext   = File.extname(raster_file.filename.to_s).downcase
       needs_preview = long_side > Gis::RasterPreviewer::DEFAULT_MAX_DIM ||
-                      !Gis::RasterPreviewer::BROWSER_FORMATS.include?(File.extname(raster_file.filename.to_s).downcase)
+                      !Gis::RasterPreviewer::BROWSER_FORMATS.include?(src_ext) ||
+                      raster_preview_file.attached?  # regenerăm dacă există versiune veche
 
       if needs_preview
-        jpg_path = Gis::RasterPreviewer.to_web_preview(src)
+        # Detașăm versiunea veche înainte să atașăm una nouă (evităm blob-uri orfane)
+        raster_preview_file.purge if raster_preview_file.attached?
+
+        preview_path = Gis::RasterPreviewer.to_web_preview(src)
+        preview_ext  = File.extname(preview_path).downcase
+        content_type = preview_ext == ".png" ? "image/png" : "image/jpeg"
+        Rails.logger.info "Plan ##{id}: preview generat la #{preview_path} (#{File.size(preview_path)} bytes, #{content_type})"
+
         raster_preview_file.attach(
-          io:           File.open(jpg_path, "rb"),
-          filename:     "#{name.parameterize}_preview.jpg",
-          content_type: "image/jpeg"
+          io:           File.open(preview_path, "rb"),
+          filename:     "#{name.parameterize}_preview#{preview_ext}",
+          content_type: content_type
         )
-        File.delete(jpg_path) if File.exist?(jpg_path) && jpg_path != src
+        File.delete(preview_path) if File.exist?(preview_path) && preview_path != src
       end
 
       save! if changed?
