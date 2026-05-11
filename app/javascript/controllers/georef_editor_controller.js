@@ -522,7 +522,7 @@ export default class extends Controller {
         <div class="georef-gcp-coords">
           <code>px: ${Math.round(cp.pixel_x)}, ${Math.round(cp.pixel_y)}</code>
           <code>w: ${cp.world_x.toFixed(2)}, ${cp.world_y.toFixed(2)}</code>
-          ${cp.residual != null ? `<span class="georef-gcp-residual">${cp.residual.toFixed(3)} m</span>` : ""}
+          ${cp.residual != null ? `<span class="georef-gcp-residual" title="Reziduu la fit">${this._fmtResidual(cp.residual)}</span>` : ""}
         </div>
         <button type="button" class="btn btn-xs" data-cp-id="${cp.id}"
                 data-action="click->georef-editor#deleteGcp">🗑</button>
@@ -530,43 +530,57 @@ export default class extends Controller {
     `).join("")
   }
 
+  // Formatare adaptivă pentru reziduuri — pentru afină least-squares pe puncte
+  // care fit perfect, reziduurile pot fi 1e-10 m (numerical noise). toFixed(3)
+  // ar afișa "0.000 m" — fals impresie de eroare zero. Folosim notație
+  // științifică pentru valori sub 1 mm.
+  _fmtResidual(r) {
+    if (r == null) return "—"
+    if (r === 0)   return "0 m"
+    if (r < 0.001) return `${r.toExponential(2)} m`
+    if (r < 0.1)   return `${r.toFixed(4)} m`
+    return `${r.toFixed(3)} m`
+  }
+
   _loadSourceMarkers() {
     if (!this._srcGcpSource) return
     this._srcGcpSource.clear()
     this._gcps.forEach((cp) => {
-      const feat = new ol.Feature({
-        geometry: new ol.geom.Point([cp.pixel_x, -cp.pixel_y]),
-        ordinal:  cp.ordinal + 1
-      })
+      const feat = new ol.Feature({ geometry: new ol.geom.Point([cp.pixel_x, -cp.pixel_y]) })
+      feat.set("ordinal", cp.ordinal + 1)
       this._srcGcpSource.addFeature(feat)
     })
+    this._srcGcpLayer?.changed()  // force redraw
   }
 
   _loadReferenceMarkers() {
     if (!this._refGcpSource) return
     this._refGcpSource.clear()
     this._gcps.forEach((cp) => {
-      const feat = new ol.Feature({
-        geometry: new ol.geom.Point([cp.world_x, cp.world_y]),
-        ordinal:  cp.ordinal + 1
-      })
+      const feat = new ol.Feature({ geometry: new ol.geom.Point([cp.world_x, cp.world_y]) })
+      feat.set("ordinal", cp.ordinal + 1)
       this._refGcpSource.addFeature(feat)
     })
+    this._refGcpLayer?.changed()  // force redraw
+    // Diagnostic — dacă markerii nu apar dar count > 0, problema e style/zIndex
+    this._appendDiag(`Ref markers actualizați: ${this._refGcpSource.getFeatures().length}`)
   }
 
   _gcpStyle(feature) {
     const isPending = feature.get("pending")
-    const ord       = feature.get("ordinal") || ""
+    const ordRaw    = feature.get("ordinal")
+    const ord       = ordRaw != null ? String(ordRaw) : ""
     return new ol.style.Style({
       image: new ol.style.Circle({
-        radius: 9,
-        fill:   new ol.style.Fill({ color: isPending ? "#facc15" : "#1d4ed8" }),
-        stroke: new ol.style.Stroke({ color: "#fff", width: 2 })
+        radius: 12,  // mai mari pentru vizibilitate clară la diverse zoom-uri
+        fill:   new ol.style.Fill({ color: isPending ? "#facc15" : "#dc2626" }),  // roșu pentru contrast cu OSM/parcele albastre
+        stroke: new ol.style.Stroke({ color: "#fff", width: 3 })
       }),
       text: new ol.style.Text({
-        text: String(ord),
-        font: "bold 11px system-ui, sans-serif",
-        fill: new ol.style.Fill({ color: "#fff" })
+        text: ord,
+        font: "bold 12px system-ui, sans-serif",
+        fill: new ol.style.Fill({ color: "#fff" }),
+        stroke: new ol.style.Stroke({ color: "#000", width: 2 })
       })
     })
   }

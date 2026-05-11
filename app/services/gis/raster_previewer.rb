@@ -17,8 +17,8 @@ module Gis
     class PreviewError < StandardError; end
 
     BROWSER_FORMATS = %w[.png .jpg .jpeg .gif .webp].freeze
-    DEFAULT_MAX_DIM  = 4000   # px pe latura lungă; ~1-2 MB JPG pentru scanate
-    DEFAULT_QUALITY  = 85     # JPEG quality (1-100); 85 = bun compromis
+    DEFAULT_MAX_DIM  = 6000   # px pe latura lungă; pentru zoom mai detaliat
+    DEFAULT_QUALITY  = 92     # JPEG quality (1-100); 92 = scanări claritate ridicată
 
     # Generează o variantă JPEG (sau PNG fallback) pentru afișare în browser.
     # - Detectează benzi și tipul de date din sursă (gdalinfo)
