@@ -32,15 +32,18 @@ module Gis
     # upscalează vizual). Coords click pe preview = sistem original.
     def self.to_web_preview(source_path, max_dim: DEFAULT_MAX_DIM, quality: DEFAULT_QUALITY)
       info = gdalinfo_json(source_path)
-      return source_path unless info
+      raise PreviewError, "gdalinfo nu poate citi #{source_path}" unless info
 
       w          = info["size"]&.[](0)    || info["rasterXSize"]
       h          = info["size"]&.[](1)    || info["rasterYSize"]
       bands      = info["bands"] || []
       band_count = bands.length
       data_type  = bands[0]&.[]("type") || "Byte"
+      color_interp = bands[0]&.[]("colorInterpretation")  # "Palette" / "Red" / "Gray" / ...
       long_side  = [w, h].max
-      return source_path if w.nil? || h.nil?
+      raise PreviewError, "dimensiuni invalide w=#{w} h=#{h}" if w.nil? || h.nil?
+
+      Rails.logger.info "RasterPreviewer: src=#{source_path} w=#{w} h=#{h} bands=#{band_count} type=#{data_type} color=#{color_interp.inspect}"
 
       outsize_args = []
       if long_side > max_dim
@@ -48,16 +51,20 @@ module Gis
         outsize_args = ["-outsize", (w * scale).round.to_s, (h * scale).round.to_s, "-r", "bilinear"]
       end
 
+      # Palette (indexed color) → expandare la RGB înainte de conversie
+      expand_args = color_interp == "Palette" ? ["-expand", "rgb"] : []
+
       # Încercare 1: JPEG (mic, ideal pentru scanări)
       jpg_path = try_gdal_translate(
         source_path, ".jpg",
         ["-of", "JPEG", "-co", "QUALITY=#{quality}", "-co", "WORLDFILE=NO"] +
-          jpeg_band_args(band_count, data_type) +
+          expand_args +
+          jpeg_band_args(band_count, data_type, color_interp) +
           outsize_args
       )
       return jpg_path if jpg_path
 
-      # Fallback: PNG (acceptă orice configurare de benzi)
+      # Fallback: PNG (acceptă orice configurare de benzi incl. palette)
       png_path = try_gdal_translate(
         source_path, ".png",
         ["-of", "PNG", "-co", "WORLDFILE=NO"] +
@@ -70,12 +77,14 @@ module Gis
     end
 
     # Construiește argumentele specifice JPEG pentru gdal_translate, în funcție
-    # de configurarea sursei (drop alpha, scale to byte).
-    def self.jpeg_band_args(band_count, data_type)
+    # de configurarea sursei (drop alpha, scale to byte, palette expand handled
+    # separately by caller).
+    def self.jpeg_band_args(band_count, data_type, color_interp = nil)
       args = []
       args += ["-ot", "Byte", "-scale"] if data_type != "Byte"
-      args += ["-b", "1", "-b", "2", "-b", "3"] if band_count >= 3
-      # 1 sau 2 benzi: GDAL le tratează implicit (grayscale)
+      # După -expand rgb palette → 3 benzi
+      effective_bands = color_interp == "Palette" ? 3 : band_count
+      args += ["-b", "1", "-b", "2", "-b", "3"] if effective_bands >= 3
       args
     end
 

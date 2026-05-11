@@ -180,7 +180,11 @@ class GisGeorefPlan < ApplicationRecord
       save! if changed?
     end
   rescue Gis::RasterPreviewer::PreviewError => e
-    Rails.logger.warn "Plan ##{id}: nu pot genera preview (#{e.message})"
+    Rails.logger.error "Plan ##{id}: PREVIEW EȘUAT — #{e.message}. Sursa: #{raster_file.filename}"
+    # Re-raise pentru ca eroarea să fie vizibilă în controller-ul de upload.
+    # Controller-ul setează flash.alert pentru ca user-ul să nu rămână fără
+    # diagnostic (ar fi văzut ecran negru fără explicație).
+    raise
   end
 
   # Rulează pipeline-ul gdalwarp pentru a produce un GeoTIFF georeferențiat

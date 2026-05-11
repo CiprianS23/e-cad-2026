@@ -141,7 +141,7 @@ export default class extends Controller {
     const W = this.originalWidthValue
     const H = this.originalHeightValue
     if (!W || !H) {
-      this.srcMapTarget.innerHTML = "<p class='georef-empty'>Imaginea nu se poate afișa.<br>Dimensiunile nu au fost detectate.</p>"
+      this._showSourceError("Dimensiunile nu au fost detectate. Click pentru a regenera preview-ul.")
       return
     }
     // Re-creează proiecția PLAN-PIXEL cu dim corecte (dacă a fost creată cu fallback)
@@ -150,6 +150,29 @@ export default class extends Controller {
 
     const extent = [0, -H, W, 0]
 
+    // Verificăm prima dacă imaginea poate fi încărcată — dacă nu, afișăm
+    // eroare clară cu buton de regenerare în loc de ecran negru.
+    const testImg = new Image()
+    testImg.onload = () => this._mountSourceMap(extent, W, H)
+    testImg.onerror = () => this._showSourceError(
+      "Preview-ul nu se poate afișa (format nesuportat de browser). " +
+      "Verifică Rails log pentru detalii."
+    )
+    testImg.src = this.rasterUrlValue
+  }
+
+  _showSourceError(message) {
+    this.srcMapTarget.innerHTML = `
+      <div class='georef-empty'>
+        <p>${message}</p>
+        <button type="button" class="btn btn-sm btn-primary"
+                data-action="click->georef-editor#regeneratePreview">
+          ↻ Regenerează preview server-side
+        </button>
+      </div>`
+  }
+
+  _mountSourceMap(extent, W, H) {
     this._srcImageLayer = new ol.layer.Image({
       source: new ol.source.ImageStatic({
         url:           this.rasterUrlValue,
@@ -637,6 +660,23 @@ export default class extends Controller {
       cgxml:    this._cgxmlLayer
     }
     map[which]?.setVisible(visible)
+  }
+
+  async regeneratePreview() {
+    this._appendDiag("Regenerare preview server-side...")
+    try {
+      const r = await fetch(`${this.planUrlValue}/regenerate_preview`, {
+        method: "POST", credentials: "same-origin",
+        headers: { "X-CSRF-Token": this._csrf, Accept: "application/json" }
+      })
+      const data = await r.json()
+      if (!r.ok) throw new Error(data.error || "Eroare necunoscută")
+      this._appendDiag(`Preview regenerat: ${data.preview_url}`)
+      // Reload pagina pentru a relua build-ul source map cu noul preview
+      window.location.reload()
+    } catch (e) {
+      this._setStatus(`Regenerare preview eșuată: ${e.message}`, "error")
+    }
   }
 
   // Apăsare Enter în input-ul manual de coordonate

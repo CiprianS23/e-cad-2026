@@ -1,7 +1,7 @@
 module Gis
   class GeorefPlansController < ApplicationController
     before_action :ensure_owner_token
-    before_action :set_plan, only: [:show, :update, :destroy, :georeference, :edit]
+    before_action :set_plan, only: [:show, :update, :destroy, :georeference, :edit, :finalize, :regenerate_preview]
 
     # GET /gis/georef_plans
     def index
@@ -24,10 +24,19 @@ module Gis
       plan.raster_file.attach(file) if file.present?
 
       if plan.save
-        # Generăm preview PNG (din TIFF/PDF) + citim dimensiunile reale.
-        # Operație sincronă — pentru fișiere mari ar trebui mutată în Sidekiq.
-        plan.prepare_for_display! if plan.raster_file.attached?
-        redirect_to edit_gis_georef_plan_path(plan), notice: "Plan încărcat. Adaugă puncte de control pentru georeferențiere."
+        # Generăm preview (din TIFF/PDF) + citim dimensiunile reale.
+        # Sincronă — pentru >100 MB ar trebui Sidekiq.
+        preview_error = nil
+        if plan.raster_file.attached?
+          begin
+            plan.prepare_for_display!
+          rescue Gis::RasterPreviewer::PreviewError => e
+            preview_error = "Preview-ul nu s-a putut genera: #{e.message}. Verifică în Rails log."
+          end
+        end
+        notice = "Plan încărcat. Adaugă puncte de control pentru georeferențiere."
+        notice += " ⚠ " + preview_error if preview_error
+        redirect_to edit_gis_georef_plan_path(plan), notice: notice
       else
         flash.now[:alert] = plan.errors.full_messages.join(", ")
         @plan = plan
@@ -86,6 +95,15 @@ module Gis
     def destroy
       @plan.destroy
       head :no_content
+    end
+
+    # POST /gis/georef_plans/:id/regenerate_preview
+    # Reapelează prepare_for_display! — util când preview-ul inițial a eșuat.
+    def regenerate_preview
+      @plan.prepare_for_display!
+      render json: { ok: true, preview_url: @plan.raster_preview_url }
+    rescue Gis::RasterPreviewer::PreviewError => e
+      render json: { ok: false, error: e.message }, status: :unprocessable_entity
     end
 
     private
