@@ -52,11 +52,30 @@ module Gis
       end
     end
 
-    # POST /gis/georef_plans/:id/georeference — recalculează transformarea
+    # POST /gis/georef_plans/:id/georeference — recalculează transformarea afină
+    # (preview rapid în browser, fără warp).
     def georeference
       result = @plan.recompute_georeference!
       if result[:ok]
         render json: plan_full(@plan).merge(rms: result[:rms])
+      else
+        render json: { error: result[:error] }, status: :unprocessable_entity
+      end
+    end
+
+    # POST /gis/georef_plans/:id/finalize — rulează gdalwarp pentru a produce
+    # un GeoTIFF georeferențiat efectiv (cu corecție polinomială sau TPS).
+    # După succes: state = "finalized", warped_file atașat.
+    def finalize
+      method = params[:method].presence || "auto"
+      unless GisGeorefPlan::WARP_METHODS.include?(method)
+        return render json: { error: "Metodă invalidă: #{method}. Opțiuni: #{GisGeorefPlan::WARP_METHODS.join(', ')}" },
+                      status: :unprocessable_entity
+      end
+
+      result = @plan.finalize_warp!(method: method)
+      if result[:ok]
+        render json: plan_full(@plan).merge(warp_result: result.except(:ok))
       else
         render json: { error: result[:error] }, status: :unprocessable_entity
       end
@@ -88,6 +107,8 @@ module Gis
         original_width:   p.original_width,
         original_height:  p.original_height,
         raster_url:       p.raster_url,
+        warped_url:       p.warped_url,
+        display_url:      p.display_url,
         control_points_count: p.control_points.count,
         updated_at:       p.updated_at
       }

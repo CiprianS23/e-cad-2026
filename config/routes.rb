@@ -64,7 +64,8 @@ Rails.application.routes.draw do
 
     resources :georef_plans do
       member do
-        post :georeference
+        post :georeference   # recalculează afină rapidă (preview, fără warp)
+        post :finalize       # gdalwarp → warped GeoTIFF (state=finalized)
       end
       resources :control_points, only: [:create, :update, :destroy],
                                   controller: :georef_control_points

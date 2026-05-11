@@ -6,7 +6,8 @@ class GisGeorefPlan < ApplicationRecord
   # `owner_token` — identificator stabil per browser (cookie semnat), aceeași
   # convenție ca la `GisUserLayerPref`. La integrarea în e-CAD prod se va
   # înlocui cu `user_id`.
-  has_one_attached :raster_file
+  has_one_attached :raster_file    # imaginea originală încărcată de utilizator
+  has_one_attached :warped_file    # GeoTIFF georeferențiat în EPSG:3844 (rezultat gdalwarp)
   has_many :control_points,
            -> { order(:ordinal, :id) },
            class_name: "GisGeorefControlPoint",
@@ -14,6 +15,7 @@ class GisGeorefPlan < ApplicationRecord
            dependent: :destroy
 
   STATES = %w[draft georeferenced finalized].freeze
+  WARP_METHODS = %w[auto affine polynomial2 polynomial3 tps].freeze
 
   validates :name,        presence: true, length: { maximum: 200 }
   validates :owner_token, presence: true
@@ -69,24 +71,126 @@ class GisGeorefPlan < ApplicationRecord
 
   # Pentru afișarea client-side: URL semnat către imaginea sursă (pentru a fi
   # randată via ol.source.ImageStatic) + colțurile world corespunzătoare.
+  # Funcționează doar când avem parametri afini (state=georeferenced); pentru
+  # finalized, geometria reală e dată de bounds_extent_3844.
   def display_corners_world
-    return nil if transform_params.blank? || original_width.blank? || original_height.blank?
+    return nil unless affine_params_present?
+    return nil if original_width.blank? || original_height.blank?
 
     corners_px = [[0, 0], [original_width, 0], [original_width, original_height], [0, original_height]]
     corners_px.map { |(px, py)| Gis::AffineTransform.apply_forward(transform_params, px, py) }
   end
 
+  # Bounding box pentru afișare pe hartă. Prioritate:
+  #   1. `warp_bounds_3844` stocat în transform_params după finalize (bbox real
+  #      al GeoTIFF-ului warped — fără distorsiuni).
+  #   2. Calcul din colțurile transformate prin afină (când state=georeferenced).
   def bounds_extent_3844
-    return nil unless transform_params.present? && original_width.present? && original_height.present?
-
+    if transform_params.is_a?(Hash) && (b = transform_params["warp_bounds_3844"])
+      return b
+    end
     corners = display_corners_world
-    xs = corners.map(&:first)
-    ys = corners.map(&:last)
+    return nil if corners.blank?
+    xs = corners.map(&:first); ys = corners.map(&:last)
     [xs.min, ys.min, xs.max, ys.max]
   end
+
+  private
+
+  # Verifică dacă transform_params conține parametri afini (6 coeficienți).
+  # După finalize păstrăm doar `warp_bounds_3844` și `warp_method`.
+  def affine_params_present?
+    return false unless transform_params.is_a?(Hash)
+    %w[a b c d e f].all? { |k| transform_params.key?(k) }
+  end
+
+  public
 
   def raster_url
     return nil unless raster_file.attached?
     Rails.application.routes.url_helpers.rails_blob_path(raster_file, only_path: true)
+  end
+
+  def warped_url
+    return nil unless warped_file.attached?
+    Rails.application.routes.url_helpers.rails_blob_path(warped_file, only_path: true)
+  end
+
+  # Map URL preferat pentru afișarea pe harta principală:
+  # - dacă există warped_file → folosim asta (corect georeferențiat în Stereo70
+  #   cu posibile distorsiuni polinomiale corectate)
+  # - altfel → raster_file original cu bounds calculate prin afină
+  def display_url
+    warped_url || raster_url
+  end
+
+  # Rulează pipeline-ul gdalwarp pentru a produce un GeoTIFF georeferențiat
+  # în EPSG:3844 din imaginea sursă și GCP-urile actuale. Stochează rezultatul
+  # ca `warped_file` și actualizează bounds_geom, state, transform_type.
+  #
+  # `method`: "auto" (alege ordinul după nr GCP-uri) | "affine" | "polynomial2"
+  #           | "polynomial3" | "tps"
+  def finalize_warp!(method: "auto")
+    raise "Nu există imagine sursă" unless raster_file.attached?
+    cps = control_points.to_a
+    raise "Sunt necesare minim 3 GCP-uri" if cps.size < 3
+
+    order = case method
+            when "auto"         then Gis::RasterWarper.choose_order(cps.size)
+            when "affine"       then 1
+            when "polynomial2"  then 2
+            when "polynomial3"  then 3
+            when "tps"          then "tps"
+            else raise "Metodă necunoscută: #{method}"
+            end
+
+    # Salvăm temporar imaginea sursă (Active Storage o ține în storage local
+    # sau remote — gdal_translate are nevoie de un path).
+    source_path = nil
+    raster_file.blob.open do |tempfile|
+      source_path = tempfile.path
+
+      gcps_args = cps.map { |c| { px: c.pixel_x, py: c.pixel_y, wx: c.world_x, wy: c.world_y } }
+      result = Gis::RasterWarper.new(source_path: source_path, gcps: gcps_args, order: order).call
+
+      ActiveRecord::Base.transaction do
+        # Atașează GeoTIFF-ul rezultat
+        warped_file.attach(
+          io:           File.open(result.warped_path, "rb"),
+          filename:     "#{name.parameterize}_warped.tif",
+          content_type: "image/tiff"
+        )
+
+        # Bounds-ul real (după warp) — poligon închis în 3844
+        ext = result.bounds_3844
+        wkt = "POLYGON((#{ext[0]} #{ext[1]}, #{ext[2]} #{ext[1]}, #{ext[2]} #{ext[3]}, #{ext[0]} #{ext[3]}, #{ext[0]} #{ext[1]}))"
+        self.class.connection.execute(
+          ActiveRecord::Base.sanitize_sql_array([
+            "UPDATE gis_georef_plans SET bounds_geom = ST_GeomFromText(?, 3844) WHERE id = ?",
+            wkt, id
+          ])
+        )
+
+        # Păstrăm parametrii afini calculați anterior (pentru reverse engineering
+        # eventual) și adăugăm rezultatul warp în același jsonb.
+        merged_params = (transform_params || {}).merge(
+          "warp_bounds_3844" => ext,
+          "warp_method"      => result.method,
+          "warp_width"       => result.width,
+          "warp_height"      => result.height
+        )
+
+        update!(
+          transform_type:   result.method,
+          transform_params: merged_params,
+          state:            "finalized"
+        )
+        File.delete(result.warped_path) if File.exist?(result.warped_path)
+      end
+
+      { ok: true, method: result.method, bounds: result.bounds_3844, width: result.width, height: result.height }
+    end
+  rescue Gis::RasterWarper::InsufficientGcpsError, Gis::RasterWarper::GdalUnavailableError, Gis::RasterWarper::WarpError => e
+    { ok: false, error: e.message }
   end
 end

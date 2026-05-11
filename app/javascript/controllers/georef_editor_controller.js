@@ -15,7 +15,7 @@ export default class extends Controller {
   static targets = [
     "srcMap", "refMap", "gcpList", "gcpCount", "rms",
     "leftMode", "rightMode", "srcCoord", "refCoord", "srcDims",
-    "status", "computeBtn", "gcpHint"
+    "status", "computeBtn", "finalizeBtn", "warpMethod", "gcpHint"
   ]
   static values = {
     planId:              Number,
@@ -24,6 +24,7 @@ export default class extends Controller {
     originalHeight:      Number,
     cpsUrl:              String,
     georefUrl:           String,
+    finalizeUrl:         String,
     planUrl:             String,
     cgxmlGeojsonUrl:     String,
     parceleGeojsonUrl:   String,
@@ -387,6 +388,46 @@ export default class extends Controller {
     const choice = event.target.value
     this._refOsm.setVisible(choice === "osm")
     this._refOrtofoto.setVisible(choice === "ortofotoplan")
+  }
+
+  async finalize() {
+    if (this._gcps.length < 3) {
+      this._setStatus("Sunt necesare minim 3 puncte de control.", "error")
+      return
+    }
+    const method = this.hasWarpMethodTarget ? this.warpMethodTarget.value : "auto"
+    if (!confirm(`Finalize planul cu metoda "${method}"?\n\ngdalwarp va produce un GeoTIFF georeferențiat în Stereo70. Operația durează câteva secunde și planul va apărea ca layer pe harta principală.`)) {
+      return
+    }
+    this.finalizeBtnTarget.disabled = true
+    this.finalizeBtnTarget.textContent = "⏳ Procesare..."
+    try {
+      const r = await fetch(this.finalizeUrlValue, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": this._csrf,
+          Accept: "application/json"
+        },
+        body: JSON.stringify({ method })
+      })
+      const data = await r.json()
+      if (!r.ok) throw new Error(data.error || "Eroare la warp")
+      const warp = data.warp_result || {}
+      this._setStatus(
+        `✓ Finalize complet. Metoda: ${warp.method}. ` +
+        `Dimensiuni warp: ${warp.width}×${warp.height} px. ` +
+        `Planul apare acum pe harta principală.`,
+        "ok"
+      )
+      this.finalizeBtnTarget.textContent = "✓ Finalize (gdalwarp)"
+    } catch (e) {
+      this._setStatus(`Eroare Finalize: ${e.message}`, "error")
+      this.finalizeBtnTarget.textContent = "✓ Finalize (gdalwarp)"
+    } finally {
+      this.finalizeBtnTarget.disabled = false
+    }
   }
 
   _setStatus(msg, kind = "info") {

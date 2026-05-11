@@ -9,6 +9,7 @@
      data-georef-editor-original-height-value="<%= @plan.original_height || 0 %>"
      data-georef-editor-cps-url-value="<%= gis_georef_plan_control_points_path(@plan) %>"
      data-georef-editor-georef-url-value="<%= georeference_gis_georef_plan_path(@plan) %>"
+     data-georef-editor-finalize-url-value="<%= finalize_gis_georef_plan_path(@plan) %>"
      data-georef-editor-plan-url-value="<%= gis_georef_plan_path(@plan) %>"
      data-georef-editor-cgxml-geojson-url-value="<%= cgxml_geojson_harta_path %>"
      data-georef-editor-parcele-geojson-url-value="<%= geojson_parcele_cadastrale_path %>"
@@ -24,10 +25,25 @@
       </p>
     </div>
     <div class="georef-actions">
+      <select class="input input-sm" data-georef-editor-target="warpMethod"
+              title="Metoda de transformare folosită la Finalize">
+        <option value="auto">Auto (alege după nr GCP)</option>
+        <option value="affine">Afină (ordin 1, min 3 GCP)</option>
+        <option value="polynomial2">Polinomială ordin 2 (min 6 GCP, corectează distorsiuni)</option>
+        <option value="polynomial3">Polinomială ordin 3 (min 10 GCP)</option>
+        <option value="tps">Thin-Plate Spline (exact prin GCP)</option>
+      </select>
       <button type="button" class="btn btn-primary"
               data-action="click->georef-editor#computeGeoreference"
-              data-georef-editor-target="computeBtn">
-        ▶ Recalculează georeferențierea
+              data-georef-editor-target="computeBtn"
+              title="Calculează doar transformarea afină — preview rapid în browser">
+        ▶ Recalculează (afină preview)
+      </button>
+      <button type="button" class="btn btn-success"
+              data-action="click->georef-editor#finalize"
+              data-georef-editor-target="finalizeBtn"
+              title="Rulează gdalwarp și produce GeoTIFF georeferențiat (poate dura câteva secunde)">
+        ✓ Finalize (gdalwarp)
       </button>
       <%= link_to "← Înapoi", gis_georef_plans_path, class: "btn btn-secondary" %>
     </div>

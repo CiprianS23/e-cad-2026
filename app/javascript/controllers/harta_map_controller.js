@@ -264,17 +264,21 @@ export default class extends Controller {
         headers: { Accept: "application/json" }
       })
       const d = await r.json()
-      if (!d.raster_url || !d.bounds_extent) return
+      // Preferăm warped_url (GeoTIFF din gdalwarp, polinomial corectat) când
+      // există; altfel fallback la raster_url cu bounds calculate prin afină.
+      const url    = d.display_url || d.warped_url || d.raster_url
+      const bounds = d.bounds_extent
+      if (!url || !bounds) return
       const layer = new ol.layer.Image({
         opacity:    0.7,
         source:     new ol.source.ImageStatic({
-          url:           d.raster_url,
-          imageExtent:   d.bounds_extent,  // [minX, minY, maxX, maxY] în 3844
+          url:           url,
+          imageExtent:   bounds,  // [minX, minY, maxX, maxY] în 3844
           projection:    "EPSG:3844",
           crossOrigin:   "anonymous"
         }),
         zIndex:     90,  // sub UAT și restul (sub plan_vechi în spec)
-        properties: { name: `georef_plan_${planId}`, plan_name: d.name }
+        properties: { name: `georef_plan_${planId}`, plan_name: d.name, plan_state: d.state }
       })
       this.map.addLayer(layer)
       this._georefLayers[planId] = layer
