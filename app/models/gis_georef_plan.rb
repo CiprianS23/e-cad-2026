@@ -151,16 +151,21 @@ class GisGeorefPlan < ApplicationRecord
         self.original_height = dims[1]
       end
 
-      # 2. Preview PNG (dacă e cazul)
-      ext = File.extname(raster_file.filename.to_s).downcase
-      unless Gis::RasterPreviewer::BROWSER_FORMATS.include?(ext)
-        png_path = Gis::RasterPreviewer.to_png(src)
+      # 2. Preview JPEG (downscaled la max 4000 px pe latura lungă) — chiar și
+      # pentru PNG/JPG mari, downscaling-ul reduce semnificativ timpul de load
+      # în browser. Generăm preview întotdeauna dacă imaginea sursă e > 4000 px.
+      long_side = dims ? [dims[0], dims[1]].max : 0
+      needs_preview = long_side > Gis::RasterPreviewer::DEFAULT_MAX_DIM ||
+                      !Gis::RasterPreviewer::BROWSER_FORMATS.include?(File.extname(raster_file.filename.to_s).downcase)
+
+      if needs_preview
+        jpg_path = Gis::RasterPreviewer.to_web_preview(src)
         raster_preview_file.attach(
-          io:           File.open(png_path, "rb"),
-          filename:     "#{name.parameterize}_preview.png",
-          content_type: "image/png"
+          io:           File.open(jpg_path, "rb"),
+          filename:     "#{name.parameterize}_preview.jpg",
+          content_type: "image/jpeg"
         )
-        File.delete(png_path) if File.exist?(png_path) && png_path != src
+        File.delete(jpg_path) if File.exist?(jpg_path) && jpg_path != src
       end
 
       save! if changed?
