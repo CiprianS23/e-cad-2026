@@ -1,0 +1,126 @@
+module Gis
+  class GeorefPlansController < ApplicationController
+    before_action :ensure_owner_token
+    before_action :set_plan, only: [:show, :update, :destroy, :georeference, :edit]
+
+    # GET /gis/georef_plans
+    def index
+      plans = GisGeorefPlan.for_owner(@owner_token).order(updated_at: :desc)
+      respond_to do |format|
+        format.json { render json: plans.map { |p| plan_summary(p) } }
+        format.html # listă în UI
+      end
+    end
+
+    # GET /gis/georef_plans/new
+    def new
+      @plan = GisGeorefPlan.new
+    end
+
+    # POST /gis/georef_plans
+    def create
+      plan = GisGeorefPlan.new(plan_params.merge(owner_token: @owner_token, state: "draft"))
+      file = params.dig(:gis_georef_plan, :raster_file)
+      plan.raster_file.attach(file) if file.present?
+      # original_width / height — detectate client-side din `<img>.naturalWidth`
+      # imediat după upload și trimise prin PATCH pe `edit`.
+
+      if plan.save
+        redirect_to edit_gis_georef_plan_path(plan), notice: "Plan încărcat. Adaugă puncte de control pentru georeferențiere."
+      else
+        flash.now[:alert] = plan.errors.full_messages.join(", ")
+        @plan = plan
+        render :new, status: :unprocessable_entity
+      end
+    end
+
+    # GET /gis/georef_plans/:id
+    def show
+      render json: plan_full(@plan)
+    end
+
+    # GET /gis/georef_plans/:id/edit — ecranul de georeferențiere (dual-viewport)
+    def edit
+    end
+
+    # PATCH /gis/georef_plans/:id
+    def update
+      if @plan.update(plan_params)
+        render json: plan_summary(@plan)
+      else
+        render json: { errors: @plan.errors.full_messages }, status: :unprocessable_entity
+      end
+    end
+
+    # POST /gis/georef_plans/:id/georeference — recalculează transformarea
+    def georeference
+      result = @plan.recompute_georeference!
+      if result[:ok]
+        render json: plan_full(@plan).merge(rms: result[:rms])
+      else
+        render json: { error: result[:error] }, status: :unprocessable_entity
+      end
+    end
+
+    # DELETE /gis/georef_plans/:id
+    def destroy
+      @plan.destroy
+      head :no_content
+    end
+
+    private
+
+    def set_plan
+      @plan = GisGeorefPlan.for_owner(@owner_token).find(params[:id])
+    end
+
+    def plan_params
+      params.require(:gis_georef_plan).permit(:name, :description, :original_width, :original_height, :state)
+    end
+
+    def plan_summary(p)
+      {
+        id:               p.id,
+        name:             p.name,
+        description:      p.description,
+        state:            p.state,
+        residual_rms:     p.residual_rms,
+        original_width:   p.original_width,
+        original_height:  p.original_height,
+        raster_url:       p.raster_url,
+        control_points_count: p.control_points.count,
+        updated_at:       p.updated_at
+      }
+    end
+
+    def plan_full(p)
+      plan_summary(p).merge(
+        transform_type:   p.transform_type,
+        transform_params: p.transform_params,
+        corners_world:    p.display_corners_world,
+        bounds_extent:    p.bounds_extent_3844,
+        control_points:   p.control_points.map do |cp|
+          {
+            id:       cp.id,
+            ordinal:  cp.ordinal,
+            pixel_x:  cp.pixel_x,
+            pixel_y:  cp.pixel_y,
+            world_x:  cp.world_x,
+            world_y:  cp.world_y,
+            residual: cp.residual,
+            note:     cp.note
+          }
+        end
+      )
+    end
+
+    def ensure_owner_token
+      cookies.signed[:gis_owner_token] ||= {
+        value:    SecureRandom.uuid,
+        expires:  1.year.from_now,
+        httponly: true
+      }
+      @owner_token = cookies.signed[:gis_owner_token]
+    end
+  end
+end

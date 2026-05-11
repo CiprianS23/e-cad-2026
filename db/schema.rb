@@ -10,11 +10,40 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_11_180002) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_11_190004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
+  enable_extension "postgis_raster"
   enable_extension "unaccent"
+
+  create_table "active_storage_attachments", force: :cascade do |t|
+    t.bigint "blob_id", null: false
+    t.datetime "created_at", null: false
+    t.string "name", null: false
+    t.bigint "record_id", null: false
+    t.string "record_type", null: false
+    t.index ["blob_id"], name: "index_active_storage_attachments_on_blob_id"
+    t.index ["record_type", "record_id", "name", "blob_id"], name: "index_active_storage_attachments_uniqueness", unique: true
+  end
+
+  create_table "active_storage_blobs", force: :cascade do |t|
+    t.bigint "byte_size", null: false
+    t.string "checksum"
+    t.string "content_type"
+    t.datetime "created_at", null: false
+    t.string "filename", null: false
+    t.string "key", null: false
+    t.text "metadata"
+    t.string "service_name", null: false
+    t.index ["key"], name: "index_active_storage_blobs_on_key", unique: true
+  end
+
+  create_table "active_storage_variant_records", force: :cascade do |t|
+    t.bigint "blob_id", null: false
+    t.string "variation_digest", null: false
+    t.index ["blob_id", "variation_digest"], name: "index_active_storage_variant_records_uniqueness", unique: true
+  end
 
   create_table "addresses", force: :cascade do |t|
     t.string "apno"
@@ -168,6 +197,25 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_180002) do
     t.index ["content_hash"], name: "index_file_descriptions_on_content_hash", unique: true
     t.index ["validation_status"], name: "index_file_descriptions_on_validation_status"
   end
+
+  create_table "gis_georef_control_points", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "gis_georef_plan_id", null: false
+    t.string "note"
+    t.integer "ordinal", default: 0, null: false
+    t.float "pixel_x", null: false
+    t.float "pixel_y", null: false
+    t.float "residual"
+    t.datetime "updated_at", null: false
+    t.float "world_x", null: false
+    t.float "world_y", null: false
+    t.index ["gis_georef_plan_id", "ordinal"], name: "ix_gis_gcp_plan_ord"
+    t.index ["gis_georef_plan_id"], name: "index_gis_georef_control_points_on_gis_georef_plan_id"
+  end
+
+# Could not dump table "gis_georef_plans" because of following StandardError
+#   Unknown type 'raster' for column 'raster'
+
 
   create_table "gis_user_layer_prefs", force: :cascade do |t|
     t.boolean "color_by_category"
@@ -388,6 +436,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_180002) do
     t.index ["nat_code"], name: "index_uat_boundaries_on_nat_code"
   end
 
+  add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "building_common_parts", "buildings"
   add_foreign_key "buildings", "addresses"
   add_foreign_key "buildings", "lands"
@@ -398,6 +448,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_180002) do
   add_foreign_key "contested_x_entities", "individual_units"
   add_foreign_key "contested_x_entities", "lands"
   add_foreign_key "deeds", "file_descriptions"
+  add_foreign_key "gis_georef_control_points", "gis_georef_plans"
   add_foreign_key "individual_units", "buildings"
   add_foreign_key "lands", "addresses"
   add_foreign_key "lands", "file_descriptions"

@@ -56,11 +56,19 @@ Rails.application.routes.draw do
   get "/harta", to: "harta#index", as: :harta
   get "/uat_boundaries/geojson", to: "uat_boundaries#geojson", as: :uat_boundaries_geojson
 
-  # Modul GIS — preferințe Layer Manager per utilizator/sesiune
+  # Modul GIS — preferințe Layer Manager + georeferențiere planuri vechi
   namespace :gis do
     get    "/layer_prefs",            to: "layer_prefs#index",       as: :layer_prefs
     patch  "/layer_prefs/:layer_key", to: "layer_prefs#update",      as: :layer_pref
     delete "/layer_prefs",            to: "layer_prefs#destroy_all", as: :reset_layer_prefs
+
+    resources :georef_plans do
+      member do
+        post :georeference
+      end
+      resources :control_points, only: [:create, :update, :destroy],
+                                  controller: :georef_control_points
+    end
   end
 
   root "harta#index"

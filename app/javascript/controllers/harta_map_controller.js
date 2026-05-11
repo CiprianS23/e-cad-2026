@@ -229,6 +229,58 @@ export default class extends Controller {
     this.map.addLayer(this.parcelLabelsLayer)
     this.map.addLayer(this.cladiriLabelsLayer)
     this.map.addLayer(this.cgxmlLabelsLayer)
+
+    // Planuri vechi georeferențiate — încărcate la cerere ca image overlays.
+    // Fiecare plan e ținut în `this._georefLayers[planId]` pentru a putea fi
+    // controlat individual (vizibilitate, opacitate) via Layer Manager.
+    this._georefLayers = {}
+    this._loadGeorefPlans()
+  }
+
+  // Încarcă planurile vechi georeferențiate ale utilizatorului și le adaugă
+  // ca layere `ol.layer.Image` cu sursă `ImageStatic` pe bounding box-ul
+  // calculat după aplicarea transformării afine.
+  async _loadGeorefPlans() {
+    try {
+      const r = await fetch("/gis/georef_plans", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" }
+      })
+      if (!r.ok) return
+      const plans = await r.json()
+      const georeferenced = plans.filter(p => p.state === "georeferenced" || p.state === "finalized")
+      for (const p of georeferenced) {
+        await this._addGeorefLayer(p.id)
+      }
+    } catch (e) {
+      console.warn("Nu pot încărca planurile georeferențiate:", e)
+    }
+  }
+
+  async _addGeorefLayer(planId) {
+    try {
+      const r = await fetch(`/gis/georef_plans/${planId}`, {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" }
+      })
+      const d = await r.json()
+      if (!d.raster_url || !d.bounds_extent) return
+      const layer = new ol.layer.Image({
+        opacity:    0.7,
+        source:     new ol.source.ImageStatic({
+          url:           d.raster_url,
+          imageExtent:   d.bounds_extent,  // [minX, minY, maxX, maxY] în 3844
+          projection:    "EPSG:3844",
+          crossOrigin:   "anonymous"
+        }),
+        zIndex:     90,  // sub UAT și restul (sub plan_vechi în spec)
+        properties: { name: `georef_plan_${planId}`, plan_name: d.name }
+      })
+      this.map.addLayer(layer)
+      this._georefLayers[planId] = layer
+    } catch (e) {
+      console.warn(`Nu pot adăuga planul #${planId}:`, e)
+    }
   }
 
   // ── API public — folosit de layer-manager prin Stimulus outlet ────────────

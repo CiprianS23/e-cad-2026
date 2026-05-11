@@ -528,6 +528,115 @@ legend { font-size: 13px; font-weight: 700; color: #374151; padding: 0 6px; }
   line-height: 1.4;
 }
 
+/* ── Georef Editor — dual viewport ── */
+.georef-page {
+  display: flex; flex-direction: column;
+  height: 100vh; background: #f3f4f6;
+}
+.georef-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; background: #fff; border-bottom: 1px solid #e5e7eb;
+}
+.georef-header h2 { margin: 0; font-size: 16px; color: #1f2937; }
+.georef-header .subtle { font-size: 12px; color: #6b7280; margin-top: 2px; }
+.georef-actions { display: flex; gap: 8px; }
+.georef-status {
+  padding: 6px 16px; font-size: 12px; min-height: 26px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.georef-status:empty { display: none; }
+.georef-status--ok    { background: #ecfdf5; color: #065f46; }
+.georef-status--error { background: #fef2f2; color: #991b1b; }
+.georef-status--info  { background: #eff6ff; color: #1e3a8a; }
+
+.georef-grid {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 1fr 1fr 320px;
+  gap: 6px;
+  padding: 6px;
+  min-height: 0;
+}
+.georef-pane {
+  display: flex; flex-direction: column;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 6px;
+  overflow: hidden;
+}
+.georef-pane-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px; background: #f9fafb; border-bottom: 1px solid #e5e7eb;
+}
+.georef-pane-head h3 { margin: 0; font-size: 13px; color: #1f2937; }
+.georef-mode {
+  font-size: 11px; color: #6b7280; font-style: italic;
+}
+.georef-canvas { flex: 1 1 auto; min-height: 0; background: #1f2937; }
+.georef-pane-foot {
+  display: flex; align-items: center; gap: 12px;
+  padding: 6px 10px; background: #f9fafb; border-top: 1px solid #e5e7eb;
+  font-size: 11px; color: #4b5563;
+  font-variant-numeric: tabular-nums;
+}
+.georef-base-toggle { display: flex; align-items: center; gap: 4px; }
+.georef-empty { color: #9ca3af; text-align: center; padding: 30px; }
+
+.georef-sidebar {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 6px;
+  padding: 12px; display: flex; flex-direction: column; gap: 6px;
+  overflow-y: auto;
+}
+.georef-sidebar h3 { margin: 0 0 4px; font-size: 13px; color: #1f2937; }
+.georef-gcp-list {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.georef-gcp {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center;
+  padding: 6px; border: 1px solid #e5e7eb; border-radius: 4px;
+  font-size: 11px;
+}
+.georef-gcp-num {
+  width: 22px; height: 22px; line-height: 22px;
+  background: #1d4ed8; color: #fff; border-radius: 50%;
+  text-align: center; font-weight: 700; font-size: 11px;
+}
+.georef-gcp-coords { display: flex; flex-direction: column; gap: 1px; }
+.georef-gcp-coords code {
+  background: #f3f4f6; padding: 1px 4px; border-radius: 2px;
+  font-size: 10px; color: #1f2937;
+}
+.georef-gcp-residual {
+  font-size: 10px; color: #b45309; font-weight: 600;
+}
+
+.container-narrow { max-width: 640px; margin: 24px auto; padding: 0 16px; }
+.form-stack { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.form-row { display: flex; flex-direction: column; gap: 4px; }
+.form-row label { font-size: 12px; font-weight: 600; color: #374151; }
+.form-row .input { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px; }
+.form-hint { font-size: 11px; color: #6b7280; margin: 2px 0 0; }
+.form-actions { display: flex; gap: 8px; }
+.subtle { color: #6b7280; font-size: 13px; }
+.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th, .data-table td { padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: left; font-size: 13px; }
+.data-table th { background: #f9fafb; font-weight: 600; color: #374151; font-size: 11px; text-transform: uppercase; }
+.badge-draft         { background: #f3f4f6; color: #4b5563; }
+.badge-georeferenced { background: #dbeafe; color: #1e40af; }
+.badge-finalized     { background: #dcfce7; color: #166534; }
+
+/* Buton mic în Layer Manager pentru a deschide modulul de planuri vechi */
+.lm-georef-link {
+  display: block; text-align: center;
+  margin-top: 8px; padding: 6px;
+  background: #eff6ff; color: #1e3a8a;
+  font-size: 11px; font-weight: 600;
+  border: 1px dashed #93c5fd; border-radius: 4px;
+  text-decoration: none;
+}
+.lm-georef-link:hover { background: #dbeafe; }
+
 /* ── Legendă ── */
 .legenda h3 { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
 .legenda-grid { display: flex; flex-direction: column; gap: 4px; }

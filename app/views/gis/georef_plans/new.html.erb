@@ -1,0 +1,46 @@
+<% content_for :title, "Plan vechi — upload pentru georeferențiere" %>
+
+<div class="container container-narrow">
+  <h1>Plan vechi pentru georeferențiere</h1>
+  <p class="subtle">
+    Încarcă un plan scanat (JPG/PNG/PDF/TIFF). În următorul pas vei plasa
+    minim 3 puncte de control care leagă pixeli din imagine ↔ coordonate
+    Stereo70 vizibile pe harta de referință (ortofoto/parcele existente).
+  </p>
+
+  <% if @plan.errors.any? %>
+    <div class="alert alert-error">
+      <ul>
+        <% @plan.errors.full_messages.each do |msg| %>
+          <li><%= msg %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <%= form_with model: @plan, url: gis_georef_plans_path, html: { multipart: true, class: "form-stack" } do |f| %>
+    <div class="form-row">
+      <%= f.label :name, "Denumire plan" %>
+      <%= f.text_field :name, required: true, placeholder: "Ex: Plan parcelar Tarla 15 — 1985",
+                       class: "input" %>
+    </div>
+
+    <div class="form-row">
+      <%= f.label :description, "Descriere (opțional)" %>
+      <%= f.text_area :description, rows: 3, class: "input",
+                      placeholder: "Sursa, anul, observații…" %>
+    </div>
+
+    <div class="form-row">
+      <%= f.label :raster_file, "Fișier raster (JPG / PNG / TIFF / PDF)" %>
+      <%= f.file_field :raster_file, accept: "image/*,.pdf,.tiff,.tif", required: true,
+                       class: "input" %>
+      <p class="form-hint">Maxim ~50 MB. Imaginea se afișează la dimensiune originală — folosește zoom/pan pentru plasarea precisă a GCP-urilor.</p>
+    </div>
+
+    <div class="form-actions">
+      <%= f.submit "Continuă spre georeferențiere →", class: "btn btn-primary" %>
+      <%= link_to "Anulează", harta_path, class: "btn btn-secondary" %>
+    </div>
+  <% end %>
+</div>

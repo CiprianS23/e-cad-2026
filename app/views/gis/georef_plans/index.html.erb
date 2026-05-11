@@ -1,0 +1,53 @@
+<% content_for :title, "Planuri vechi — georeferențiere" %>
+
+<div class="container">
+  <div class="page-header">
+    <h1>Planuri vechi georeferențiate</h1>
+    <%= link_to "+ Adaugă plan nou", new_gis_georef_plan_path, class: "btn btn-primary" %>
+  </div>
+
+  <% plans = GisGeorefPlan.for_owner(cookies.signed[:gis_owner_token]).order(updated_at: :desc) %>
+
+  <% if plans.empty? %>
+    <p class="subtle">Niciun plan încărcat încă. Apasă <strong>+ Adaugă plan nou</strong> pentru a începe.</p>
+  <% else %>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Denumire</th>
+          <th>Stare</th>
+          <th>GCP</th>
+          <th>RMS</th>
+          <th>Actualizat</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% plans.each do |p| %>
+          <tr>
+            <td>
+              <strong><%= p.name %></strong>
+              <% if p.description.present? %>
+                <br><span class="subtle"><%= p.description.truncate(80) %></span>
+              <% end %>
+            </td>
+            <td><span class="badge badge-<%= p.state %>"><%= p.state %></span></td>
+            <td><%= p.control_points.count %></td>
+            <td><%= p.residual_rms.present? ? "#{p.residual_rms.round(3)} m" : "—" %></td>
+            <td><%= l p.updated_at, format: :short rescue p.updated_at %></td>
+            <td>
+              <%= link_to "✎ Editează", edit_gis_georef_plan_path(p), class: "btn btn-sm" %>
+              <%= button_to "🗑", gis_georef_plan_path(p), method: :delete,
+                            data: { turbo_confirm: "Ștergi planul și toate punctele de control?" },
+                            class: "btn btn-sm btn-danger", form: { style: "display:inline" } %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  <% end %>
+
+  <p style="margin-top: 1rem">
+    <%= link_to "← Înapoi la hartă", harta_path, class: "btn btn-secondary" %>
+  </p>
+</div>

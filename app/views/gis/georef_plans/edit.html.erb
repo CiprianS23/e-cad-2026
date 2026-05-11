@@ -1,0 +1,89 @@
+<% content_for :title, "Georeferențiere — #{@plan.name}" %>
+<% content_for :fullpage, true %>
+
+<div class="georef-page"
+     data-controller="georef-editor"
+     data-georef-editor-plan-id-value="<%= @plan.id %>"
+     data-georef-editor-raster-url-value="<%= @plan.raster_url %>"
+     data-georef-editor-original-width-value="<%= @plan.original_width || 0 %>"
+     data-georef-editor-original-height-value="<%= @plan.original_height || 0 %>"
+     data-georef-editor-cps-url-value="<%= gis_georef_plan_control_points_path(@plan) %>"
+     data-georef-editor-georef-url-value="<%= georeference_gis_georef_plan_path(@plan) %>"
+     data-georef-editor-plan-url-value="<%= gis_georef_plan_path(@plan) %>"
+     data-georef-editor-cgxml-geojson-url-value="<%= cgxml_geojson_harta_path %>"
+     data-georef-editor-parcele-geojson-url-value="<%= geojson_parcele_cadastrale_path %>"
+     data-georef-editor-mapproxy-url-value="http://localhost:8080">
+
+  <header class="georef-header">
+    <div>
+      <h2><%= @plan.name %></h2>
+      <p class="subtle">
+        Stare: <span class="badge badge-<%= @plan.state %>"><%= @plan.state %></span>
+        · GCP: <span data-georef-editor-target="gcpCount"><%= @plan.control_points.count %></span>
+        · RMS: <span data-georef-editor-target="rms"><%= @plan.residual_rms.present? ? "#{@plan.residual_rms.round(3)} m" : "—" %></span>
+      </p>
+    </div>
+    <div class="georef-actions">
+      <button type="button" class="btn btn-primary"
+              data-action="click->georef-editor#computeGeoreference"
+              data-georef-editor-target="computeBtn">
+        ▶ Recalculează georeferențierea
+      </button>
+      <%= link_to "← Înapoi", gis_georef_plans_path, class: "btn btn-secondary" %>
+    </div>
+  </header>
+
+  <div class="georef-status" data-georef-editor-target="status"></div>
+
+  <div class="georef-grid">
+    <!-- VIEWPORT STÂNGA — imaginea sursă -->
+    <section class="georef-pane">
+      <header class="georef-pane-head">
+        <h3>1. Plan vechi (sursă)</h3>
+        <span class="georef-mode" data-georef-editor-target="leftMode">Click pentru a plasa primul punct (sursă)</span>
+      </header>
+      <div id="georef-map-src" class="georef-canvas"
+           data-georef-editor-target="srcMap"></div>
+      <footer class="georef-pane-foot">
+        <span data-georef-editor-target="srcCoord">Pixel: —</span>
+        <span data-georef-editor-target="srcDims">
+          <%= @plan.original_width.present? ? "#{@plan.original_width} × #{@plan.original_height} px" : "Detectare dimensiuni…" %>
+        </span>
+      </footer>
+    </section>
+
+    <!-- VIEWPORT DREAPTA — harta de referință -->
+    <section class="georef-pane">
+      <header class="georef-pane-head">
+        <h3>2. Hartă referință (Stereo70)</h3>
+        <span class="georef-mode" data-georef-editor-target="rightMode">Apoi click pe harta de referință (țintă)</span>
+      </header>
+      <div id="georef-map-ref" class="georef-canvas"
+           data-georef-editor-target="refMap"></div>
+      <footer class="georef-pane-foot">
+        <span data-georef-editor-target="refCoord">X, Y: —</span>
+        <label class="georef-base-toggle">
+          <input type="radio" name="georef-base" value="osm" checked
+                 data-action="change->georef-editor#changeBase"> OSM
+        </label>
+        <label class="georef-base-toggle">
+          <input type="radio" name="georef-base" value="ortofotoplan"
+                 data-action="change->georef-editor#changeBase"> Ortofoto
+        </label>
+      </footer>
+    </section>
+
+    <!-- LISTĂ GCP -->
+    <aside class="georef-sidebar">
+      <h3>Puncte de control (GCP)</h3>
+      <p class="subtle">
+        Minim 3 puncte pentru transformare afină.
+        4+ puncte → precizia crește (least squares).
+      </p>
+      <ol class="georef-gcp-list" data-georef-editor-target="gcpList"></ol>
+      <p class="form-hint" data-georef-editor-target="gcpHint">
+        Click pe planul vechi pentru a începe primul punct.
+      </p>
+    </aside>
+  </div>
+</div>
