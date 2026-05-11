@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_11_220001) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_11_230002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -198,6 +198,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_220001) do
     t.index ["validation_status"], name: "index_file_descriptions_on_validation_status"
   end
 
+  create_table "gis_contours", force: :cascade do |t|
+    t.decimal "area", precision: 14, scale: 2
+    t.datetime "created_at", null: false
+    t.geometry "geom", limit: {:srid=>3844, :type=>"st_polygon"}, null: false
+    t.string "name", null: false
+    t.text "notes"
+    t.string "owner_token", null: false
+    t.string "state", default: "open", null: false
+    t.datetime "updated_at", null: false
+    t.index ["geom"], name: "index_gis_contours_on_geom", using: :gist
+    t.index ["owner_token"], name: "index_gis_contours_on_owner_token"
+    t.index ["state"], name: "index_gis_contours_on_state"
+  end
+
   create_table "gis_georef_control_points", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.bigint "gis_georef_plan_id", null: false
@@ -216,6 +230,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_220001) do
 # Could not dump table "gis_georef_plans" because of following StandardError
 #   Unknown type 'raster' for column 'raster'
 
+
+  create_table "gis_imobile", force: :cascade do |t|
+    t.decimal "area_corrected", precision: 14, scale: 2
+    t.datetime "corrected_at", default: -> { "CURRENT_TIMESTAMP" }
+    t.string "corrected_by"
+    t.datetime "created_at", null: false
+    t.geometry "geom_corrected", limit: {:srid=>3844, :type=>"multi_polygon"}
+    t.bigint "land_id"
+    t.bigint "proiect_divizare_id"
+    t.string "source", default: "cgxml_fit", null: false
+    t.datetime "updated_at", null: false
+    t.index ["geom_corrected"], name: "index_gis_imobile_on_geom_corrected", using: :gist
+    t.index ["land_id"], name: "index_gis_imobile_on_land_id"
+    t.index ["proiect_divizare_id"], name: "index_gis_imobile_on_proiect_divizare_id"
+    t.index ["source"], name: "index_gis_imobile_on_source"
+  end
 
   create_table "gis_user_layer_groups", force: :cascade do |t|
     t.boolean "collapsed", default: false

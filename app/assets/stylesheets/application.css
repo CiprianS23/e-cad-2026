@@ -1445,3 +1445,100 @@ nav.pagination a:hover  { background: #f3f4f6; }
 .digi-autofill {
   animation: digi-autofill-flash 1.8s ease forwards;
 }
+
+/* ── Floating toolbar pentru divizare proiect ───────────────────────────── */
+.divizare-toolbar {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1050;
+  background: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(15, 23, 42, 0.18);
+  padding: 10px 12px;
+  min-width: 580px;
+  max-width: 96%;
+  font-size: 13px;
+  color: #1f2937;
+}
+.divizare-toolbar[hidden] { display: none; }
+.divizare-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.divizare-title {
+  font-weight: 700;
+  color: #111827;
+  margin-right: 6px;
+  white-space: nowrap;
+}
+.divizare-phase-tab {
+  padding: 5px 10px;
+  border: 1px solid #d1d5db;
+  background: #f9fafb;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #374151;
+}
+.divizare-phase-tab:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.divizare-phase-tab.is-active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+  font-weight: 600;
+}
+.divizare-phase-tab.is-done {
+  background: #dcfce7;
+  border-color: #86efac;
+  color: #166534;
+}
+.divizare-close {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
+  cursor: pointer;
+  color: #6b7280;
+}
+.divizare-close:hover { background: #fee2e2; color: #dc2626; border-color: #fca5a5; }
+.divizare-body { padding-top: 10px; }
+.divizare-panel { display: none; }
+.divizare-panel.is-active { display: block; }
+.divizare-panel-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.divizare-stat {
+  font-size: 12px;
+  color: #6b7280;
+}
+.divizare-stat strong { color: #111827; }
+.divizare-trigger {
+  margin-left: 8px;
+}
+
+/* Trigger button în header sidebar */
+.btn-divizare-launch {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.btn-divizare-launch:hover { background: #e5e7eb; }

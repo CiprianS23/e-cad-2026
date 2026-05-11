@@ -642,3 +642,203 @@ app/views/harta/index.html.erb                          # 3 butoane noi în sec�
 ```
 
 **Schema e-CAD existentă: neatinsă.**
+
+---
+
+# SESIUNEA 2026‑05‑11 (partea 4) — Workflow „Divizare proiect parcelar" (Iter. A+B+pre‑Faza 3)
+
+**Context:** spec §13-16 din `1_modul_gis.md`. Construit progresiv pe parcursul sesiunii cu validare iterativă a utilizatorului. Workflow în 5 faze; iterația A=Faza 1, B=Faza 2, plus pre-pas la Faza 3 (simulare).
+
+## 0. Asseturi noi pe GitHub (separare cod/date)
+
+**Cerință:** partenerul are nevoie de date demo pentru a putea testa modulul GIS.
+
+- Creat repo privat **`CiprianS23/e-cad-2026-assets`** pe GitHub (gh CLI).
+- **Release `v1.0.0-dev-snapshot`** cu 2 attachments (Release assets = până la 2 GB per fișier, fără cost LFS):
+  - `e_cad_2026_dev.dump` (60 MB) — `pg_dump --format=custom` (PostgreSQL 17 + PostGIS) cu toate datele de dev (44 CGXML files, 23 parcele, GCP-uri, georef plans, etc.)
+  - `storage.tar.gz` (263 MB) — folderul `storage/` (ActiveStorage cu TIFF/GeoTIFF/preview)
+- README + `restore.sh` în repo: clone + descărcare 2 attachments + script automat de restore.
+- Owner token în repo principal e `"dev-shared"` în development — toate datele cross-browser, simplifică testarea (vezi sesiunea partea 3).
+
+---
+
+## 1. Service kernel: `Gis::ParcelDivider`
+
+**Cerință:** divizare poligon mare în N sub-poligoane cu suprafețe țintă, conform §13.3 din spec (algorithm cu axă principală OMBR).
+
+**Fișier creat:** `app/services/gis/parcel_divider.rb`.
+
+**Algoritm Mod 1 (linii paralele perpendiculare pe axa principală):**
+1. `ST_OrientedEnvelope(geom)` → dreptunghi minim orientat
+2. Extrage cele 4 colțuri din WKT-ul envelope-ului, identifică latura cea mai lungă = axa principală (A→B, lungime L, direcție d, normală n)
+3. **Bisecție pe poziția cutului** — pentru fiecare țintă, caută `t ∈ [t_min, axis_length]` astfel încât piesa de dinaintea cutului să aibă aria țintă (toleranță relativă 1e-3, max 30 iterații). Necesar pentru poligoane neregulate; poziționarea proporțională simplă funcționează doar pe dreptunghiuri.
+4. Pentru fiecare cut: `ST_Split(remaining, line)` + sortare piese după proiecția centroidului pe axă. Piesa "înainte" → adăugată; restul devine `remaining`.
+5. La final, `remaining` = ultima piesă.
+
+**Acuratețe demonstrată:**
+- Dreptunghi 100×50 + 3 țintă uniform = diferențe ≈ 0
+- Parcela neregulată #15 (1.3M mp) + 3 țintă egale → dif 226-495 mp (0.05%)
+- Aceeași parcelă + 4 țintă inegale → dif 12-22 mp (0.005%)
+
+Service-ul acceptă fie un model Rails (`parcela:`) fie WKT brut (`geom_wkt:`) — flexibilitate pentru conturul temporar (nu există în DB).
+
+**Status final:** păstrat ca kernel reutilizabil pentru viitoarea Faza 3 (parcelare propriu-zisă cu direcție).
+
+---
+
+## 2. Iterația A — Floating toolbar + Faza 1 (Conturul general)
+
+### 2.1 Schema nouă
+
+Două migrații noi:
+- `db/migrate/20260511230001_create_gis_imobile.rb` — tabela `gis_imobile` cu `land_id` (FK către CGXML lands, opțional), `geom_corrected` (MultiPolygon 3844), `area_corrected`, `source` enum (`cgxml_fit` / `divizare_zona` / `manual`), `proiect_divizare_id` (placeholder, momentan = `contour.id`), audit fields. GiST index pe geometry.
+- `db/migrate/20260511230002_create_gis_contours.rb` — tabela `gis_contours` cu `name`, `state` (open/finalized), `geom` (Polygon 3844), `area`, `owner_token`, `notes`. GiST index.
+
+### 2.2 Modele și controllere
+
+- `app/models/gis_imobil.rb` — `belongs_to :land` opțional, auto-calcul `area_corrected` la save din `geom_corrected`.
+- `app/models/gis_contour.rb` — `attr_writer :geom_wkt`, asignare RGeo, validare ST_IsValid, scope `for_owner`, scope `open_only`.
+- `app/controllers/gis/contours_controller.rb` — CRUD complet REST (index/show/create/update/destroy), JSON, owner_token scoping (dev=`dev-shared`). `index` returnează lista cu `geometry` inclus pentru afișare pe hartă.
+
+### 2.3 Floating toolbar UI
+
+**CSS adăugat** în `app/assets/stylesheets/application.css` — `.divizare-toolbar` cu `position:absolute; top:14px; left:50%; transform:translateX(-50%); z-index:1050`, shadow, tab-uri cu state `is-active` / `is-done` / disabled.
+
+**Stimulus controller** `app/javascript/controllers/divizare_proiect_controller.js` — state machine cu 5 faze, layer dedicat pentru contur activ (galben dashed) și contururi salvate (gri pastel cu labels), action-uri pentru navigation între tab-uri (disabled până la completarea fazei anterioare).
+
+**Trigger** — buton `🔪 Divizare proiect` în header sidebar din `app/views/harta/index.html.erb` care dispatch-uiește event `divizare-proiect:open` (controller-ul ascultă în `initialize()` și apelează `open()` curat). Fallback: setează `hidden=false` direct, ca să meargă chiar dacă listener-ul nu e gata.
+
+### 2.4 Faza 1 — Contur cu OSnap, popup suppression, persistare
+
+**Workflow:**
+1. Listă dropdown cu contururi salvate (open state) — încarcă la deschiderea toolbar-ului
+2. Buton „⏏ Încarcă" — selecția devine activă, layer-ul gri o ascunde, activul apare galben + fit pe extent
+3. Buton „🗑" — șterge cel selectat
+4. Input nume + buton „✏ Desenează" → `ol.interaction.Draw type:Polygon` cu **OSnap** activ pe parcele/clădiri/cgxml/contururi salvate (tolerance 12px); popup-uri suprimate prin `harta_map.setDigitizing(true)`.
+5. La dublu-click → conturul rămâne pe hartă (NU se salvează automat). Buton **„💾 Salvează"** explicit (utilizatorul cere nume dacă lipsește; POST sau PATCH după caz).
+
+### 2.5 Bug-fixe pe parcursul iterației A
+
+| # | Simptom | Cauză | Fix |
+|---|---|---|---|
+| A.1 | Butonul „🔪 Divizare proiect" deschidea toolbar dar contururile salvate nu apăreau | `open()` nu era apelat — inline onclick doar seta `hidden=false` | Trigger dispatchează event custom + fallback direct |
+| A.2 | „Desenează" nu plasa punct pe hartă | `_activeLayer.setVisible(false)` la connect (când element.hidden=true) rămânea permanent | Scos logica de `setVisible`; sursele goale = nimic afișat |
+| A.3 | Tot „Desenează" nu mergea după A.2 | Style fix pentru sketch lipsă; OL Draw cu Style instanță nu funcționează identic ca StyleFunction pentru cele 3 sketch features (Polygon/LineString/Point) | Style ca funcție `() => new Style(...)` cu `image: Circle({radius:6, fill:#1d4ed8, stroke:#fff})` |
+| A.4 | `SyntaxError: Unexpected identifier 'pentru'` la load JS | Ghilimea ASCII `"` în mijlocul string-ului JS închidea string-ul prematur (`"...„Salvează" pentru..."`) | Schimb `"..."` în `'...'` |
+| A.5 | Dropdown contururi salvate gol (deși count corect) | Rails serializa `area` (DECIMAL) ca string în JSON, `.toFixed(0)` arunca silent | `c.area&.to_f` în controller serialize + `Number(c.area)` defensiv în JS |
+
+---
+
+## 3. Iterația B — Faza 2 (CGXML fit, alipire + extindere + area-preserving)
+
+### 3.1 Cerințe utilizator (evoluate incremental)
+
+1. Detectează imobile CGXML care intersectează conturul → propune geometrie corectată
+2. **Atât alipire (clip) cât și extindere (extend)** la limita conturului
+3. **Suprafața poligonului trebuie păstrată IDENTICĂ** după corecție; geometria se poate deforma
+4. **Confirmare individuală** per imobil (checkbox)
+
+### 3.2 Service `Gis::ImobilFitter`
+
+`app/services/gis/imobil_fitter.rb` — algoritm complet în PostGIS via CTE:
+
+```
+1. land_lines  ← ST_MakeLine(points.coordinates ORDER BY no), GROUP BY land_id HAVING count>=3
+2. land_polys  ← reconstrucție Polygon din line (ST_MakePolygon, închidere automată)
+3. contour     ← ST_GeomFromText
+4. snapped     ← ST_Snap(geom_orig, ST_Segmentize(ST_Boundary(contour), 1m), tolerance_m)
+                 — vertecșii la ≤ tolerance de boundary snap la el; rezolvă atât alipire (vertex în afară→pe edge) cât și extindere (vertex înăuntru→pe edge)
+5. fitted      ← ST_Translate(ST_Scale(ST_Translate(snap, -cx, -cy), s, s), cx, cy)
+                 unde s = sqrt(area_orig / area_snap) — scale uniform din centroid, păstrează aria EXACT
+6. clean       ← ST_Multi(ST_MakeValid(fitted))
+```
+
+**Validare experimentală:** Land #35 (699.78 mp) → fit 699.78 mp, dif 0.0. Land #36 (1900.07 mp) → fit 1900.07 mp, dif 0.0. Toleranță snap default 5m, configurabilă.
+
+### 3.3 Controller `Gis::ImobileController`
+
+`app/controllers/gis/imobile_controller.rb` cu 2 acțiuni:
+- **`fit_preview`** — apelează service-ul, returnează candidați (cu geometry GeoJSON), NU persistă
+- **`fit_apply`** — recompută (curat, fără cache între requests), filtrează la `land_ids` selectate, șterge orice `cgxml_fit` anterior pentru același land (idempotent), creează `gis_imobil` în tranzacție
+
+### 3.4 UI Faza 2
+
+Layer nou în Stimulus controller `_fitLayer` — verde solid pentru bifate, gri pentru debifate. Stilul re-evaluează `_checked` la fiecare render.
+
+**Panel Faza 2** în `harta/index.html.erb`:
+- „🔍 Detectează imobile CGXML" → POST `/gis/imobile/fit_preview`
+- Listă cu checkbox per imobil (toate bifate implicit), cu nume cadastral, suprafață originală, fitted, diferență colorată, buton 🔍 zoom-to-feature
+- Toggle pe checkbox → live update al stilului pe hartă (gri ↔ verde)
+- „✓ Aplică bifate" → confirm cu count → POST `/gis/imobile/fit_apply` cu lista de `land_ids` bifate
+
+---
+
+## 4. Pre-pas Faza 3 — Simulare fit înainte de parcelare propriu-zisă
+
+**Cerință utilizator:** „Înainte de a începe parcelarea propriu-zisă utilizatorul poate selecta lista de parcele și apoi să dea click pe o zonă de parcelat și să se facă o simulare în sensul să știm dacă încap toate imobilele."
+
+### 4.1 Backend
+
+Două endpoint-uri noi pe `Gis::ImobileController`:
+- **`POST /gis/imobile/remaining_zones`** — `ST_Difference(contour, ST_UnaryUnion(gis_imobile WHERE proiect_divizare_id=...))` → returnează zonele rămase ca FeatureCollection cu `idx`, `area`, `wkt`, `geometry`. ST_Dump pentru a separa MultiPolygon în poligoane individuale.
+- **`POST /gis/imobile/simulate_fit`** — pur aritmetic: primește `zone_area` + `target_areas[]`, returnează `verdict` (perfect/fits_with_surplus/overflow), `surplus_mp`, `deficit_mp`, `fill_ratio`, `min/avg/max_target`.
+
+### 4.2 UI Faza 3 (doar simulare)
+
+Layer nou `_zonesLayer` — albastru dashed cu label `Z1`/`Z2`/... + aria în mp pe centroid.
+
+**Click pe hartă în Faza 3** → `_tryZoneClick(evt)` detectează feature din `_zonesLayer` → `_selectZone(idx)` marchează ca selectat (border albastru închis, fill mai intens).
+
+**Panel:**
+- Buton „🔄 Recalculează zone rămase" (auto-rulează la intrare în Faza 3 prin `nextFromPhase2`)
+- Status: numărul de zone, suma totală
+- Textarea pentru suprafețe țintă (separare flexibilă: newline/virgulă/punct-virgulă/spațiu)
+- Buton „▶ Simulează" (enabled doar dacă zonă selectată + ≥1 țintă)
+- **Card rezultat colorat** cu verdict + tabel: aria zonei, sumă, dif, fill %, min/med/max țintă
+
+### 4.3 Limitare conștientă
+
+Simularea e pur aritmetică (sum vs aria). NU verifică FORMA — o zonă în L cu aria 1000 mp poate refuza fizic 4 parcele de 250 mp dacă geometria nu permite cuts. Va fi îmbunătățit în Faza 3 actuală (iterația C) când vom calcula cut-urile concrete cu `ParcelDivider`.
+
+---
+
+## Sumar fișiere atinse — sesiunea 11 mai (partea 4)
+
+```
+# Migrații (2)
+db/migrate/20260511230001_create_gis_imobile.rb
+db/migrate/20260511230002_create_gis_contours.rb
+
+# Modele (2)
+app/models/gis_imobil.rb
+app/models/gis_contour.rb
+
+# Servicii (2)
+app/services/gis/parcel_divider.rb       # kernel divizare cu axă OMBR + bisecție
+app/services/gis/imobil_fitter.rb        # CGXML fit: snap + scale (area-preserving)
+
+# Controllere (2)
+app/controllers/gis/contours_controller.rb
+app/controllers/gis/imobile_controller.rb   # fit_preview, fit_apply, remaining_zones, simulate_fit
+
+# Frontend
+app/javascript/controllers/divizare_proiect_controller.js   # state machine 5 faze + UI Faza 1/2/3(pre)
+
+# View
+app/views/harta/index.html.erb           # floating toolbar overlay + trigger sidebar
+
+# CSS
+app/assets/stylesheets/application.css   # .divizare-toolbar, phase-tabs, layout
+
+# Rute
+config/routes.rb                         # /gis/contours CRUD + /gis/imobile/*
+
+# Asseturi externe (repo separat)
+e-cad-2026-assets (GitHub privat) Release v1.0.0-dev-snapshot:
+  • e_cad_2026_dev.dump (60 MB) — pg_dump custom format
+  • storage.tar.gz (263 MB) — ActiveStorage tree
+```
+
+**Schema e-CAD existentă: neatinsă. Tabele noi cu prefix `gis_`. Pe `points` (CGXML originals) NU s-a scris nimic — corecțiile trăiesc în `gis_imobile` cu FK `land_id` opțional.**
+
+**Restanță pentru iterația C:** parcelarea propriu-zisă în Faza 3 (direcție/limită desenată + `ParcelDivider` aplicat per zonă), apoi Faza 4 (best-fit global) și Faza 5 (commit definitiv în `parcele_cadastrale`).

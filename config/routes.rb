@@ -78,6 +78,15 @@ Rails.application.routes.draw do
       resources :control_points, only: [:create, :update, :destroy],
                                   controller: :georef_control_points
     end
+
+    # Contururi de lucru pentru divizare proiect (persistente; multiple per utilizator)
+    resources :contours, only: [:index, :show, :create, :update, :destroy]
+
+    # Imobile corectate — Faza 2 (CGXML fit) și ulterior Faza 3+
+    post "/imobile/fit_preview",      to: "imobile#fit_preview",     as: :imobile_fit_preview
+    post "/imobile/fit_apply",        to: "imobile#fit_apply",       as: :imobile_fit_apply
+    post "/imobile/remaining_zones",  to: "imobile#remaining_zones", as: :imobile_remaining_zones
+    post "/imobile/simulate_fit",     to: "imobile#simulate_fit",    as: :imobile_simulate_fit
   end
 
   root "harta#index"

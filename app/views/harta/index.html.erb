@@ -20,6 +20,11 @@
       <div class="sidebar-header">
         <h2>Parcele Cadastrale</h2>
         <%= link_to "Adaugă parcelă", new_parcela_cadastrala_path, class: "btn btn-primary btn-sm" %>
+        <button type="button" class="btn-divizare-launch divizare-trigger"
+                title="Deschide workflow-ul de divizare proiect parcelar"
+                onclick="var t=document.querySelector('.divizare-toolbar'); if(t){t.hidden=false;} document.dispatchEvent(new CustomEvent('divizare-proiect:open'));">
+          🔪 Divizare proiect
+        </button>
       </div>
 
       <div class="sidebar-filters">
@@ -94,7 +99,187 @@
   </aside>
 
   <!-- ── Zona hartă (centru): hartă + linia de comandă + status bar ───────── -->
-  <div class="harta-center">
+  <div class="harta-center" style="position:relative">
+    <!-- Floating toolbar pentru workflow „Divizare proiect" -->
+    <div class="divizare-toolbar"
+         hidden
+         data-controller="divizare-proiect"
+         data-divizare-proiect-harta-map-outlet="#harta-map">
+      <div class="divizare-header">
+        <span class="divizare-title">🔪 Divizare proiect</span>
+        <button class="divizare-phase-tab is-active" data-phase="1"
+                data-divizare-proiect-target="phaseTab1"
+                data-action="click->divizare-proiect#goToPhase">① Contur</button>
+        <button class="divizare-phase-tab" data-phase="2" disabled
+                data-divizare-proiect-target="phaseTab2"
+                data-action="click->divizare-proiect#goToPhase"
+                title="Disponibil după Faza 1">② CGXML fit</button>
+        <button class="divizare-phase-tab" data-phase="3" disabled
+                data-divizare-proiect-target="phaseTab3"
+                data-action="click->divizare-proiect#goToPhase"
+                title="Disponibil după Faza 2">③ Zone parcelare</button>
+        <button class="divizare-phase-tab" data-phase="4" disabled
+                data-divizare-proiect-target="phaseTab4"
+                data-action="click->divizare-proiect#goToPhase"
+                title="Disponibil după Faza 3">④ Best-fit</button>
+        <button class="divizare-phase-tab" data-phase="5" disabled
+                data-divizare-proiect-target="phaseTab5"
+                data-action="click->divizare-proiect#goToPhase"
+                title="Disponibil după Faza 4">⑤ Commit</button>
+        <button class="divizare-close"
+                data-action="click->divizare-proiect#close"
+                title="Închide (pierzi conturul curent)">×</button>
+      </div>
+
+      <div class="divizare-body">
+        <!-- Faza 1: Contur -->
+        <div class="divizare-panel is-active" data-divizare-proiect-target="panel1">
+          <!-- Contururi salvate -->
+          <div class="divizare-panel-row">
+            <label style="font-size:12px;color:#6b7280">Contur existent:</label>
+            <select class="input input-sm"
+                    style="flex:1;min-width:200px"
+                    data-divizare-proiect-target="savedList"></select>
+            <button class="btn btn-outline btn-sm"
+                    data-divizare-proiect-target="btnLoadSelected"
+                    data-action="click->divizare-proiect#loadSelected">
+              ⏏ Încarcă
+            </button>
+            <button class="btn btn-danger btn-sm"
+                    data-divizare-proiect-target="btnDeleteSelected"
+                    data-action="click->divizare-proiect#deleteSelected">
+              🗑
+            </button>
+          </div>
+
+          <!-- Nume + acțiuni desen -->
+          <div class="divizare-panel-row" style="margin-top:6px">
+            <label style="font-size:12px;color:#6b7280">Nume:</label>
+            <input type="text" class="input input-sm"
+                   style="flex:1;min-width:160px"
+                   placeholder="Ex: Tarlaua 12 — sat X"
+                   data-divizare-proiect-target="contourName">
+            <button class="btn btn-primary btn-sm"
+                    data-divizare-proiect-target="btnDrawContour"
+                    data-action="click->divizare-proiect#startDrawContour">
+              ✏ Desenează
+            </button>
+            <button class="btn btn-success btn-sm"
+                    data-divizare-proiect-target="btnSaveContour"
+                    data-action="click->divizare-proiect#saveContour"
+                    disabled>
+              💾 Salvează
+            </button>
+            <button class="btn btn-outline btn-sm"
+                    data-divizare-proiect-target="btnResetContour"
+                    data-action="click->divizare-proiect#resetContour">
+              ↺ Reset
+            </button>
+            <button class="btn btn-secondary btn-sm"
+                    style="margin-left:auto"
+                    data-divizare-proiect-target="btnNextFrom1"
+                    data-action="click->divizare-proiect#nextFromPhase1"
+                    disabled>
+              → Faza 2
+            </button>
+          </div>
+
+          <div class="divizare-stat" style="margin-top:4px">
+            Aria: <strong data-divizare-proiect-target="contourArea">—</strong>
+          </div>
+          <div class="divizare-stat" data-divizare-proiect-target="contourStatus" style="margin-top:4px;font-size:11px">
+            Click „Desenează" sau alege un contur salvat.
+          </div>
+        </div>
+
+        <!-- Faza 2: CGXML fit (alipire + extindere la contur, area-preserving) -->
+        <div class="divizare-panel" data-divizare-proiect-target="panel2">
+          <div class="divizare-panel-row">
+            <button class="btn btn-primary btn-sm"
+                    data-divizare-proiect-target="btnDetectCgxml"
+                    data-action="click->divizare-proiect#detectCgxml">
+              🔍 Detectează imobile CGXML
+            </button>
+            <button class="btn btn-success btn-sm"
+                    data-divizare-proiect-target="btnApplyFit"
+                    data-action="click->divizare-proiect#applyFit"
+                    disabled>
+              ✓ Aplică bifate
+            </button>
+            <button class="btn btn-secondary btn-sm"
+                    style="margin-left:auto"
+                    data-divizare-proiect-target="btnNextFrom2"
+                    data-action="click->divizare-proiect#nextFromPhase2"
+                    disabled>
+              → Faza 3
+            </button>
+          </div>
+          <div class="divizare-stat" data-divizare-proiect-target="fitStatus" style="margin-top:4px;font-size:11px">
+            Apasă „Detectează" — vor apărea sub-geometriile lipite la contur (verde), cu confirmare individuală per imobil.
+          </div>
+          <ul data-divizare-proiect-target="fitList"
+              style="list-style:none;padding:0;margin:8px 0 0;max-height:180px;overflow:auto;border-top:1px solid #e5e7eb"></ul>
+        </div>
+
+        <!-- Faza 3: Pre-parcelare — simulare fit + parcelare (parcelarea în iterația C) -->
+        <div class="divizare-panel" data-divizare-proiect-target="panel3">
+          <div class="divizare-panel-row">
+            <button class="btn btn-primary btn-sm"
+                    data-divizare-proiect-target="btnRecomputeZones"
+                    data-action="click->divizare-proiect#recomputeZones">
+              🔄 Recalculează zone rămase
+            </button>
+            <button class="btn btn-secondary btn-sm"
+                    style="margin-left:auto"
+                    data-divizare-proiect-target="btnNextFrom3"
+                    data-action="click->divizare-proiect#nextFromPhase3"
+                    disabled>
+              → Faza 4
+            </button>
+          </div>
+          <div class="divizare-stat" data-divizare-proiect-target="zoneStatus" style="margin-top:4px;font-size:11px">
+            Click „Recalculează" sau intră în Faza 3 — zonele neacoperite (contour − imobile) apar albastru pe hartă.
+          </div>
+          <div class="divizare-stat" data-divizare-proiect-target="zoneInfo" style="margin-top:4px;font-size:11px;font-weight:600;color:#1d4ed8"></div>
+
+          <div class="divizare-section-label" style="margin-top:10px;font-size:11px;color:#6b7280;font-weight:600">
+            SIMULARE FIT (pre-parcelare)
+          </div>
+          <div style="display:flex;gap:8px;align-items:flex-start">
+            <textarea rows="4"
+                      class="input input-sm"
+                      style="flex:1;font-family:monospace;font-size:12px;min-width:0"
+                      placeholder="Suprafețe țintă (mp), una per linie:&#10;2450&#10;1870&#10;980&#10;3200"
+                      data-divizare-proiect-target="targetsTextarea"
+                      data-action="input->divizare-proiect#targetsTextareaChanged"></textarea>
+            <button class="btn btn-primary btn-sm"
+                    style="align-self:stretch"
+                    data-divizare-proiect-target="btnSimulate"
+                    data-action="click->divizare-proiect#simulate"
+                    disabled>
+              ▶<br>Simulează
+            </button>
+          </div>
+
+          <div data-divizare-proiect-target="simulateResult" hidden></div>
+        </div>
+
+        <!-- Faza 4: Best-fit (placeholder) -->
+        <div class="divizare-panel" data-divizare-proiect-target="panel4">
+          <p style="color:#6b7280;margin:6px 0">
+            🚧 <em>Faza 4 — Ajustare „best-fit" pentru ca toate suprafețele să corespundă țintelor. Iterația D.</em>
+          </p>
+        </div>
+
+        <!-- Faza 5: Commit (placeholder) -->
+        <div class="divizare-panel" data-divizare-proiect-target="panel5">
+          <p style="color:#6b7280;margin:6px 0">
+            🚧 <em>Faza 5 — Creare definitivă parcele_cadastrale + gis_imobil. Iterația E.</em>
+          </p>
+        </div>
+      </div>
+    </div>
+
     <div id="harta-map"
          data-controller="harta-map"
          data-harta-map-geojson-url-value="<%= geojson_parcele_cadastrale_path(params.permit(:q, :status, :judet, :categoria_folosinta)) %>"
