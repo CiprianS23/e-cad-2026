@@ -16,7 +16,8 @@ export default class extends Controller {
     "srcMap", "refMap", "gcpList", "gcpCount", "rms",
     "leftMode", "rightMode", "srcCoord", "refCoord", "srcDims",
     "status", "computeBtn", "finalizeBtn", "warpMethod", "gcpHint",
-    "manualX", "manualY", "manualApply", "diag"
+    "manualX", "manualY", "manualApply", "diag",
+    "rotateSlider", "rotateValue"
   ]
   static values = {
     planId:              Number,
@@ -200,9 +201,16 @@ export default class extends Controller {
   _buildReferenceMap() {
     if (!this.hasRefMapTarget) return
 
-    // OSM direct (fără MapProxy) cu crossOrigin: null (același pattern ca /harta
-    // care merge). `ol.source.OSM()` setează implicit crossOrigin: "anonymous",
-    // ceea ce poate eșua când browser-ul a cached tile-uri fără CORS headers.
+    // Diagnostic detaliat — identifică EXACT ce e ne-OK în lanțul proj.
+    const proj3844 = ol.proj.get("EPSG:3844")
+    this._appendDiag(
+      `proj4=${typeof proj4 !== "undefined" ? 'OK' : 'LIPSĂ'} · ` +
+      `ol.proj.proj4=${typeof ol.proj?.proj4} · ` +
+      `EPSG:3844 known=${!!proj3844}` +
+      (proj3844 ? ` ext=[${(proj3844.getExtent() || []).join(',')}]` : '')
+    )
+
+    // OSM direct (fără MapProxy) cu crossOrigin: null (același pattern ca /harta).
     this._refOsm = new ol.layer.Tile({
       source: new ol.source.XYZ({
         url:          "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -211,9 +219,10 @@ export default class extends Controller {
       }),
       visible: true
     })
-    this._refOsm.getSource().once("tileloaderror", () => {
-      this._appendDiag("OSM tiles nu se încarcă (network/firewall/ad-blocker?)")
-    })
+    const osmSrc = this._refOsm.getSource()
+    osmSrc.once("tileloadstart", () => this._appendDiag("OSM: tile request emis"))
+    osmSrc.once("tileloadend",   () => this._appendDiag("OSM: tile încărcat OK"))
+    osmSrc.once("tileloaderror", () => this._appendDiag("OSM: tile eșuat (network/firewall/ad-blocker?)"))
 
     // Google Satellite (endpoint neoficial mt{0-3}). Util în dev; pentru
     // producție recomandat Esri sau o cheie comercială Google Maps Tile API.
@@ -334,8 +343,16 @@ export default class extends Controller {
   _buildVectorLayer(url, opts) {
     if (!url) return null
     return new ol.layer.Vector({
-      source: new ol.source.Vector({ url, format: new ol.format.GeoJSON() }),
-      style:  new ol.style.Style({
+      // CRITIC: backend-ul returnează GeoJSON nativ în EPSG:3844 (nu 4326!).
+      // Fără asta OL presupune 4326 și transformă datele → poziții aiurea.
+      source: new ol.source.Vector({
+        url,
+        format: new ol.format.GeoJSON({
+          dataProjection:    "EPSG:3844",
+          featureProjection: "EPSG:3844"
+        })
+      }),
+      style: new ol.style.Style({
         stroke: new ol.style.Stroke({ color: opts.stroke, width: opts.width, lineDash: opts.dash }),
         fill:   new ol.style.Fill({ color: opts.fillRgba })
       })
@@ -628,6 +645,42 @@ export default class extends Controller {
       event.preventDefault()
       this.applyManualCoord()
     }
+  }
+
+  // ── Rotire sursă ────────────────────────────────────────────────────────
+  // Modifică doar view-ul (vizual). Coordonatele pixel rămân corecte —
+  // sistemul de coords sursă e fix (0..W × 0..H), rotația e afișaj.
+  rotateSrc(event) {
+    if (!this._srcMap) return
+    const deg     = parseFloat(event.currentTarget.dataset.deg) || 0
+    const view    = this._srcMap.getView()
+    const current = view.getRotation()  // în radieni
+    const target  = current + (deg * Math.PI / 180)
+    view.animate({ rotation: target, duration: 200 })
+    this._syncRotateUi(target)
+  }
+
+  rotateSrcReset() {
+    if (!this._srcMap) return
+    this._srcMap.getView().animate({ rotation: 0, duration: 200 })
+    this._syncRotateUi(0)
+  }
+
+  rotateSrcSlider(event) {
+    if (!this._srcMap) return
+    const deg = parseFloat(event.target.value)
+    const rad = deg * Math.PI / 180
+    this._srcMap.getView().setRotation(rad)
+    this._syncRotateUi(rad, false)
+  }
+
+  _syncRotateUi(rad, updateSlider = true) {
+    // Normalizează la [-180, 180]
+    let deg = (rad * 180 / Math.PI) % 360
+    if (deg >  180) deg -= 360
+    if (deg < -180) deg += 360
+    if (this.hasRotateValueTarget) this.rotateValueTarget.textContent = `${Math.round(deg)}°`
+    if (updateSlider && this.hasRotateSliderTarget) this.rotateSliderTarget.value = String(Math.round(deg))
   }
 
   _setStatus(msg, kind = "info") {

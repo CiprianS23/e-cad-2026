@@ -67,6 +67,23 @@
            data-georef-editor-target="srcMap"></div>
       <footer class="georef-pane-foot">
         <span data-georef-editor-target="srcCoord">Pixel: —</span>
+        <span class="georef-rotate-controls" title="Rotire imagine (doar vizual, nu afectează coords pixel)">
+          <button type="button" class="btn btn-xs"
+                  data-action="click->georef-editor#rotateSrc"
+                  data-deg="-90" title="Rotește -90°">↺</button>
+          <button type="button" class="btn btn-xs"
+                  data-action="click->georef-editor#rotateSrc"
+                  data-deg="90" title="Rotește +90°">↻</button>
+          <button type="button" class="btn btn-xs"
+                  data-action="click->georef-editor#rotateSrcReset"
+                  title="Reset rotație">⊕ 0°</button>
+          <input type="range" min="-180" max="180" step="1" value="0"
+                 class="georef-rotate-slider"
+                 data-action="input->georef-editor#rotateSrcSlider"
+                 data-georef-editor-target="rotateSlider"
+                 title="Rotire fină">
+          <span data-georef-editor-target="rotateValue">0°</span>
+        </span>
         <span data-georef-editor-target="srcDims">
           <%= @plan.original_width.present? ? "#{@plan.original_width} × #{@plan.original_height} px" : "Detectare dimensiuni…" %>
         </span>
