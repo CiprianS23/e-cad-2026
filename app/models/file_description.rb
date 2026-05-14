@@ -4,7 +4,11 @@ class FileDescription < ApplicationRecord
   has_many :persons,                 dependent: :nullify
   has_many :cgxml_validation_errors, dependent: :destroy
 
-  IMPORT_STATUSES     = %w[done partial failed].freeze
+  # Fișierul .cgxml brut arhivat la upload; folosit de CgxmlImportJob (bulk async)
+  # pentru a reciti conținutul din coadă, și ulterior pentru reimport/audit.
+  has_one_attached :raw_file
+
+  IMPORT_STATUSES     = %w[pending in_progress done partial failed].freeze
   VALIDATION_STATUSES = %w[pending in_progress valid errors].freeze
 
   validates :filename,          presence: true, length: { maximum: 50 }

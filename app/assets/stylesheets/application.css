@@ -857,9 +857,11 @@ legend { font-size: 13px; font-weight: 700; color: #374151; padding: 0 6px; }
 
 /* ── OpenLayers popup container ── */
 .ol-popup-content {
-  background: #fff;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   border-radius: 6px;
-  box-shadow: 0 2px 12px rgba(0,0,0,.18);
+  box-shadow: 0 2px 12px rgba(0,0,0,.14);
   padding: 10px 12px;
   min-width: 220px;
   max-width: 320px;
@@ -871,7 +873,7 @@ legend { font-size: 13px; font-weight: 700; color: #374151; padding: 0 6px; }
   position: absolute;
   bottom: -8px; left: 50%; transform: translateX(-50%);
   border: 8px solid transparent;
-  border-top-color: #fff;
+  border-top-color: rgba(255, 255, 255, 0.78);
   border-bottom: 0;
 }
 
@@ -1105,40 +1107,62 @@ nav.pagination a:hover  { background: #f3f4f6; }
 .total-row { font-weight: 700; background: #f8fafc; }
 
 /* ══════════════════════════════════════════════════════════════════
-   MODUL DIGITIZARE — panou pliabil (stil AutoCAD)
+   MODUL DIGITIZARE — panou pliabil (SaaS 2026)
+   Paleta: slate + indigo accent; hairlines în loc de chenare grele;
+   tipografie liniștită, spațiere generoasă, butoane segmentate.
    ══════════════════════════════════════════════════════════════════ */
 
-/* Panou dreapta, mereu prezent în .harta-page; toggle bar 36px + body 320px */
+/* Tokens locale — nu „leak"-uiește în restul aplicației */
 .digi-panel {
+  --d-bg:          #ffffff;
+  --d-bg-soft:     #f8fafc;
+  --d-border:      #e2e8f0;
+  --d-border-soft: #eef2f6;
+  --d-text:        #0f172a;
+  --d-muted:       #64748b;
+  --d-subtle:      #94a3b8;
+  --d-accent:      #4f46e5;
+  --d-accent-soft: #eef2ff;
+  --d-success:     #16a34a;
+  --d-success-bg:  #ecfdf5;
+  --d-warn:        #b45309;
+  --d-warn-bg:     #fffbeb;
+  --d-danger:      #dc2626;
+  --d-danger-bg:   #fef2f2;
+  --d-radius:      10px;
+  --d-radius-sm:   6px;
+  --d-shadow:      0 -1px 2px rgba(15, 23, 42, 0.04), -8px 0 24px -16px rgba(15, 23, 42, 0.12);
+
   display: flex;
   flex-shrink: 0;
-  background: #fff;
-  border-left: 1px solid #2d2d4a;
+  background: var(--d-bg);
+  border-left: 1px solid var(--d-border);
   font-size: 12px;
+  color: var(--d-text);
   z-index: 1000;
   height: 100%;
-  box-shadow: -2px 0 4px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--d-shadow);
 }
 
-/* Toggle bar (vertical, mereu vizibil) */
+/* Bara verticală — minimală, accent indigo subtil pe hover */
 .digi-panel-toggle {
-  width: 36px;
+  width: 40px;
   flex-shrink: 0;
-  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
-  color: #e5e7eb;
+  background: var(--d-bg-soft);
+  color: var(--d-muted);
   border: none;
   cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 12px 0;
-  gap: 10px;
-  border-right: 1px solid #2d2d4a;
-  transition: background 0.15s;
+  padding: 14px 0;
+  gap: 12px;
+  border-right: 1px solid var(--d-border);
+  transition: background .15s, color .15s;
 }
 .digi-panel-toggle:hover {
-  background: linear-gradient(180deg, #2d2d4a 0%, #1e2a4a 100%);
-  color: #fff;
+  background: var(--d-accent-soft);
+  color: var(--d-accent);
 }
 .digi-panel-toggle-icon {
   font-size: 16px;
@@ -1148,303 +1172,344 @@ nav.pagination a:hover  { background: #f3f4f6; }
   writing-mode: vertical-rl;
   text-orientation: mixed;
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  font-weight: 600;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
-/* Body panou — vizibil când e expandat */
+/* Body — coloana de conținut */
 .digi-panel-body {
-  width: 320px;
+  width: 340px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  background: #fafbfc;
+  background: var(--d-bg);
 }
+.digi-panel--collapsed .digi-panel-body { display: none; }
 
-/* Stare colapsată — body ascuns */
-.digi-panel--collapsed .digi-panel-body {
-  display: none;
-}
+/* Scrollbar discret (WebKit) */
+.digi-panel-body::-webkit-scrollbar      { width: 8px; }
+.digi-panel-body::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
+.digi-panel-body::-webkit-scrollbar-track { background: transparent; }
 
+/* Header — fără bara navy; doar titlul + chip Stereo70 */
 .digi-sidebar-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 10px 14px;
-  background: #1a1a2e;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 700;
+  padding: 16px 18px 12px;
+  background: var(--d-bg);
+  color: var(--d-text);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
   flex-shrink: 0;
+  border-bottom: 1px solid var(--d-border-soft);
 }
-.digi-title { letter-spacing: .02em; }
+.digi-title { letter-spacing: -0.005em; }
+.digi-sidebar-header .badge {
+  background: var(--d-accent-soft);
+  color: var(--d-accent);
+  border: none;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  font-size: 10px;
+  padding: 2px 8px;
+}
 
-/* Secțiuni */
+/* Secțiuni — bloc cu hairline jos, fără borduri colorate */
 .digi-section {
-  border-bottom: 2px solid #1d4ed8;
-  padding: 12px 14px;
+  border-bottom: 1px solid var(--d-border-soft);
+  padding: 14px 18px 16px;
   position: relative;
 }
+.digi-section:last-child  { border-bottom: none; }
 .digi-section + .digi-section { border-top: none; }
 .digi-section-flex { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-/* Label-ul direct al secțiunii — bara de header proeminentă */
+
+/* Eticheta principală a secțiunii — small caps liniștit */
 .digi-section > .digi-section-label {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: .06em;
-  color: #1a1a2e;
-  background: linear-gradient(90deg, #e0e7ff 0%, #f3f4f6 100%);
-  padding: 5px 10px;
-  border-left: 3px solid #1d4ed8;
-  margin: -12px -14px 10px;
+  letter-spacing: 0.08em;
+  color: var(--d-subtle);
+  background: transparent;
+  padding: 0;
+  border: none;
+  margin: 0 0 10px;
   display: flex;
   align-items: center;
   gap: 6px;
 }
-/* Variantă simplă pentru sub-labels în interiorul secțiunilor (dxf, etc.) */
+/* Sub-label-uri (Adaugă punct manual, etc.) */
 .digi-section-label {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: .06em;
-  color: #9ca3af;
+  letter-spacing: 0.08em;
+  color: var(--d-subtle);
   margin-bottom: 6px;
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-/* Coordonate cursor */
-.digi-coords-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.digi-coord-box  { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 8px; }
-.digi-coord-label { display: block; font-size: 10px; color: #9ca3af; font-weight: 600; }
-.digi-coord-val   { display: block; font-family: monospace; font-size: 13px; font-weight: 700; color: #1a1a2e; margin-top: 2px; }
+/* Coordonate cursor (legacy — în status bar acum, dar păstrăm clasele) */
+.digi-coords-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.digi-coord-box  {
+  background: var(--d-bg-soft);
+  border: 1px solid var(--d-border-soft);
+  border-radius: var(--d-radius-sm);
+  padding: 8px 10px;
+}
+.digi-coord-label { display: block; font-size: 10px; color: var(--d-subtle); font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; }
+.digi-coord-val   { display: block; font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 13px; font-weight: 600; color: var(--d-text); margin-top: 3px; }
 
-/* Snap */
-.digi-snap-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+/* Snap legacy */
+.digi-snap-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
 .snap-dot {
-  width: 10px; height: 10px; border-radius: 50%;
-  background: #9ca3af; flex-shrink: 0;
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #cbd5e1; flex-shrink: 0;
   transition: background .2s;
 }
-.snap-label { font-size: 11px; font-weight: 600; color: #374151; flex: 1; }
-.snap-tol-label { font-size: 10px; color: #9ca3af; display: flex; align-items: center; gap: 4px; }
-.snap-slider { width: 60px; accent-color: #1d4ed8; }
+.snap-label { font-size: 11px; font-weight: 500; color: var(--d-text); flex: 1; }
+.snap-tol-label { font-size: 10px; color: var(--d-subtle); display: flex; align-items: center; gap: 6px; }
+.snap-slider { width: 64px; accent-color: var(--d-accent); }
 
-/* Toolbar acțiuni */
-.digi-btn-row { display: flex; flex-wrap: wrap; gap: 4px; }
-.btn-active   { background: #1d4ed8 !important; color: #fff !important; }
+/* Toolbar acțiuni — butoanele iau aer prin gap mai mare */
+.digi-btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn-active   { background: var(--d-accent) !important; color: #fff !important; border-color: var(--d-accent) !important; }
+
+/* Status — chip rotunjit, fond neutru */
 .digi-status  {
-  margin-top: 8px;
-  font-size: 11px;
-  color: #6b7280;
-  background: #f8fafc;
-  border-radius: 4px;
-  padding: 5px 8px;
-  min-height: 28px;
-  line-height: 1.4;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--d-muted);
+  background: var(--d-bg-soft);
+  border: 1px solid var(--d-border-soft);
+  border-radius: var(--d-radius-sm);
+  padding: 8px 10px;
+  min-height: 30px;
+  line-height: 1.45;
 }
-.digi-status-ok   { color: #16a34a; background: #f0fdf4; }
-.digi-status-warn { color: #b45309; background: #fffbeb; }
+.digi-status-ok   { color: #047857; background: var(--d-success-bg); border-color: #a7f3d0; }
+.digi-status-warn { color: var(--d-warn); background: var(--d-warn-bg); border-color: #fde68a; }
 
-/* Vertex list */
-.digi-vertex-scroll { overflow-y: auto; max-height: 200px; flex: 1 1 auto; }
+/* Lista de vertecși */
+.digi-vertex-scroll { overflow-y: auto; max-height: 220px; flex: 1 1 auto; }
 .digi-vertex-table  { width: 100%; border-collapse: collapse; }
 .digi-vertex-table thead th {
   position: sticky; top: 0;
-  background: #f3f4f6;
-  padding: 4px 6px;
+  background: var(--d-bg-soft);
+  padding: 6px 8px;
   font-size: 10px;
-  font-weight: 700;
-  color: #6b7280;
+  font-weight: 600;
+  color: var(--d-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   text-align: left;
 }
-.digi-vertex-table tbody tr:hover { background: #f8fafc; }
-.vt-no    { color: #9ca3af; padding: 3px 6px; width: 24px; }
-.vt-coord { font-family: monospace; font-size: 11px; padding: 3px 6px; color: #1a1a2e; }
+.digi-vertex-table tbody tr:hover { background: var(--d-bg-soft); }
+.vt-no    { color: var(--d-subtle); padding: 4px 8px; width: 24px; }
+.vt-coord { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 11px; padding: 4px 8px; color: var(--d-text); }
 .digi-del-btn {
-  background: none; border: none; color: #9ca3af; cursor: pointer; font-size: 11px;
-  padding: 2px 4px; border-radius: 3px;
+  background: none; border: none; color: var(--d-subtle); cursor: pointer; font-size: 12px;
+  padding: 3px 6px; border-radius: 4px; transition: background .15s, color .15s;
 }
-.digi-del-btn:hover { background: #fee2e2; color: #dc2626; }
+.digi-del-btn:hover { background: var(--d-danger-bg); color: var(--d-danger); }
 
 /* Tooltip vertex pe hartă */
-.digi-vertex-tooltip { font-size: 11px; font-family: monospace; }
+.digi-vertex-tooltip { font-size: 11px; font-family: ui-monospace, "SF Mono", Consolas, monospace; }
 
-/* Manual input */
-.digi-manual-row { display: flex; gap: 4px; align-items: center; }
-.digi-coord-input { width: 90px; font-family: monospace; font-size: 12px; }
+/* Adăugare punct manual */
+.digi-manual-row { display: flex; gap: 6px; align-items: center; }
+.digi-coord-input { width: 96px; font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; }
 .digi-file-input  { display: none; }
 .digi-import-label {
-  display: inline-block; margin-top: 8px;
-  cursor: pointer; font-size: 11px; color: #1d4ed8;
-  padding: 4px 8px; border: 1px dashed #93c5fd; border-radius: 4px;
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 8px;
+  cursor: pointer; font-size: 11.5px; font-weight: 500; color: var(--d-accent);
+  padding: 7px 12px; border: 1px dashed #c7d2fe; border-radius: var(--d-radius-sm);
+  background: var(--d-bg);
+  transition: background .15s, border-color .15s;
 }
-.digi-import-label:hover { background: #eff6ff; }
+.digi-import-label:hover { background: var(--d-accent-soft); border-color: #a5b4fc; }
 
-/* Suprafață */
+/* Suprafață — grid liniștit */
 .digi-area-grid {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 5px 10px;
+  gap: 8px 14px;
   align-items: center;
 }
-.digi-area-label { font-size: 11px; color: #6b7280; white-space: nowrap; }
-.digi-area-val   { font-family: monospace; font-size: 13px; font-weight: 700; color: #1a1a2e; }
-.digi-area-input { font-family: monospace; font-size: 12px; }
-.digi-area-diff  { font-family: monospace; font-size: 13px; font-weight: 700; }
-.diff-ok   { color: #16a34a; }
+.digi-area-label { font-size: 11.5px; color: var(--d-muted); white-space: nowrap; }
+.digi-area-val   { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 13px; font-weight: 600; color: var(--d-text); }
+.digi-area-input { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; }
+.digi-area-diff  { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 13px; font-weight: 600; }
+.diff-ok   { color: var(--d-success); }
 .diff-warn { color: #d97706; }
-.diff-bad  { color: #dc2626; }
-.digi-topology { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
-.topo-warn { font-size: 11px; color: #b45309; background: #fffbeb; border-radius: 3px; padding: 2px 6px; }
-.topo-ok   { font-size: 11px; color: #15803d; background: #f0fdf4; border-radius: 3px; padding: 4px 8px; font-weight: 600; }
+.diff-bad  { color: var(--d-danger); }
 
-/* ── Import DXF — UI mapping în panou ─────────────────────────── */
-.digi-dxf-mapping { margin-top: 8px; font-size: 11px; }
-.digi-dxf-header { padding: 4px 6px; background: #dbeafe; border-radius: 3px; font-weight: 600; color: #1e3a8a; margin-bottom: 6px; }
-.digi-dxf-table { width: 100%; border-collapse: collapse; font-size: 11px; }
-.digi-dxf-table th, .digi-dxf-table td { padding: 3px 6px; text-align: left; border-bottom: 1px solid #e5e7eb; }
-.digi-dxf-table th { font-weight: 600; color: #6b7280; text-transform: uppercase; font-size: 10px; }
+/* Topologie — chips */
+.digi-topology { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.topo-warn { font-size: 11.5px; color: var(--d-warn); background: var(--d-warn-bg); border-radius: 999px; padding: 4px 10px; align-self: flex-start; }
+.topo-ok   { font-size: 11.5px; color: #047857; background: var(--d-success-bg); border-radius: 999px; padding: 4px 10px; font-weight: 500; align-self: flex-start; }
+
+/* ── Import DXF — UI mapping ─────────────────────────── */
+.digi-dxf-mapping { margin-top: 10px; font-size: 11.5px; }
+.digi-dxf-header  { padding: 6px 10px; background: var(--d-accent-soft); border-radius: var(--d-radius-sm); font-weight: 500; color: var(--d-accent); margin-bottom: 8px; }
+.digi-dxf-table   { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.digi-dxf-table th, .digi-dxf-table td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--d-border-soft); }
+.digi-dxf-table th { font-weight: 600; color: var(--d-subtle); text-transform: uppercase; font-size: 10px; letter-spacing: 0.06em; }
 .digi-dxf-table td { vertical-align: middle; }
-.digi-dxf-defaults { margin-top: 8px; }
-.digi-dxf-result { margin-top: 8px; }
+.digi-dxf-defaults { margin-top: 10px; }
+.digi-dxf-result   { margin-top: 10px; }
 
 /* ── Audit topologie global — listă în panou ──────────────────── */
-.digi-audit-list { margin-top: 8px; max-height: 300px; overflow-y: auto; font-size: 11px; }
-.digi-audit-summary { padding: 4px 6px; background: #fef3c7; border-radius: 3px; margin-bottom: 6px; color: #78350f; }
-.digi-audit-category { margin-bottom: 8px; }
+.digi-audit-list    { margin-top: 10px; max-height: 320px; overflow-y: auto; font-size: 11.5px; }
+.digi-audit-summary { padding: 6px 10px; background: var(--d-warn-bg); border: 1px solid #fde68a; border-radius: var(--d-radius-sm); margin-bottom: 8px; color: var(--d-warn); }
+.digi-audit-category { margin-bottom: 10px; }
 .digi-audit-category-header {
-  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
-  color: #6b7280; padding: 4px 0 2px; border-bottom: 1px solid #e5e7eb; display: flex; gap: 6px; align-items: center;
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--d-subtle); padding: 6px 0 4px; border-bottom: 1px solid var(--d-border-soft); display: flex; gap: 6px; align-items: center;
 }
-.digi-audit-items { list-style: none; padding: 0; margin: 4px 0 0; }
+.digi-audit-items { list-style: none; padding: 0; margin: 6px 0 0; }
 .digi-audit-item {
-  display: flex; gap: 6px; align-items: flex-start;
-  padding: 4px 6px; border-left: 3px solid #dc2626; background: #fef2f2;
-  margin-bottom: 3px; border-radius: 0 3px 3px 0;
-  color: #991b1b; line-height: 1.3;
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 6px 10px; border-left: 3px solid var(--d-danger); background: var(--d-danger-bg);
+  margin-bottom: 4px; border-radius: 0 var(--d-radius-sm) var(--d-radius-sm) 0;
+  color: #991b1b; line-height: 1.35;
 }
-.digi-audit-item--warning { border-left-color: #d97706; background: #fffbeb; color: #92400e; }
+.digi-audit-item--warning { border-left-color: #d97706; background: var(--d-warn-bg); color: var(--d-warn); }
 .digi-audit-zoom-btn {
-  background: transparent; border: none; cursor: pointer; padding: 0 4px;
-  font-size: 12px; flex-shrink: 0;
+  background: transparent; border: none; cursor: pointer; padding: 2px 6px;
+  font-size: 12px; flex-shrink: 0; border-radius: 4px; transition: background .15s;
 }
-.digi-audit-zoom-btn:hover { background: #fff; border-radius: 3px; }
-.topo-error-item { color: #991b1b !important; background: #fef2f2 !important; border-left: 3px solid #dc2626; padding-left: 6px; }
+.digi-audit-zoom-btn:hover { background: rgba(255,255,255,0.8); }
+.topo-error-item { color: #991b1b !important; background: var(--d-danger-bg) !important; border-left: 3px solid var(--d-danger); padding-left: 8px; }
 .topo-error-header {
-  font-size: 11px; font-weight: 700; color: #991b1b;
-  background: #fee2e2; border-radius: 3px; padding: 3px 6px;
-  margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em;
+  font-size: 11px; font-weight: 600; color: #991b1b;
+  background: #fee2e2; border-radius: var(--d-radius-sm); padding: 4px 10px;
+  margin-top: 2px; text-transform: uppercase; letter-spacing: 0.06em;
 }
 .topo-warn-header {
-  font-size: 11px; font-weight: 700; color: #b45309;
-  background: #fef3c7; border-radius: 3px; padding: 3px 6px;
-  margin-top: 2px; text-transform: uppercase; letter-spacing: 0.04em;
+  font-size: 11px; font-weight: 600; color: var(--d-warn);
+  background: #fef3c7; border-radius: var(--d-radius-sm); padding: 4px 10px;
+  margin-top: 2px; text-transform: uppercase; letter-spacing: 0.06em;
 }
 
-/* Salvare */
-.digi-save-grid { display: flex; flex-direction: column; gap: 5px; }
+/* Salvare — coloană cu spațiu generos */
+.digi-save-grid { display: flex; flex-direction: column; gap: 8px; }
+.digi-save-grid .input { font-size: 12.5px; padding: 8px 10px; }
 
 /* ── Autocomplete SIRUTA ─────────────────────────────────────────── */
-.ac-wrap {
-  position: relative;
-}
+.ac-wrap     { position: relative; }
 .ac-dropdown {
   position: fixed;
   z-index: 9999;
   margin: 0;
-  padding: 4px 0;
+  padding: 6px 0;
   list-style: none;
   background: #fff;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0,0,0,.12);
-  max-height: 220px;
+  border: 1px solid var(--d-border);
+  border-radius: var(--d-radius);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+  max-height: 240px;
   overflow-y: auto;
 }
 .ac-item {
-  padding: 7px 12px;
+  padding: 8px 14px;
   font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   color: #1f2937;
+  transition: background .12s, color .12s;
 }
 .ac-item:hover,
 .ac-item--active {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: var(--d-accent-soft);
+  color: var(--d-accent);
 }
 
-/* ── Digitizare — toggle entitate Parcelă / Clădire ─────────────── */
+/* ── Toggle Parcelă / Clădire — segmented control ─────────────── */
 .digi-entity-toggle {
   display: flex;
-  gap: 4px;
-  margin-bottom: 10px;
+  gap: 0;
+  margin-bottom: 12px;
+  padding: 3px;
+  background: var(--d-bg-soft);
+  border-radius: 999px;
+  border: 1px solid var(--d-border-soft);
 }
 .digi-entity-btn {
   flex: 1;
-  padding: 5px 8px;
+  padding: 7px 12px;
   font-size: 12px;
   font-weight: 500;
-  border: 1px solid #d1d5db;
-  border-radius: 5px;
-  background: #f9fafb;
-  color: #374151;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--d-muted);
   cursor: pointer;
   text-align: center;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background .18s, color .18s, box-shadow .18s;
 }
-.digi-entity-btn:hover { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
-.digi-entity-btn--active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
-.digi-entity-btn--active:hover { background: #1e40af; }
+.digi-entity-btn:hover { color: var(--d-text); }
+.digi-entity-btn--active {
+  background: #fff;
+  color: var(--d-accent);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 0 0 1px var(--d-border);
+}
+.digi-entity-btn--active:hover { color: var(--d-accent); }
 
-/* ── Digitizare — panou edit mode ───────────────────────────────── */
+/* ── Panou edit mode — card de avertizare moale ─────────────── */
 .digi-edit-panel {
-  background: #fef3c7;
-  border: 2px solid #f59e0b;
-  border-radius: 6px;
-  padding: 10px;
-  margin-top: 6px;
+  background: var(--d-warn-bg);
+  border: 1px solid #fcd34d;
+  border-left: 3px solid #f59e0b;
+  border-radius: var(--d-radius-sm);
+  padding: 12px;
+  margin-top: 8px;
 }
 .digi-edit-header {
-  font-size: 12px;
-  font-weight: 700;
-  color: #92400e;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--d-warn);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 6px;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
 }
 
-/* ── Digitizare — referință parcelă ─────────────────────────────── */
-.digi-parcela-ref { margin-bottom: 6px; }
+/* ── Referință parcelă — info card ─────────────────────────────── */
+.digi-parcela-ref  { margin-bottom: 8px; }
 .digi-parcela-hint {
-  font-size: 11px;
-  color: #6b7280;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-  border-radius: 5px;
-  padding: 5px 8px;
+  font-size: 11.5px;
+  color: var(--d-muted);
+  background: var(--d-bg-soft);
+  border: 1px solid var(--d-border-soft);
+  border-radius: var(--d-radius-sm);
+  padding: 8px 10px;
   margin: 0;
+  line-height: 1.4;
 }
 
 /* ── Detalii clădire — hartă ─────────────────────────────────────── */
 .detail-map-wrap { flex: 1 1 400px; min-width: 300px; }
 
-/* ── Digitizare — autofill flash ─────────────────────────────────── */
+/* ── Autofill flash (verde subtil pe input completat) ──────────── */
 @keyframes digi-autofill-flash {
   0%   { background: #d1fae5; border-color: #10b981; }
   70%  { background: #d1fae5; border-color: #10b981; }
   100% { background: transparent; border-color: inherit; }
 }
-.digi-autofill {
-  animation: digi-autofill-flash 1.8s ease forwards;
-}
+.digi-autofill { animation: digi-autofill-flash 1.8s ease forwards; }
 
 /* ── Floating toolbar pentru divizare proiect ───────────────────────────── */
 .divizare-toolbar {

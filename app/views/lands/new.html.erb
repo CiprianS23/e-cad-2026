@@ -1,0 +1,10 @@
+<% content_for :title, "Parcelă nouă" %>
+
+<div class="page-header">
+  <h1>Parcelă nouă (draft)</h1>
+  <div class="header-actions">
+    <%= link_to "Înapoi", lands_path, class: "btn btn-secondary" %>
+  </div>
+</div>
+
+<%= render "form", land: @land %>

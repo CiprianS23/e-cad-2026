@@ -38,13 +38,23 @@ export default class extends Controller {
   _onMapReady() {
     this._mapReady = true
     if (this._loaded) this._applyAllToMap()
-    // Aplicăm starea de bază (radio "Hartă de bază") imediat la conectare
+    // Restaurăm ultima hartă de bază aleasă (localStorage), altfel folosim
+    // radio-ul `checked` din HTML (default OSM).
+    const saved = (() => { try { return localStorage.getItem("harta:baseLayer") } catch (_) { return null } })()
+    if (saved) {
+      const target = this.element.querySelector(`input[name="base-layer"][value="${saved}"]`)
+      if (target) {
+        target.checked = true
+      }
+    }
     const baseChecked = this.element.querySelector('input[name="base-layer"]:checked')
     if (baseChecked && this.hasHartaMapOutlet) this.hartaMapOutlet.setBaseLayer(baseChecked.value)
   }
 
   selectBase(event) {
-    this.hartaMapOutlet?.setBaseLayer(event.target.value)
+    const name = event.target.value
+    this.hartaMapOutlet?.setBaseLayer(name)
+    try { localStorage.setItem("harta:baseLayer", name) } catch (_) { /* no-op */ }
   }
 
   async _fetchPrefs() {

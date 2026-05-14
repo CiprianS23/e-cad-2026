@@ -48,7 +48,17 @@ export default class extends Controller {
     this._entityType        = "parcela"
     this._snapEnabled       = true
     this._orthoEnabled      = false
-    this._snapModes         = new Set(["endpoint", "midpoint"])
+    // Persistă moduri OSNAP via localStorage — la refresh utilizatorul găsește
+    // aceleași moduri active (default endpoint+midpoint dacă lipsesc).
+    const savedSnapModes = (() => {
+      try {
+        const raw = localStorage.getItem("harta:snapModes")
+        if (!raw) return null
+        const arr = JSON.parse(raw)
+        return Array.isArray(arr) ? arr : null
+      } catch (_) { return null }
+    })()
+    this._snapModes         = new Set(savedSnapModes || ["endpoint", "midpoint"])
     this._polygonValid      = false
     this._polygonSimple     = false
     this._topologyIssues    = []
@@ -92,26 +102,86 @@ export default class extends Controller {
       zIndex: 1050
     })
 
-    // Layer cu cerculețe la fiecare vertex (vizibile pentru a identifica
-    // vertecșii coliniari care altfel nu se văd).
-    // - Roșu (#dc2626): vertecși ai poligonului propriu (digitizare sau edit primar)
-    // - Portocaliu (#f59e0b): vertecși ai vecinilor editabili (în edit mode topology-aware)
+    // Vertexii poligonului editat: PĂTRAT roșu (#dc2626).
+    // Vertexii vecinilor (editabili sau doar vizualizare): CERC.
+    // - Portocaliu (#f59e0b): vecini editabili (topology-aware)
+    // - Gri-bleu (#64748b): vecini doar pentru vizualizare (CGXML)
     this._editVertexSource = new ol.source.Vector()
     this._editVertexLayer  = new ol.layer.Vector({
       source: this._editVertexSource,
-      style:  (feat) => new ol.style.Style({
-        image: new ol.style.Circle({
-          radius: feat.get("neighborVertex") ? 4 : 5,
-          fill:   new ol.style.Fill({ color: feat.get("neighborVertex") ? "#f59e0b" : "#dc2626" }),
-          stroke: new ol.style.Stroke({ color: "#fff", width: 2 })
+      style:  (feat) => {
+        const isVisual   = feat.get("visualNeighbor")
+        const isNeighbor = feat.get("neighborVertex")
+        if (isVisual || isNeighbor) {
+          const color  = isVisual ? "#64748b" : "#f59e0b"
+          const radius = isVisual ? 4 : 5
+          return new ol.style.Style({
+            image: new ol.style.Circle({
+              radius,
+              fill:   new ol.style.Fill({ color }),
+              stroke: new ol.style.Stroke({ color: "#fff", width: 1.5 })
+            })
+          })
+        }
+        // Primary — pătrat roșu, aliniat pe axe
+        return new ol.style.Style({
+          image: new ol.style.RegularShape({
+            points: 4,
+            radius: 6,
+            angle:  Math.PI / 4,
+            fill:   new ol.style.Fill({ color: "#dc2626" }),
+            stroke: new ol.style.Stroke({ color: "#fff", width: 1.5 })
+          })
         })
-      }),
+      },
       properties: { name: "edit-vertices" },
       zIndex: 1100
     })
 
+    // Etichete cu lungimea muchiilor (în metri Stereo70), plasate în interiorul
+    // poligonului — utile pentru verificarea distanțelor între vertecși la edit.
+    // Tot aici: o etichetă centrală cu suprafața totală (flag `areaLabel:true`).
+    this._editEdgeLabelsSource = new ol.source.Vector()
+    this._editEdgeLabelsLayer  = new ol.layer.Vector({
+      source: this._editEdgeLabelsSource,
+      style: (feat) => {
+        if (feat.get("areaLabel")) {
+          const a = feat.get("area") || 0
+          const text = a >= 1000 ? `${a.toFixed(0)} mp` : `${a.toFixed(2)} mp`
+          return new ol.style.Style({
+            text: new ol.style.Text({
+              text,
+              font:      "700 13px system-ui, sans-serif",
+              fill:      new ol.style.Fill({ color: "#0f172a" }),
+              stroke:    new ol.style.Stroke({ color: "#ffffff", width: 3 }),
+              textAlign: "center",
+              overflow:  true
+            })
+          })
+        }
+        const d = feat.get("distance") || 0
+        const text = d >= 100 ? `${d.toFixed(1)} m` : `${d.toFixed(2)} m`
+        return new ol.style.Style({
+          text: new ol.style.Text({
+            text,
+            font:      "600 11px system-ui, sans-serif",
+            fill:      new ol.style.Fill({ color: "#1f2937" }),
+            stroke:    new ol.style.Stroke({ color: "#ffffff", width: 3 }),
+            textAlign: "center",
+            overflow:  true,
+            rotation:  feat.get("rotation") || 0
+          })
+        })
+      },
+      properties: { name: "edit-edge-labels" },
+      zIndex: 1090
+    })
+
     this._onKeyDown = (evt) => this._handleGlobalKey(evt)
     document.addEventListener("keydown", this._onKeyDown)
+
+    // Reflectă în UI modurile OSNAP restaurate din localStorage.
+    this._syncSnapModeCheckboxes()
   }
 
   disconnect() {
@@ -142,6 +212,7 @@ export default class extends Controller {
     this.map.addLayer(this._drawLayer)
     this.map.addLayer(this._topoLayer)
     this.map.addLayer(this._editVertexLayer)  // cerculețele roșii la vertecși — pentru ambele moduri
+    this.map.addLayer(this._editEdgeLabelsLayer)  // distanțele între vertecși, în interiorul poligonului
     this.map.addLayer(this._auditLayer)       // layer audit topologic global
     this._mouseMoveKey = this.map.on("pointermove", (evt) => this._onPointerMove(evt))
     this._moveEndKey   = this.map.on("moveend",     ()    => this._updateScale())
@@ -158,10 +229,12 @@ export default class extends Controller {
     if (this._mouseMoveKey) ol.Observable.unByKey(this._mouseMoveKey)
     if (this._moveEndKey)   ol.Observable.unByKey(this._moveEndKey)
     if (this._draw && this.map) this.map.removeInteraction(this._draw)
+    if (this._postDrawModify && this.map) this.map.removeInteraction(this._postDrawModify)
     if (this._snap && this.map) this.map.removeInteraction(this._snap)
     if (this._drawLayer && this.map) this.map.removeLayer(this._drawLayer)
     if (this._topoLayer && this.map) this.map.removeLayer(this._topoLayer)
     if (this._editVertexLayer && this.map) this.map.removeLayer(this._editVertexLayer)
+    if (this._editEdgeLabelsLayer && this.map) this.map.removeLayer(this._editEdgeLabelsLayer)
     this._draw = this._snap = this.map = this._hartaMap = null
   }
 
@@ -188,7 +261,19 @@ export default class extends Controller {
     const mode = evt.target.dataset.snapMode
     if (evt.target.checked) this._snapModes.add(mode)
     else this._snapModes.delete(mode)
-    if (this._draw) this._refreshSnap()
+    try {
+      localStorage.setItem("harta:snapModes", JSON.stringify(Array.from(this._snapModes)))
+    } catch (_) { /* no-op */ }
+    if (this._draw || this._editing || this._postDrawModify) this._refreshSnap()
+  }
+
+  // Sincronizează `checked` pe toate checkbox-urile OSNAP cu starea curentă
+  // a `_snapModes` (apelat la connect ca să reflecte valorile din localStorage).
+  _syncSnapModeCheckboxes() {
+    if (!this.hasSnapModesTarget) return
+    this.snapModesTarget.querySelectorAll('[data-snap-mode]').forEach(box => {
+      box.checked = this._snapModes.has(box.dataset.snapMode)
+    })
   }
 
   onCmdKey(evt) {
@@ -311,11 +396,15 @@ export default class extends Controller {
     this._topologyIssues = []
     this._topologyHasErrors = false
     if (this._draw && this.map) { this.map.removeInteraction(this._draw); this._draw = null }
+    if (this._postDrawModify && this.map) { this.map.removeInteraction(this._postDrawModify); this._postDrawModify = null }
+    if (this._geomChangeKey) { ol.Observable.unByKey(this._geomChangeKey); this._geomChangeKey = null }
     if (this._snap && this.map) { this.map.removeInteraction(this._snap); this._snap = null }
+    this._currentFeature = null
     this._hartaMap?.setDigitizing(false)
     this._drawSource.clear()
     this._topoSource?.clear()
     this._editVertexSource?.clear()
+    this._editEdgeLabelsSource?.clear()
     this.btnStartTarget.classList.remove("btn-active")
     this.btnCloseTarget.disabled = true
     this.btnUndoTarget.disabled  = true
@@ -323,8 +412,17 @@ export default class extends Controller {
     this._updateVertexList()
     this.areaCalcTarget.textContent  = "—"
     this.areaDiffTarget.textContent  = "—"
+    if (this.hasAreaActTarget)        this.areaActTarget.value = ""
     this.topologyMsgTarget.textContent = ""
     if (this.hasStatusAreaTarget) this.statusAreaTarget.textContent = "—"
+    // Resetăm starea de selecție + formularul ca să nu rămână câmpurile
+    // populate cu date din parcela anterior selectată (proprietar, judet,
+    // localitate, suprafață etc.) — risc de save accidental cu valori vechi.
+    this._selected = null
+    this._hartaMap?.clearSelection?.()
+    this._hartaMap?._updateFocusUrlParams?.(null)
+    this._clearSelectionForm()
+    this._updateEditButton()
     this._setStatus("Toți vertecșii au fost șterși.")
   }
 
@@ -388,14 +486,42 @@ export default class extends Controller {
     if (!await this._validateBeforeSave()) return
     this.wktFieldTarget.value      = this._buildWkt("MULTIPOLYGON")
     this.saveAreaFieldTarget.value = this._areaCalc > 0 ? this._areaCalc.toFixed(4) : ""
-    this.saveFormTarget.submit()
+    await this._submitNewFeatureAjax(this.saveFormTarget, "parcela")
   }
 
   async saveBuilding() {
     if (!await this._validateBeforeSave()) return
     this.wktFieldCladireTarget.value      = this._buildWkt("MULTIPOLYGON")
     this.saveAreaFieldCladireTarget.value = this._areaCalc > 0 ? this._areaCalc.toFixed(4) : ""
-    this.saveFormCladireTarget.submit()
+    await this._submitNewFeatureAjax(this.saveFormCladireTarget, "cladire")
+  }
+
+  // Submit AJAX al formularului parcelă/clădire — rămâne pe /harta, reload
+  // layere și status în panou (fără navigare la /lands/:id sau /buildings/:id).
+  async _submitNewFeatureAjax(form, kind) {
+    try {
+      this._setStatus(`Salvare ${kind}…`)
+      const fd  = new FormData(form)
+      const res = await fetch(form.action, {
+        method:  form.method?.toUpperCase() || "POST",
+        body:    fd,
+        headers: { "X-CSRF-Token": this._csrf(), "Accept": "application/json" }
+      })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok && data.ok) {
+        this._setStatus(`✓ ${kind === "cladire" ? "Clădirea" : "Parcela"} a fost salvată.`, "ok")
+        this.clearAll()
+        // Reload layere ca să apară noul poligon
+        this._hartaMap?._loadParcele?.()
+        this._hartaMap?._loadCladiri?.()
+        this._hartaMap?._loadCgxml?.()
+      } else {
+        const errs = (data.errors || []).join(" | ") || `HTTP ${res.status}`
+        this._setStatus(`Eroare la salvare: ${errs}`, "warn")
+      }
+    } catch (e) {
+      this._setStatus(`Eroare rețea: ${e.message}`, "warn")
+    }
   }
 
   // Forțează o validare sincronă proaspătă înainte să accepte save (anti-race)
@@ -610,7 +736,26 @@ export default class extends Controller {
         clearTimeout(this._topoDebounce)
         this._topoDebounce = setTimeout(() => this._verifyTopology(), 700)
       }
+      // Update vecinii vizuali pe măsură ce poligonul crește (bbox-ul se extinde)
+      clearTimeout(this._neighborDebounce)
+      this._neighborDebounce = setTimeout(() => this._refreshDrawVisualNeighbors(), 250)
     })
+    // Inițial — fără vecini (bbox prea mic), dar pregătim source-ul.
+    this._refreshDrawVisualNeighbors()
+  }
+
+  // Re-randează vertecșii vecinilor (cerculețe gri-bleu) în jurul poligonului
+  // în curs de desenare/post-draw. Cheamă `_findVisualNeighbors` care folosește
+  // JSTS pentru detecție de tip „lipit" cu toleranță 5 cm. În mod draw poligonul
+  // crește treptat — refacem la fiecare schimbare de geometrie (debounced).
+  _refreshDrawVisualNeighbors() {
+    if (!this._currentFeature || !this._editVertexSource) return
+    // Curățăm doar entrările visualNeighbor (păstrăm vertecșii primarului)
+    const keep = this._editVertexSource.getFeatures().filter(f => !f.get("visualNeighbor"))
+    this._editVertexSource.clear()
+    keep.forEach(f => this._editVertexSource.addFeature(f))
+    const visual = this._findVisualNeighbors(this._currentFeature)
+    this._renderVisualNeighborVertices(visual)
   }
 
   _onDrawEnd(evt) {
@@ -620,7 +765,8 @@ export default class extends Controller {
     // OL.finishDrawing pop-uiește cursor-ul ÎNAINTE să închidă ring-ul, dar
     // ultima dată când change event a fost prins în handler-ul nostru, _draw
     // era încă activ → _extractVerts elimina și ultimul vertex real ca pe cursor.
-    const ring = evt.feature.getGeometry().getCoordinates()[0] || []
+    const feature = evt.feature
+    const ring = feature.getGeometry().getCoordinates()[0] || []
     this._verts = (ring.length > 1 ? ring.slice(0, -1) : ring).map(c => ({ x: c[0], y: c[1] }))
     this._polygonValid      = false
     this._polygonSimple     = false
@@ -631,11 +777,43 @@ export default class extends Controller {
     this._updateSaveAvailability()
 
     if (this._draw && this.map) { this.map.removeInteraction(this._draw); this._draw = null }
-    if (this._snap && this.map) { this.map.removeInteraction(this._snap); this._snap = null }
-    this._hartaMap?.setDigitizing(false)
     this.btnCloseTarget.disabled = true
     this.btnStartTarget.classList.remove("btn-active")
-    this._setStatus(`Poligon închis — ${this._verts.length} vertecși.`, "ok")
+
+    // Permite ajustarea poligonului proaspăt desenat — drag pe vertex,
+    // click pe muchie + drag pentru vertex nou, Shift/Alt+click pentru
+    // ștergere — TOATE până la save (forma se redesenează live, area și
+    // topology re-verificate la fiecare schimbare).
+    this._postDrawModify = new ol.interaction.Modify({
+      features:       new ol.Collection([feature]),
+      pixelTolerance: 12,
+      deleteCondition: (e) => {
+        const oe = e.originalEvent
+        return e.type === "singleclick" && (oe?.shiftKey || oe?.altKey)
+      }
+    })
+    this.map.addInteraction(this._postDrawModify)
+    this._refreshSnap()  // snap-ul rămâne activ pentru ajustări
+
+    // Re-atașăm geom-change listener → _verts + area + topology live, plus
+    // re-randare vecini vizuali (poligonul poate fi mutat/transformat în
+    // post-draw modify).
+    this._geomChangeKey = feature.getGeometry().on("change", (e) => {
+      this._extractVerts(e.target)
+      clearTimeout(this._areaDebounce); clearTimeout(this._topoDebounce)
+      this._areaDebounce = setTimeout(() => this._calcArea(), 400)
+      this._topoDebounce = setTimeout(() => this._verifyTopology(), 700)
+      clearTimeout(this._neighborDebounce)
+      this._neighborDebounce = setTimeout(() => this._refreshDrawVisualNeighbors(), 250)
+    })
+
+    // Vecini vizuali finali (după închidere)
+    this._refreshDrawVisualNeighbors()
+
+    // Setăm flag-ul digitizing OFF (popup-urile pot reapărea pe hover), dar
+    // păstrăm `_currentFeature` ca să-l identificăm la save.
+    this._hartaMap?.setDigitizing(false)
+    this._setStatus(`Poligon închis — ${this._verts.length} vertecși. Poți încă ajusta vertecșii înainte de save.`, "ok")
     this._calcArea()
     this._verifyTopology()
     this._locateUat()
@@ -1451,6 +1629,103 @@ export default class extends Controller {
     if (this._draw || this._editing) return
     this._selected = sel
     this._updateEditButton()
+    this._populateAreaFromSelection(sel)
+    this._populateFormFromSelection(sel)
+  }
+
+  // Populare câmpuri formular Parcelă/Clădire la selecția unui poligon —
+  // sincron din proprietățile GeoJSON (cadgenno, suprafață, categorie), apoi
+  // async via `/lands/:id/popup_info.json` pentru proprietari + adresă.
+  _populateFormFromSelection(sel) {
+    if (!sel) {
+      this._clearSelectionForm()
+      return
+    }
+    const f         = sel.feature
+    const isCladire = sel.kind === "cladire"
+
+    // Arătăm formularul potrivit (parcelă vs clădire)
+    if (this.hasFormParcelaTarget) this.formParcelaTarget.style.display = isCladire ? "none" : ""
+    if (this.hasFormCladireTarget) this.formCladireTarget.style.display = isCladire ? ""    : "none"
+    const formRoot = isCladire ? this.formCladireTarget : this.formParcelaTarget
+    if (!formRoot) return
+
+    const setVal = (suffix, value) => {
+      const input = formRoot.querySelector(`[name$="${suffix}]"]`)
+      if (input != null && value != null && value !== "") input.value = value
+    }
+
+    // Sync — din GeoJSON props (suport pentru cgxml + parcele/cladiri layer)
+    setVal("numar_cadastral", f.get("cadgenno") || f.get("numar_cadastral") || "")
+    const calcArea = f.get("measuredarea") || f.get("suprafata_mp")
+    if (!isCladire) {
+      setVal("categoria_folosinta", f.get("categoria_folosinta") || "")
+      setVal("suprafata_mp",        calcArea ? Number(calcArea).toFixed(2) : "")
+    } else {
+      setVal("destinatie",                f.get("buildingdestination") || "")
+      const lv = f.get("levelsno")
+      setVal("regim_inaltime",            lv ? `P+${Math.max(0, Number(lv) - 1)}` : "")
+      setVal("suprafata_construita_mp",   calcArea ? Number(calcArea).toFixed(2) : "")
+    }
+
+    // Async — owners + address din popup_info
+    const id  = f.get("id")
+    const url = isCladire ? `/buildings/${id}/popup_info.json` : `/lands/${id}/popup_info.json`
+    fetch(url, { headers: { Accept: "application/json" } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return
+        // Verifică că selecția curentă e încă același feature
+        if (this._selected?.feature !== f) return
+        if (!isCladire && data.categoria_folosinta) {
+          setVal("categoria_folosinta", data.categoria_folosinta)
+        }
+        if (isCladire && data.destinatie) setVal("destinatie", data.destinatie)
+        if (data.address) {
+          setVal("judet",      data.address.judet || "")
+          setVal("localitate", data.address.localitate || "")
+        }
+        const owners = (data.owners || [])
+          .filter(o => o && (o.lastname || o.firstname))
+          .map(o => [o.lastname, o.fatherinitial, o.firstname].filter(Boolean).join(" "))
+        if (owners.length) setVal("proprietar", owners.join("; "))
+      })
+      .catch(() => { /* no-op */ })
+  }
+
+  // Curăță inputurile din formularele Parcelă/Clădire la deselecție.
+  _clearSelectionForm() {
+    [this.hasFormParcelaTarget && this.formParcelaTarget,
+     this.hasFormCladireTarget && this.formCladireTarget].filter(Boolean).forEach(form => {
+      form.querySelectorAll("input[type=text], input[type=number]").forEach(i => i.value = "")
+      form.querySelectorAll("select").forEach(s => s.selectedIndex = 0)
+    })
+  }
+
+  // Populare câmpuri Suprafață (Calculată / Din act / Diferență) la simpla
+  // selecție a unui poligon. Calculată: `measuredarea` (CGXML) sau
+  // `suprafata_mp` (parcele/cladiri); Din act: `parcellegalarea` (CGXML).
+  _populateAreaFromSelection(sel) {
+    if (!sel) {
+      this._areaCalc = 0
+      if (this.hasAreaCalcTarget) this.areaCalcTarget.textContent = "—"
+      if (this.hasAreaActTarget)  this.areaActTarget.value = ""
+      if (this.hasAreaDiffTarget) { this.areaDiffTarget.textContent = "—"; this.areaDiffTarget.className = "digi-area-diff" }
+      return
+    }
+    const f = sel.feature
+    let calc = Number(f.get("measuredarea") ?? f.get("suprafata_mp"))
+    if (!Number.isFinite(calc) || calc <= 0) {
+      const g = f.getGeometry?.()
+      if (g?.getArea) calc = g.getArea()
+    }
+    this._areaCalc = Number.isFinite(calc) && calc > 0 ? calc : 0
+    if (this.hasAreaCalcTarget) {
+      this.areaCalcTarget.textContent = this._areaCalc > 0 ? `${FMT2(this._areaCalc)} mp` : "—"
+    }
+    const act = Number(f.get("parcellegalarea"))
+    if (this.hasAreaActTarget) this.areaActTarget.value = act > 0 ? act.toFixed(2) : ""
+    this._updateDiffDisplay()
   }
 
   _updateEditButton() {
@@ -1487,8 +1762,8 @@ export default class extends Controller {
     if (!confirm(`Ștergi ${sel.kind} ${label}?\n\nAceastă acțiune e ireversibilă.`)) return
 
     const url = sel.kind === "cladire"
-      ? `/cladiri_cadastrale/${sel.feature.get("id")}`
-      : `/parcele_cadastrale/${sel.feature.get("id")}`
+      ? `/buildings/${sel.feature.get("id")}`
+      : `/lands/${sel.feature.get("id")}`
 
     try {
       const res = await fetch(url, {
@@ -1500,13 +1775,20 @@ export default class extends Controller {
       })
       if (res.ok) {
         this._setStatus(`${sel.kind} ${label} ștearsă.`, "ok")
-        // Curăț selecția vizual + state
+        // Dacă suntem în edit mode pe feature-ul șters, ieșim curat (modify
+        // interaction, panou edit, layer vertecsi/edges) — fără reload aici,
+        // încărcăm layerele jos.
+        if (this._editing) this._resetEditUIState()
+        // Curăț selecția vizual + state + URL focus param (entitatea nu mai există)
         this._hartaMap?.clearSelection?.()
+        this._hartaMap?._updateFocusUrlParams?.(null)
         this._selected = null
         this._updateEditButton()
-        // Reload layer-ul potrivit
-        if (sel.kind === "cladire") this._hartaMap?._loadCladiri()
-        else                         this._hartaMap?._loadParcele()
+        // Reload toate layerele relevante (feature-ul poate fi în parcele
+        // sau în cgxml — sau în cladiri/cgxml pentru clădiri).
+        this._hartaMap?._loadParcele?.()
+        this._hartaMap?._loadCladiri?.()
+        this._hartaMap?._loadCgxml?.()
       } else {
         const data = await res.json().catch(() => ({}))
         this._setStatus(`Eroare la ștergere: ${data.error || res.status}`, "warn")
@@ -1607,8 +1889,8 @@ export default class extends Controller {
     const results = await Promise.all(items.map(async (it) => {
       const id  = it.feature.get("id")
       const url = it.kind === "cladire"
-        ? `/cladiri_cadastrale/${id}`
-        : `/parcele_cadastrale/${id}`
+        ? `/buildings/${id}`
+        : `/lands/${id}`
       try {
         const res = await fetch(url, {
           method:  "DELETE",
@@ -1653,7 +1935,11 @@ export default class extends Controller {
   // edit cât și la digitizare nouă.
   _renderEditVertices() {
     if (!this._editVertexSource) return
+    // Păstrăm vertecșii vecinilor doar-vizuali (statici pe durata edit-ului) —
+    // altfel ar dispărea la fiecare re-render declanșat de drag pe primar.
+    const keep = this._editVertexSource.getFeatures().filter(f => f.get("visualNeighbor"))
     this._editVertexSource.clear()
+    keep.forEach(f => this._editVertexSource.addFeature(f))
     this._verts.forEach(v => {
       this._editVertexSource.addFeature(new ol.Feature(new ol.geom.Point([v.x, v.y])))
     })
@@ -1663,6 +1949,74 @@ export default class extends Controller {
         if (feat === this._editFeature) return
         this._addAllVertexesAsPoints(feat, this._editVertexSource, true)
       })
+    }
+    this._renderEditEdgeLabels()
+  }
+
+  // Plasează o etichetă cu lungimea fiecărei muchii în interiorul poligonului.
+  // Poziția: midpoint-ul muchiei deplasat ușor spre centroid (1m sau 30% din
+  // distanța până la centroid), ca textul să fie clar în interior, nu pe linie.
+  // Distanța e calculată direct în Stereo70 (metri reali, fără reproiecție).
+  _renderEditEdgeLabels() {
+    if (!this._editEdgeLabelsSource) return
+    this._editEdgeLabelsSource.clear()
+    const verts = this._verts
+    if (!verts || verts.length < 2) return
+
+    const cx = verts.reduce((s, v) => s + v.x, 0) / verts.length
+    const cy = verts.reduce((s, v) => s + v.y, 0) / verts.length
+
+    // Dacă poligonul nu e încă închis (în mod draw), nu desenăm muchia
+    // dintre ultimul și primul vertex.
+    const closed = !this._draw
+    const n = verts.length
+    const edgeCount = closed ? n : n - 1
+    for (let i = 0; i < edgeCount; i++) {
+      const a = verts[i]
+      const b = verts[(i + 1) % n]
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const dist = Math.hypot(dx, dy)
+      if (dist < 0.01) continue
+      const mx = (a.x + b.x) / 2
+      const my = (a.y + b.y) / 2
+      let ox = cx - mx, oy = cy - my
+      const olen = Math.hypot(ox, oy)
+      if (olen > 0) {
+        const offset = Math.min(1.0, olen * 0.3)
+        ox = (ox / olen) * offset
+        oy = (oy / olen) * offset
+      }
+      // Rotație în convenția OL (pozitiv = clockwise pe ecran). View-ul e în
+      // Stereo70 cu Y nord (sus); pe ecran Y e jos → unghiul geometric e
+      // inversat. Normalizăm în [-π/2, π/2] ca textul să nu apară upside-down.
+      let rotation = -Math.atan2(dy, dx)
+      if (rotation > Math.PI / 2)  rotation -= Math.PI
+      if (rotation < -Math.PI / 2) rotation += Math.PI
+      const f = new ol.Feature(new ol.geom.Point([mx + ox, my + oy]))
+      f.set("distance", dist)
+      f.set("rotation", rotation)
+      this._editEdgeLabelsSource.addFeature(f)
+    }
+
+    // Eticheta centrală cu suprafața — afișată live de la al 3-lea vertex
+    // (în draw, post-draw modify, edit). Formula shoelace închide implicit
+    // poligonul (ultimul vertex → primul), deci funcționează și pe verts
+    // încă neînchiși vizual.
+    if (verts.length >= 3) {
+      let s = 0
+      for (let i = 0; i < n; i++) {
+        const a = verts[i]
+        const b = verts[(i + 1) % n]
+        s += (a.x * b.y) - (b.x * a.y)
+      }
+      const area = Math.abs(s) / 2
+      if (area > 0) {
+        const af = new ol.Feature(new ol.geom.Point([cx, cy]))
+        af.set("areaLabel", true)
+        af.set("area", area)
+        this._editEdgeLabelsSource.addFeature(af)
+      }
     }
   }
 
@@ -1723,6 +2077,61 @@ export default class extends Controller {
     return out
   }
 
+  // Vecini doar pentru vizualizare — features din layer-ul CGXML (imobile)
+  // care sunt LIPITE de poligonul curent (împart cel puțin un segment de
+  // boundary). Verificare geometrică reală cu JSTS — distanța minimă < 5 cm
+  // acoperă atât touch exact cât și mici toleranțe de floating-point.
+  // Nu intră în Modify interaction; vertecșii apar ca cerculețe gri-bleu.
+  _findVisualNeighbors(feature) {
+    if (!this._hartaMap?.cgxmlLayer) return []
+    const editGeom = feature.getGeometry()
+    const editExt  = editGeom.getExtent()
+    // Buffer mic pentru bbox-search (sub-metru e suficient pentru a prinde
+    // toate poligoanele candidate la touch).
+    const bbox     = ol.extent.buffer(editExt, 0.20)
+    const expectEt = this.editKindValue === "cladire" ? "building" : "land"
+    const parser   = this._hartaMap._getJstsParser?.()
+    const jstsEdit = parser ? parser.read(editGeom) : null
+    const touchTol = 0.05      // 5 cm — toleranță floating-point pentru „lipit"
+    const out      = []
+    this._hartaMap.cgxmlLayer.getSource().forEachFeatureInExtent(bbox, (f) => {
+      if (f === feature) return
+      if (f.get("entity_type") !== expectEt) return
+      if (jstsEdit) {
+        try {
+          const jstsCand = parser.read(f.getGeometry())
+          if (jstsEdit.distance(jstsCand) > touchTol) return
+        } catch (_) { return }   // skip features cu geometrii ne-parsabile
+      }
+      out.push(f)
+    })
+    return out
+  }
+
+  // Adaugă vertecșii feature-urilor vizuale (gri-bleu cerc) în
+  // `_editVertexSource`. Marcați cu `visualNeighbor: true` ca să fie:
+  //   (1) stilizați diferit
+  //   (2) păstrați prin re-randările din `_renderEditVertices`.
+  _renderVisualNeighborVertices(features) {
+    if (!this._editVertexSource) return
+    features.forEach(f => {
+      const geom = f.getGeometry()
+      if (!geom) return
+      const type = geom.getType()
+      const rings = type === "Polygon" ? geom.getCoordinates()
+                  : type === "MultiPolygon" ? geom.getCoordinates().flat()
+                  : []
+      rings.forEach(ring => {
+        const verts = ring.length > 1 ? ring.slice(0, -1) : ring
+        verts.forEach(coord => {
+          const pt = new ol.Feature(new ol.geom.Point(coord))
+          pt.set("visualNeighbor", true)
+          this._editVertexSource.addFeature(pt)
+        })
+      })
+    })
+  }
+
   // ── EDIT MODE: modify geometrie poligon existent ─────────────────────────
 
   _waitForFeatureAndEdit() {
@@ -1781,12 +2190,18 @@ export default class extends Controller {
       evt.features.forEach(f => this._modifiedFeatures.add(f))
     })
 
-    // Render cerculețe albastre la fiecare vertex al fiecărui vecin editabil
-    // (pe lângă cerculețele roșii ale poligonului primar din _renderEditVertices)
+    // Render cerculețe portocalii la vecinii editabili (topology-aware)
     this._renderNeighborVertices(neighbors.map(n => n.feature))
 
-    // Snap la celelalte features
-    this._snapModes = new Set(["endpoint"])
+    // Vecini doar-vizuali (CGXML imobile din apropiere) — vertecși gri-bleu
+    // cerculețe, NU sunt incluși în Modify (nu pot fi dragați).
+    const visualNeighbors = this._findVisualNeighbors(feature)
+      .filter(f => !this._editFeatureKindMap.has(f))  // evită dublarea pe cei deja editabili
+    this._renderVisualNeighborVertices(visualNeighbors)
+
+    // Snap la celelalte features — păstrăm preferințele user-ului (endpoint /
+    // midpoint / centroid / nearest), nu forțăm un default care suprascrie
+    // toggle-urile din toolbar.
     this._refreshSnap()
 
     // Extract verts inițial + on change (apelul _renderEditVertices e deja inclus în _extractVerts)
@@ -1801,6 +2216,13 @@ export default class extends Controller {
     // Preluăm zoom la feature ca să fie vizibil
     const ext = feature.getGeometry().getExtent()
     this.map.getView().fit(ext, { padding: [60, 60, 60, 60], maxZoom: 19, duration: 250 })
+
+    // Pre-completare „Din act" din `parcellegalarea` (CGXML). `_calcArea` apoi
+    // apelează `_updateDiffDisplay` care folosește această valoare.
+    if (this.hasAreaActTarget) {
+      const act = Number(feature.get("parcellegalarea"))
+      this.areaActTarget.value = act > 0 ? act.toFixed(2) : ""
+    }
 
     // Înlocuim butoanele Salvează cu un buton dedicat „Salvează modificări"
     this._injectEditUI()
@@ -1834,8 +2256,8 @@ export default class extends Controller {
               style="width:100%;margin-top:8px">💾 Salvează modificări</button>
       <button type="button" class="btn btn-secondary btn-sm"
               style="width:100%;margin-top:6px"
-              onclick="window.location.href='/${this.editKindValue === 'cladire' ? 'cladiri_cadastrale' : 'parcele_cadastrale'}/${this.editIdValue}'">
-        ✕ Anulează (înapoi la detalii)
+              data-action="click->digitizare#cancelEdit">
+        ✕ Anulează
       </button>
     `
     // Inserăm panoul la TOP-ul panel-body, ca să fie imediat vizibil sub header
@@ -1884,12 +2306,96 @@ export default class extends Controller {
       })
       const data = await res.json()
       if (data.ok) {
-        window.location.href = data.redirect
+        this._setStatus("Salvat ✓", "ok")
+        this._exitEditMode()
       } else {
         this._setStatus("Erori la save: " + (data.errors || []).join(" | "), "warn")
       }
     } catch (e) {
       this._setStatus(`Eroare rețea: ${e.message}`, "warn")
+    }
+  }
+
+  cancelEdit() { this._exitEditMode() }
+
+  // Cleanup sincron al state-ului de edit mode (fără reload de layere, fără
+  // reselect). Folosit din `_exitEditMode` și din `deleteSelected` (când
+  // ștergerea se face direct din edit mode).
+  _resetEditUIState() {
+    if (this._modify && this.map) this.map.removeInteraction(this._modify)
+    this._modify = null
+
+    if (this._geomChangeKey) { ol.Observable.unByKey(this._geomChangeKey); this._geomChangeKey = null }
+    if (this._neighborChangeKeys) {
+      this._neighborChangeKeys.forEach(k => ol.Observable.unByKey(k))
+      this._neighborChangeKeys = null
+    }
+
+    this._editing            = false
+    this._editFeature        = null
+    this._editSourceLayer    = null
+    this._editFeatureKindMap = null
+    this._modifiedFeatures   = null
+    this.editKindValue       = ""
+    this.editIdValue         = ""
+
+    this._editVertexSource?.clear()
+    this._editEdgeLabelsSource?.clear()
+    this._verts = []
+
+    if (this.hasFormParcelaTarget) this.formParcelaTarget.style.display = ""
+    if (this.hasFormCladireTarget) this.formCladireTarget.style.display = ""
+    const ent = this.element.querySelector(".digi-entity-toggle")
+    if (ent) ent.style.display = ""
+    this.element.querySelector(".digi-edit-panel")?.remove()
+
+    this._areaCalc = 0
+    if (this.hasAreaCalcTarget)   this.areaCalcTarget.textContent = "—"
+    if (this.hasAreaActTarget)    this.areaActTarget.value = ""
+    if (this.hasAreaDiffTarget)   { this.areaDiffTarget.textContent = "—"; this.areaDiffTarget.className = "digi-area-diff" }
+    if (this.hasStatusAreaTarget) this.statusAreaTarget.textContent = "—"
+
+    this._hartaMap?.setDigitizing(false)
+  }
+
+  // Curăță tot state-ul de edit mode și rămâne pe /harta (fără navigare la /lands/:id).
+  // Apelat din saveEdit (după success) și din butonul „Anulează".
+  // După reload, re-selectează silent feature-ul ca să rămână evidențiat.
+  async _exitEditMode() {
+    const editedKind = this.editKindValue       // capturăm înainte de cleanup
+    const editedId   = String(this.editIdValue || "")
+
+    this._resetEditUIState()
+
+    this._hartaMap?.clearSelection?.()
+    this._selected = null
+    this._updateEditButton()
+
+    // Reîncarcă layerele (await pentru ca re-highlight să găsească feature-ul nou)
+    await Promise.all([
+      this._hartaMap?._loadParcele?.(),
+      this._hartaMap?._loadCladiri?.(),
+      this._hartaMap?._loadCgxml?.()
+    ])
+
+    // Re-selectează silent feature-ul editat ca să rămână evidențiat pe hartă.
+    // Silent = fără event `feature-selected` (evităm re-intrarea în mod edit).
+    if (!editedKind || !editedId) return
+    const hm = this._hartaMap
+    if (!hm) return
+    const cgxmlEt = editedKind === "cladire" ? "building" : "land"
+    const layersToSearch = editedKind === "cladire"
+      ? [[hm.cladiriLayer, false], [hm.cgxmlLayer, true]]
+      : [[hm.parcelLayer,  false], [hm.cgxmlLayer, true]]
+    for (const [layer, isCgxml] of layersToSearch) {
+      const feat = layer?.getSource().getFeatures().find(f => {
+        if (isCgxml) return f.get("entity_type") === cgxmlEt && String(f.get("id")) === editedId
+        return String(f.get("id")) === editedId
+      })
+      if (feat) {
+        hm._setSelectedFeature?.({ kind: editedKind, feature: feat, layer }, { silent: true })
+        break
+      }
     }
   }
 

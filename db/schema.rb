@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_11_230002) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_12_110001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "postgis"
@@ -119,28 +119,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_230002) do
     t.index ["fixed_at"], name: "index_cgxml_validation_errors_on_fixed_at"
   end
 
-  create_table "cladiri_cadastrale", force: :cascade do |t|
-    t.geometry "centroid", limit: {:srid=>3844, :type=>"st_point"}
-    t.datetime "created_at", null: false
-    t.string "destinatie"
-    t.geometry "geom", limit: {:srid=>3844, :type=>"multi_polygon"}
-    t.string "judet", null: false
-    t.string "localitate", null: false
-    t.string "numar_cadastral", null: false
-    t.bigint "parcela_cadastrala_id", null: false
-    t.string "proprietar"
-    t.string "regim_inaltime"
-    t.string "status", default: "activ", null: false
-    t.decimal "suprafata_construita_mp", precision: 12, scale: 4
-    t.datetime "updated_at", null: false
-    t.index ["centroid"], name: "index_cladiri_cadastrale_on_centroid", using: :gist
-    t.index ["geom"], name: "index_cladiri_cadastrale_on_geom", using: :gist
-    t.index ["judet"], name: "index_cladiri_cadastrale_on_judet"
-    t.index ["numar_cadastral"], name: "index_cladiri_cadastrale_on_numar_cadastral", unique: true
-    t.index ["parcela_cadastrala_id"], name: "index_cladiri_cadastrale_on_parcela_cadastrala_id"
-    t.index ["status"], name: "index_cladiri_cadastrale_on_status"
-  end
-
   create_table "contested_x_entities", force: :cascade do |t|
     t.bigint "building_id"
     t.bigint "contested_id"
@@ -186,6 +164,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_230002) do
     t.integer "import_errors_count", default: 0, null: false
     t.string "import_status", default: "done", null: false
     t.datetime "imported_at"
+    t.boolean "is_systematic_corrected", default: false, null: false
     t.string "licensedname"
     t.string "licensenumber"
     t.string "operationtype"
@@ -195,7 +174,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_230002) do
     t.string "validation_status", default: "pending", null: false
     t.integer "validation_warnings_count", default: 0, null: false
     t.index ["content_hash"], name: "index_file_descriptions_on_content_hash", unique: true
+    t.index ["is_systematic_corrected"], name: "index_file_descriptions_on_is_systematic_corrected"
     t.index ["validation_status"], name: "index_file_descriptions_on_validation_status"
+  end
+
+  create_table "gis_building_geometries", force: :cascade do |t|
+    t.bigint "building_id", null: false
+    t.geometry "centroid", limit: {:srid=>3844, :type=>"st_point"}
+    t.datetime "created_at", null: false
+    t.geometry "geom", limit: {:srid=>3844, :type=>"multi_polygon"}, null: false
+    t.text "notes"
+    t.string "owner_token"
+    t.string "status", default: "draft", null: false
+    t.decimal "suprafata_mp", precision: 14, scale: 4
+    t.datetime "updated_at", null: false
+    t.index ["building_id"], name: "index_gis_building_geometries_on_building_id", unique: true
+    t.index ["centroid"], name: "index_gis_building_geometries_on_centroid", using: :gist
+    t.index ["geom"], name: "index_gis_building_geometries_on_geom", using: :gist
+    t.index ["status"], name: "index_gis_building_geometries_on_status"
   end
 
   create_table "gis_contours", force: :cascade do |t|
@@ -245,6 +241,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_230002) do
     t.index ["land_id"], name: "index_gis_imobile_on_land_id"
     t.index ["proiect_divizare_id"], name: "index_gis_imobile_on_proiect_divizare_id"
     t.index ["source"], name: "index_gis_imobile_on_source"
+  end
+
+  create_table "gis_land_geometries", force: :cascade do |t|
+    t.geometry "centroid", limit: {:srid=>3844, :type=>"st_point"}
+    t.datetime "created_at", null: false
+    t.geometry "geom", limit: {:srid=>3844, :type=>"multi_polygon"}, null: false
+    t.bigint "land_id", null: false
+    t.text "notes"
+    t.string "owner_token"
+    t.string "status", default: "draft", null: false
+    t.decimal "suprafata_mp", precision: 14, scale: 4
+    t.datetime "updated_at", null: false
+    t.index ["centroid"], name: "index_gis_land_geometries_on_centroid", using: :gist
+    t.index ["geom"], name: "index_gis_land_geometries_on_geom", using: :gist
+    t.index ["land_id"], name: "index_gis_land_geometries_on_land_id", unique: true
+    t.index ["status"], name: "index_gis_land_geometries_on_status"
   end
 
   create_table "gis_user_layer_groups", force: :cascade do |t|
@@ -326,28 +338,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_230002) do
     t.datetime "updated_at", null: false
     t.index ["address_id"], name: "index_lands_on_address_id"
     t.index ["file_description_id"], name: "index_lands_on_file_description_id"
-  end
-
-  create_table "parcele_cadastrale", force: :cascade do |t|
-    t.string "adresa"
-    t.string "categoria_folosinta", null: false
-    t.geometry "centroid", limit: {:srid=>3844, :type=>"st_point"}
-    t.string "cnp_cui_proprietar"
-    t.datetime "created_at", null: false
-    t.geometry "geom", limit: {:srid=>3844, :type=>"multi_polygon"}
-    t.string "judet", null: false
-    t.string "localitate", null: false
-    t.string "numar_cadastral", null: false
-    t.string "numar_topografic"
-    t.string "proprietar"
-    t.string "status", default: "activ", null: false
-    t.decimal "suprafata_mp", precision: 12, scale: 4
-    t.datetime "updated_at", null: false
-    t.index ["centroid"], name: "index_parcele_cadastrale_on_centroid", using: :gist
-    t.index ["geom"], name: "index_parcele_cadastrale_on_geom", using: :gist
-    t.index ["judet"], name: "index_parcele_cadastrale_on_judet"
-    t.index ["numar_cadastral"], name: "index_parcele_cadastrale_on_numar_cadastral", unique: true
-    t.index ["status"], name: "index_parcele_cadastrale_on_status"
   end
 
   create_table "parcels", force: :cascade do |t|
@@ -485,13 +475,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_11_230002) do
   add_foreign_key "buildings", "addresses"
   add_foreign_key "buildings", "lands"
   add_foreign_key "cgxml_validation_errors", "file_descriptions"
-  add_foreign_key "cladiri_cadastrale", "parcele_cadastrale"
   add_foreign_key "contested_x_entities", "buildings"
   add_foreign_key "contested_x_entities", "contesteds"
   add_foreign_key "contested_x_entities", "individual_units"
   add_foreign_key "contested_x_entities", "lands"
   add_foreign_key "deeds", "file_descriptions"
+  add_foreign_key "gis_building_geometries", "buildings", on_delete: :cascade
   add_foreign_key "gis_georef_control_points", "gis_georef_plans"
+  add_foreign_key "gis_land_geometries", "lands", on_delete: :cascade
   add_foreign_key "gis_user_layer_prefs", "gis_user_layer_groups", column: "group_id", on_delete: :nullify
   add_foreign_key "individual_units", "buildings"
   add_foreign_key "lands", "addresses"

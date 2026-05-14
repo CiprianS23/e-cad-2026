@@ -118,11 +118,8 @@ class CgxmlValidationErrorsController < ApplicationController
     { invalid: v.to_f < 0, message: "Valoarea nu poate fi negativă" }
   }
 
-  USE_CAT_RULE = ->(v) {
-    return { invalid: false } if v.blank?
-    allowed = CgxmlValidationService::USE_CATEGORIES
-    { invalid: !allowed.include?(v.upcase), message: "Categorie nerecunoscută. Valori: #{allowed.join(', ')}" }
-  }
+  # USECATEGORY (și celelalte câmpuri-dicționar din CGXML) sunt declarate
+  # `xs:string` în XSD — nu există enum oficial. Nu mai blocăm valori la edit.
 
   FIELD_RULES = {
     "Address#siruta"              => [ SIRUTA_RULE ],
@@ -133,7 +130,6 @@ class CgxmlValidationErrorsController < ApplicationController
     "Building#measuredarea"       => [ NON_NEGATIVE_RULE ],
     "Building#totalarea"          => [ NON_NEGATIVE_RULE ],
     "IndividualUnit#measuredarea" => [ NON_NEGATIVE_RULE ],
-    "Parcel#measuredarea"         => [ NON_NEGATIVE_RULE ],
-    "Parcel#usecategory"          => [ USE_CAT_RULE ]
+    "Parcel#measuredarea"         => [ NON_NEGATIVE_RULE ]
   }.freeze
 end

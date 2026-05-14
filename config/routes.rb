@@ -5,25 +5,35 @@ Rails.application.routes.draw do
 
   get "up" => "rails/health#show", as: :rails_health_check
 
-  resources :parcele_cadastrale do
+  resources :lands do
     collection do
       get :geojson
       get :lookup
     end
+    member do
+      get :popup_info
+    end
   end
 
-  resources :cladiri_cadastrale, only: [:show, :create, :update, :destroy] do
+  resources :buildings, only: [:show, :create, :update, :destroy] do
     collection do
       get :geojson
+    end
+    member do
+      get :popup_info
     end
   end
 
   resources :cgxml_imports, only: [ :new, :create ]
+  resources :cgxml_bulk_imports, only: [ :new, :create ]
 
   resources :cgxml_files, only: [ :index, :show ] do
     member do
       post :revalidate
       get  :report
+    end
+    collection do
+      get :comparison
     end
   end
 
@@ -87,6 +97,14 @@ Rails.application.routes.draw do
     post "/imobile/fit_apply",        to: "imobile#fit_apply",       as: :imobile_fit_apply
     post "/imobile/remaining_zones",  to: "imobile#remaining_zones", as: :imobile_remaining_zones
     post "/imobile/simulate_fit",     to: "imobile#simulate_fit",    as: :imobile_simulate_fit
+
+    # Proxy WMTS pentru ortofotoplan Sascut (geosys.ro, basic auth).
+    # Browser-ul cere tile-uri prin Rails ca să nu expunem credențialele.
+    get "/wmts/sascut/:matrix/:col/:row",
+        to: "wmts_proxy#sascut",
+        as: :gis_wmts_sascut,
+        constraints: { matrix: /\d+/, col: /\d+/, row: /\d+/ },
+        defaults: { format: :png }
   end
 
   root "harta#index"

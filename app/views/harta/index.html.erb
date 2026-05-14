@@ -19,7 +19,7 @@
     <div class="harta-sidebar-body">
       <div class="sidebar-header">
         <h2>Parcele Cadastrale</h2>
-        <%= link_to "Adaugă parcelă", new_parcela_cadastrala_path, class: "btn btn-primary btn-sm" %>
+        <%= link_to "Adaugă parcelă", new_land_path, class: "btn btn-primary btn-sm" %>
         <button type="button" class="btn-divizare-launch divizare-trigger"
                 title="Deschide workflow-ul de divizare proiect parcelar"
                 onclick="var t=document.querySelector('.divizare-toolbar'); if(t){t.hidden=false;} document.dispatchEvent(new CustomEvent('divizare-proiect:open'));">
@@ -82,11 +82,16 @@
                      data-action="change->layer-manager#selectBase">
               <span>Ortofotoplan (ANCPI)</span>
             </label>
+            <label class="layer-radio">
+              <input type="radio" name="base-layer" value="ortofotoplan_sascut"
+                     data-action="change->layer-manager#selectBase">
+              <span>Ortofotoplan Sascut 2022</span>
+            </label>
           </div>
         </details>
       </div>
 
-      <%= link_to "Listă parcele", parcele_cadastrale_path, class: "btn btn-secondary btn-sm sidebar-link" %>
+      <%= link_to "Listă parcele", lands_path, class: "btn btn-secondary btn-sm sidebar-link" %>
     </div>
 
     <!-- Toggle bar — colapsare/expansiune sidebar -->
@@ -282,11 +287,12 @@
 
     <div id="harta-map"
          data-controller="harta-map"
-         data-harta-map-geojson-url-value="<%= geojson_parcele_cadastrale_path(params.permit(:q, :status, :judet, :categoria_folosinta)) %>"
+         data-harta-map-geojson-url-value="<%= geojson_lands_path(params.permit(:q, :status, :categoria_folosinta)) %>"
          data-harta-map-cgxml-geojson-url-value="<%= cgxml_geojson_harta_path %>"
-         data-harta-map-cladiri-url-value="<%= geojson_cladiri_cadastrale_index_path %>"
+         data-harta-map-cladiri-url-value="<%= geojson_buildings_path %>"
          data-harta-map-uat-url-value="<%= uat_boundaries_geojson_path %>"
-         data-harta-map-mapproxy-url-value="http://localhost:8080">
+         data-harta-map-mapproxy-url-value="http://localhost:8080"
+         <% if @base_extent %>data-harta-map-base-extent-value="<%= @base_extent.to_json %>"<% end %>>
     </div>
 
     <!-- Linia de comandă (stil AutoCAD) — input absolut / relativ / polar -->
@@ -485,7 +491,7 @@
 
         <!-- Formular parcelă -->
         <div data-digitizare-target="formParcela">
-          <%= form_with url: parcele_cadastrale_path, method: :post, data: { digitizare_target: "saveForm" } do |f| %>
+          <%= form_with url: lands_path, method: :post, data: { digitizare_target: "saveForm" } do |f| %>
             <%= hidden_field_tag "parcela_cadastrala[geom_wkt]", "", data: { digitizare_target: "wktField" } %>
             <div class="digi-save-grid">
               <%= f.text_field  "parcela_cadastrala[numar_cadastral]", placeholder: "Nr. cadastral *", class: "input input-sm" %>
@@ -518,10 +524,11 @@
             </div>
             <div class="digi-save-grid">
               <%= f.text_field   "parcela_cadastrala[proprietar]",  placeholder: "Proprietar",   class: "input input-sm" %>
-              <%= f.number_field "parcela_cadastrala[suprafata_mp]", placeholder: "Suprafață mp",
-                                  step: 0.01, class: "input input-sm",
-                                  data: { digitizare_target: "saveAreaField" } %>
             </div>
+            <%# Suprafața apare în secțiunea „Suprafață" de mai jos. Păstrăm un
+                hidden ca să nu spargem target-ul `saveAreaField` din JS. %>
+            <%= f.hidden_field "parcela_cadastrala[suprafata_mp]",
+                               data: { digitizare_target: "saveAreaField" } %>
             <button type="button" class="btn btn-primary btn-sm"
                     style="width:100%;margin-top:8px"
                     data-action="click->digitizare#saveParcel">
@@ -532,7 +539,7 @@
 
         <!-- Formular clădire -->
         <div data-digitizare-target="formCladire" style="display:none">
-          <%= form_with url: cladiri_cadastrale_index_path, method: :post, data: { digitizare_target: "saveFormCladire" } do |f| %>
+          <%= form_with url: buildings_path, method: :post, data: { digitizare_target: "saveFormCladire" } do |f| %>
             <%= hidden_field_tag "cladire_cadastrala[geom_wkt]", "", data: { digitizare_target: "wktFieldCladire" } %>
             <div class="digi-save-grid">
               <%= f.text_field "cladire_cadastrala[numar_cadastral]", placeholder: "Nr. cadastral *", class: "input input-sm" %>

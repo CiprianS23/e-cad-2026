@@ -1,0 +1,92 @@
+<% content_for :title, "Import lot CGXML" %>
+
+<div class="page-header">
+  <h1>Import lot CGXML</h1>
+  <div class="header-actions">
+    <%= link_to "Import single", new_cgxml_import_path, class: "btn btn-secondary" %>
+    <%= link_to "Vezi fișierele", cgxml_files_path, class: "btn btn-secondary" %>
+  </div>
+</div>
+
+<div class="import-card">
+  <p class="hint">
+    Importă <strong>mai multe fișiere CGXML v3</strong> deodată. Sunt acceptate:
+    <code>.cgxml</code>, <code>.xml</code> și <code>.zip</code> (cu cgxml-uri înăuntru).<br>
+    Fiecare fișier este pus în coadă și procesat în fundal (import + validare).
+    Fișierele deja importate (același conținut) sunt ignorate silent.
+  </p>
+
+  <%= form_with url: cgxml_bulk_imports_path, multipart: true, local: true do |f| %>
+    <div class="drop-zone" id="drop-zone">
+      <div class="drop-zone-inner">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="1.5">
+          <path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1M8 12l4-4 4 4M12 8v8"/>
+        </svg>
+        <p class="drop-label">Trageți fișierele aici sau</p>
+        <label for="bulk_files" class="btn btn-secondary btn-sm drop-btn">Alegeți fișiere</label>
+        <%= file_field_tag "files[]", multiple: true, accept: ".cgxml,.xml,.zip",
+            class: "drop-input", id: "bulk_files" %>
+        <p class="drop-hint" id="file-count">Niciun fișier selectat</p>
+      </div>
+    </div>
+
+    <ul class="file-preview" id="file-preview" style="margin-top:14px;padding-left:18px;font-size:13px;color:#374151"></ul>
+
+    <label style="display:flex;gap:8px;align-items:center;margin-top:14px;padding:10px;background:#fef3c7;border-radius:6px;font-size:14px">
+      <%= check_box_tag :corrected, "1", false, id: "corrected-flag" %>
+      <span>
+        <strong>Fișiere corectate (cadastrul sistematic)</strong> —
+        bifează când urci livrabile finale ale unui UAT (ex. Sascut). Acestea sunt
+        considerate „gold standard" pentru analiza comparativă a regulilor.
+      </span>
+    </label>
+
+    <div class="form-actions" style="margin-top:20px">
+      <%= submit_tag "Pornește importul", class: "btn btn-primary", id: "submit-btn", disabled: true %>
+      <%= link_to "Anulare", cgxml_files_path, class: "btn btn-secondary" %>
+    </div>
+  <% end %>
+</div>
+
+<script>
+  (function() {
+    const input   = document.getElementById('bulk_files');
+    const count   = document.getElementById('file-count');
+    const preview = document.getElementById('file-preview');
+    const btn     = document.getElementById('submit-btn');
+    const zone    = document.getElementById('drop-zone');
+
+    function render(files) {
+      preview.innerHTML = '';
+      if (!files || !files.length) {
+        count.textContent = 'Niciun fișier selectat';
+        count.style.color = '';
+        btn.disabled = true;
+        return;
+      }
+      let total = 0;
+      for (const f of files) {
+        total += f.size;
+        const li = document.createElement('li');
+        li.textContent = `${f.name} (${(f.size / 1024).toFixed(1)} KB)`;
+        preview.appendChild(li);
+      }
+      count.textContent = `${files.length} fișier(e), ${(total / 1024 / 1024).toFixed(2)} MB total`;
+      count.style.color = '#1d4ed8';
+      btn.disabled = false;
+    }
+
+    input.addEventListener('change', () => render(input.files));
+
+    zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', e => {
+      e.preventDefault();
+      zone.classList.remove('drag-over');
+      const dt = new DataTransfer();
+      for (const f of e.dataTransfer.files) dt.items.add(f);
+      input.files = dt.files;
+      render(input.files);
+    });
+  })();
+</script>

@@ -4,31 +4,17 @@ class CgxmlValidationService
   XSD_URL        = "https://www.ancpi.ro/pnccf/documente/CGXMLSchema_new_v3.xsd".freeze
   XSD_CACHE_PATH = Rails.root.join("tmp", "ancpi_cgxml_v3.xsd").freeze
 
-  # ── Enumeration constants from CGXML v3 XSD ────────────────────────────────
-  USE_CATEGORIES = %w[
-    AR CC L LI PA PA1 PA2 VI VD BI DR CF
-    NE A PD PS AL NV FN
-  ].freeze
+  # Dicționarele oficiale ANCPI extrase din kit-ul Generare CG (vezi
+  # Cgxml::AncpiDictionaries). Aceste constants validează semantic câmpurile
+  # tip „Dictionar" din XSD — XSD-ul însuși le declară `xs:string` fără
+  # enumeration, dar aplicația oficială ANCPI verifică membership-ul.
+  DICT = Cgxml::AncpiDictionaries
 
-  OPERATION_TYPES = %w[1 2 3].freeze
-
-  BUILDING_DESTINATIONS = %w[
-    L C1 C2 I A S CA CU E T O SP DP
-  ].freeze
-
-  DISTRICT_TYPES = %w[
-    CARTIER ZONA TRUP INSULA INCINTA SECTOR FERMA PARCELA
-  ].freeze
-
-  RIGHT_TYPES = %w[
-    PROPRIETATE ADMINISTRARE CONCESIUNE FOLOSINTA SUPERFICIE
-    UZUFRUCT ABITATIE SERVITUTE IPOTECA PRIVILEGIU LOCATIUNE
-  ].freeze
-
-  REGISTRATION_TYPES = %w[
-    B C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 C11 C12 C13 C14 C15
-    D1 D2 E1 E2 E3 F1 F2 G1 G2 G3
-  ].freeze
+  # Placeholder universal în CGXML pentru valori lipsă/necunoscute. La import
+  # `"_empty"` se transformă în NULL; `"-"` și `"_"` rămân ca string-uri și
+  # marchează absența semantică a valorii. Nu le considerăm „prezente" pentru
+  # check_present.
+  MISSING_PLACEHOLDERS = %w[- _].freeze
 
   Result = Struct.new(:errors_count, :warnings_count, :xsd_valid, :errors, keyword_init: true)
 
@@ -53,6 +39,9 @@ class CgxmlValidationService
     validate_registrations
     validate_persons
     validate_points
+
+    # Cele 62 reguli oficiale ANCPI (sub-set aplicabil fluxului) — ErrXX.
+    @errors.concat(Cgxml::AncpiRules.new(@fd).call)
 
     save_errors
     update_status
@@ -123,18 +112,20 @@ class CgxmlValidationService
   def validate_file_description
     fd = @fd
 
-    check_present(fd, :filename,      "Numele fișierului este obligatoriu")
-    check_present(fd, :fileversion,   "Versiunea fișierului lipsește", severity: "warning")
-    check_present(fd, :operationtype, "Tipul operațiunii lipsește")
-    check_enum(fd, :operationtype, OPERATION_TYPES,
-      "Tipul operațiunii trebuie să fie 1 (nou), 2 (actualizare) sau 3 (ștergere)")
-    check_present(fd, :licensedname,   "Numele titular licență lipsește", severity: "warning")
-    check_present(fd, :licensenumber,  "Numărul licenței lipsește",       severity: "warning")
-
-    if fd.exportdate.nil?
-      add_field_error(fd, :exportdate, "MISSING_REQUIRED", "error",
-        "Data exportului este obligatorie", nil, "DateTime ISO8601")
+    check_present(fd, :filename, "Numele fișierului este obligatoriu")
+    # fileversion / operationtype — opționale în practica reală (verificat pe Sascut
+    # corectate: 189 fișiere nu au fileversion). Skip.
+    check_present(fd, :operationtype, "Tipul operațiunii lipsește", severity: "warning")
+    if fd.operationtype.present? && !DICT.in?(fd.operationtype, DICT::OPERATION_TYPES)
+      add_field_error(fd, :operationtype, "INVALID_ENUM", "error",
+        "Tipul operațiunii nu e recunoscut în dicționarul ANCPI OT_CAD",
+        fd.operationtype, DICT::OPERATION_TYPES.join(" | "))
     end
+    # licensedname / licensenumber se completează de prestator la EXPORT,
+    # nu la import (fluxul nostru consumă fișiere intermediare). Nu raportăm.
+
+    # EXPORTDATE e `minOccurs="0"` în XSD — opțional, nu obligatoriu.
+    # (În practică ANCPI nu îl include în export — verificat pe 7900 fișiere.)
   end
 
   def validate_addresses
@@ -147,10 +138,8 @@ class CgxmlValidationService
   end
 
   def validate_address(addr)
-    check_present(addr, :siruta,
-      "Codul SIRUTA al localității lipsește — necesar pentru identificarea UAT",
-      severity: "warning")
-
+    # SIRUTA — opțional în practica reală (Sascut corectate: 60% nu îl au).
+    # Verificare doar de format când e prezent.
     if addr.siruta.present? && !addr.siruta.match?(/\A\d{1,6}\z/)
       add_field_error(addr, :siruta, "INVALID_FORMAT", "error",
         "SIRUTA trebuie să fie numeric, max 6 cifre", addr.siruta, "1-6 cifre numerice")
@@ -161,9 +150,10 @@ class CgxmlValidationService
         "SIRSUP trebuie să fie numeric, max 6 cifre", addr.sirsup, "1-6 cifre numerice")
     end
 
-    if addr.districttype.present?
-      check_enum(addr, :districttype, DISTRICT_TYPES,
-        "Tipul tarlalei/districtului are valoare nerecunoscută")
+    if addr.districttype.present? && !DICT.in?(addr.districttype, DICT::DISTRICT_TYPES)
+      add_field_error(addr, :districttype, "INVALID_ENUM", "warning",
+        "Tipul districtului nu e în dicționarul ANCPI DISTRICT",
+        addr.districttype, DICT::DISTRICT_TYPES.join(" | "))
     end
   end
 
@@ -181,14 +171,8 @@ class CgxmlValidationService
           "0", "Valoare pozitivă recomandată")
       end
 
-      if land.parcellegalarea.present? && land.measuredarea.present? &&
-         land.measuredarea > 0 &&
-         (land.parcellegalarea - land.measuredarea).abs / land.measuredarea > 0.05
-        add_field_error(land, :parcellegalarea, "BUSINESS_RULE", "warning",
-          "Diferența dintre suprafața măsurată și suprafața legală depășește 5%",
-          land.parcellegalarea.to_s,
-          "Apropiată de suprafața măsurată (#{land.measuredarea})")
-      end
+      # Diferența parcellegalarea vs measuredarea — acoperit de ERR26/35/36
+      # din Cgxml::AncpiRules (cod ANCPI proper, nu BUSINESS_RULE generic).
     end
   end
 
@@ -212,9 +196,10 @@ class CgxmlValidationService
             bld.totalarea.to_s, "Număr ≥ 0")
         end
 
-        if bld.buildingdestination.present?
-          check_enum(bld, :buildingdestination, BUILDING_DESTINATIONS,
-            "Destinația construcției are valoare nerecunoscută conform CGXML v3")
+        if bld.buildingdestination.present? && !DICT.in?(bld.buildingdestination, DICT::BUILDING_DESTINATIONS)
+          add_field_error(bld, :buildingdestination, "INVALID_ENUM", "error",
+            "Destinația construcției nu e în dicționarul ANCPI BUILDDEST",
+            bld.buildingdestination, DICT::BUILDING_DESTINATIONS.join(" | "))
         end
 
         if bld.levelsno.present? && bld.levelsno < 0
@@ -231,6 +216,11 @@ class CgxmlValidationService
         bld.building_common_parts.each do |bcp|
           check_present(bcp, :commonparttype,
             "Tipul părții comune lipsește — câmp obligatoriu conform XSD")
+          if bcp.commonparttype.present? && !DICT.in?(bcp.commonparttype, DICT::COMMON_PART_TYPES)
+            add_field_error(bcp, :commonparttype, "INVALID_ENUM", "warning",
+              "Tipul părții comune nu e în dicționarul ANCPI COMMONPARTS",
+              bcp.commonparttype, DICT::COMMON_PART_TYPES.first(8).join(" | ") + "…")
+          end
         end
       end
     end
@@ -255,14 +245,19 @@ class CgxmlValidationService
   def validate_parcels
     @fd.lands.includes(:parcels).each do |land|
       land.parcels.each do |parcel|
-        if parcel.usecategory.present?
-          check_enum(parcel, :usecategory, USE_CATEGORIES,
-            "Categoria de folosință are valoare nerecunoscută conform CGXML v3 — " \
-            "valori acceptate: #{USE_CATEGORIES.join(', ')}")
-        else
+        if parcel.usecategory.blank?
           add_field_error(parcel, :usecategory, "MISSING_REQUIRED", "warning",
             "Categoria de folosință lipsește — recomandată pentru cadastru",
-            nil, USE_CATEGORIES.join(" | "))
+            nil, DICT::USE_CATEGORIES.join(" | "))
+        elsif !DICT.valid_usecategory?(parcel.usecategory)
+          msg = if parcel.usecategory.include?("-")
+                  "Categoria de folosință compusă (#{parcel.usecategory}) NU e acceptată de ANCPI — " \
+                  "împărțiți parcela în două entități separate, fiecare cu propria categorie simplă"
+                else
+                  "Categoria de folosință nu e în dicționarul ANCPI USECAT"
+                end
+          add_field_error(parcel, :usecategory, "INVALID_ENUM", "error",
+            msg, parcel.usecategory, DICT::USE_CATEGORIES.join(" | "))
         end
 
         if parcel.measuredarea.present? && parcel.measuredarea < 0
@@ -276,12 +271,12 @@ class CgxmlValidationService
 
   def validate_deeds
     @fd.deeds.each do |deed|
-      check_present(deed, :deednumber,
-        "Numărul actului este obligatoriu conform XSD")
-      check_present(deed, :deedtype,
-        "Tipul actului este obligatoriu conform XSD")
-      check_present(deed, :authority,
-        "Emitentul actului este obligatoriu conform XSD")
+      # În practică deednumber/authority lipsesc pentru acte vechi (TP-uri din
+      # arhivă, certificate moștenitor fără număr scanat). Marcat ca warning,
+      # nu error — fișierul rămâne valid, dar utilizatorul vede absența.
+      check_present(deed, :deednumber, "Numărul actului lipsește", severity: "warning")
+      check_present(deed, :deedtype,   "Tipul actului lipsește",   severity: "warning")
+      check_present(deed, :authority,  "Emitentul actului lipsește", severity: "warning")
 
       if deed.deeddate.nil?
         add_field_error(deed, :deeddate, "MISSING_REQUIRED", "warning",
@@ -296,50 +291,49 @@ class CgxmlValidationService
       deed.registrations.each do |reg|
         check_present(reg, :registrationtype,
           "Tipul înscrierii este obligatoriu conform XSD")
-
-        if reg.registrationtype.present?
-          check_enum(reg, :registrationtype, REGISTRATION_TYPES,
-            "Tipul înscrierii are valoare nerecunoscută conform schema ANCPI")
+        if reg.registrationtype.present? && !DICT.in?(reg.registrationtype, DICT::REGISTRATION_TYPES)
+          add_field_error(reg, :registrationtype, "INVALID_ENUM", "error",
+            "Tipul înscrierii nu e în dicționarul ANCPI REGISTRATIONTYPE",
+            reg.registrationtype, DICT::REGISTRATION_TYPES.join(" | "))
         end
 
-        if reg.righttype.present?
-          check_enum(reg, :righttype, RIGHT_TYPES,
-            "Tipul dreptului are valoare nerecunoscută conform schema ANCPI")
+        if reg.righttype.present? && !DICT.in?(reg.righttype, DICT::RIGHT_TYPES)
+          add_field_error(reg, :righttype, "INVALID_ENUM", "warning",
+            "Tipul dreptului nu e în dicționarul ANCPI RIGHTTYPE",
+            reg.righttype, DICT::RIGHT_TYPES.first(8).join(" | ") + "…")
         end
 
-        if reg.appdate.nil?
-          add_field_error(reg, :appdate, "MISSING_REQUIRED", "warning",
-            "Data cererii lipsește", nil, "DateTime ISO8601")
-        end
+        # appdate (data cererii) — relevantă DOAR la depunerea oficială.
+        # Fișierele cadastru sistematic în lucru NU au appdate (verificat pe
+        # Sascut: 80% lipsă). Skip raportarea.
       end
     end
   end
 
   def validate_persons
     @fd.persons.each do |person|
-      check_present(person, :firstname, "Prenumele/denumirea persoanei este obligatorie")
+      # `firstname` poate lipsi pentru: persoane vechi din arhivă, decedați
+      # fără identificare completă, mandatari. Demoted la warning.
+      check_present(person, :firstname,
+        "Prenumele/denumirea persoanei lipsește", severity: "warning")
 
-      if person.isphysical
-        if person.idcode.present? && person.idcode.length != 13
-          add_field_error(person, :idcode, "INVALID_FORMAT", "error",
-            "CNP-ul trebuie să aibă exact 13 cifre",
-            person.idcode, "13 cifre numerice")
+      # Validare structurală CNP/CUI cu modulul dedicat — acceptă marker-urile
+      # oficiale ANCPI 0×13 (UNIDENTIFIED) și 9×13 (necunoscut).
+      if person.idcode.present?
+        cls = Cgxml::CnpValidator.classify(person.idcode, is_physical: person.isphysical)
+        sev = Cgxml::CnpValidator.severity_for(cls)
+        msg = Cgxml::CnpValidator.message_for(cls)
+        if sev && msg
+          add_field_error(person, :idcode,
+                          cls.to_s.upcase.start_with?("INVALID") ? "INVALID_FORMAT" : "BUSINESS_RULE",
+                          sev, msg, person.idcode,
+                          person.isphysical ? "CNP valid (13 cifre + checksum) sau 9999999999999" : "CUI valid (algoritm ANAF)")
         end
+      end
 
-        if person.idcode.present? && !person.idcode.match?(/\A\d{13}\z/)
-          add_field_error(person, :idcode, "INVALID_FORMAT", "error",
-            "CNP-ul poate conține doar cifre",
-            person.idcode, "13 cifre numerice")
-        end
-
-        if person.idcode.present? && !valid_cnp_checksum?(person.idcode)
-          add_field_error(person, :idcode, "BUSINESS_RULE", "warning",
-            "Cifra de control a CNP-ului nu este validă — posibil CNP eronat",
-            person.idcode, "CNP valid conform algoritmului ANAF")
-        end
-      else
+      unless person.isphysical
         check_present(person, :lastname,
-          "Denumirea persoanei juridice (câmpul LASTNAME) este obligatorie")
+          "Denumirea persoanei juridice (LASTNAME) lipsește", severity: "warning")
       end
 
       if person.email.present? && !person.email.match?(/\A[^@\s]+@[^@\s]+\.[^@\s]+\z/)
@@ -378,11 +372,13 @@ class CgxmlValidationService
 
   def check_present(record, field, message, severity: "error")
     val = record.public_send(field)
-    return if val.present? && val.to_s != "-"
+    return if val.present? && !MISSING_PLACEHOLDERS.include?(val.to_s)
 
     add_field_error(record, field, "MISSING_REQUIRED", severity, message, val&.to_s, "Câmp completat")
   end
 
+  # Helper rămas pentru viitor, dacă vrem dictionary lookups oficiale.
+  # Momentan câmpurile-dicționar nu sunt validate semantic (vezi CGXML_DICTIONARY_FIELDS).
   def check_enum(record, field, allowed, message, severity: "error")
     val = record.public_send(field)
     return if val.blank? || allowed.include?(val.to_s.upcase)
@@ -430,7 +426,9 @@ class CgxmlValidationService
   def update_status
     errs  = @errors.count { |e| e[:severity] == "error" }
     warns = @errors.count { |e| e[:severity] == "warning" }
-    status = (errs + warns).zero? ? "valid" : "errors"
+    # Doar erorile (severity='error') marchează fișierul ca invalid.
+    # Warnings sunt informative — nu blochează validitatea.
+    status = errs.zero? ? "valid" : "errors"
 
     @fd.update_columns(
       validation_status:         status,

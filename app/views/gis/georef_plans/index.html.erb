@@ -6,7 +6,7 @@
     <%= link_to "+ Adaugă plan nou", new_gis_georef_plan_path, class: "btn btn-primary" %>
   </div>
 
-  <% plans = GisGeorefPlan.for_owner(cookies.signed[:gis_owner_token]).order(updated_at: :desc) %>
+  <% plans = GisGeorefPlan.for_owner(@owner_token).order(updated_at: :desc) %>
 
   <% if plans.empty? %>
     <p class="subtle">Niciun plan încărcat încă. Apasă <strong>+ Adaugă plan nou</strong> pentru a începe.</p>

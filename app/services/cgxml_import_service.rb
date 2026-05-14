@@ -5,7 +5,7 @@ class CgxmlImportService
     def total_saved = counts.values.sum
   end
 
-  def initialize(xml_content, filename: "import.cgxml", content_hash: nil)
+  def initialize(xml_content, filename: "import.cgxml", content_hash: nil, file_description: nil)
     @xml_content  = xml_content
     @filename     = filename
     @content_hash = content_hash
@@ -13,7 +13,9 @@ class CgxmlImportService
     @id_map      = {}
     @counts      = Hash.new(0)
     @import_errors = []
-    @file_description = nil
+    # Dacă primim un stub (flux bulk async), îl refolosim în loc să creem unul nou.
+    @file_description = file_description
+    @prepopulated_fd  = !file_description.nil?
   end
 
   def call
@@ -130,17 +132,26 @@ class CgxmlImportService
   def import_file_descriptions
     nodes("FileDescription").each do |n|
       cgxml_id = int_val(n, "FILEID")
-      rec = safe_save(:file_descriptions, { fileid: cgxml_id }) do
-        FileDescription.create!(
-          filename:      txt(n, "FILENAME") || @filename,
-          exportdate:    dt_val(n, "EXPORTDATE"),
-          fileversion:   txt(n, "FILEVERSION"),
-          operationtype: txt(n, "OPERATIONTYPE"),
-          licensedname:  txt(n, "LICENSEDNAME"),
-          licensenumber: txt(n, "LICENSENUMBER"),
-          import_status: "partial",
-          imported_at:   Time.current
-        )
+      attrs = {
+        filename:      (txt(n, "FILENAME") || @filename).to_s.first(50),
+        exportdate:    dt_val(n, "EXPORTDATE"),
+        fileversion:   txt(n, "FILEVERSION"),
+        operationtype: txt(n, "OPERATIONTYPE"),
+        licensedname:  txt(n, "LICENSEDNAME"),
+        licensenumber: txt(n, "LICENSENUMBER")
+      }
+
+      # Flux bulk async: refolosește stub-ul deja existent pentru primul FileDescription
+      # întâlnit; pentru orice FD suplimentar în același XML, cădem pe flux normal (create).
+      if @prepopulated_fd && @file_description && cgxml_id && !@id_map.key?("FileDescription:#{cgxml_id}")
+        @file_description.update!(attrs)
+        store_id("FileDescription", cgxml_id, @file_description.id)
+        @counts[:file_descriptions] += 1
+        next
+      end
+
+      rec = safe_save(:file_descriptions, attrs) do
+        FileDescription.create!(attrs.merge(import_status: "partial", imported_at: Time.current))
       end
       next unless rec
 
@@ -148,7 +159,7 @@ class CgxmlImportService
       @file_description ||= rec
     end
 
-    # If no FileDescription node, create a placeholder
+    # Fără FileDescription în XML: dacă avem stub, îl folosim; altfel creăm placeholder.
     if @file_description.nil?
       @file_description = FileDescription.create!(
         filename:      @filename,

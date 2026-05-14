@@ -1,0 +1,59 @@
+<% content_for :title, "Lands (parcele digitizate)" %>
+
+<div class="page-header">
+  <h1>Lands (parcele digitizate)</h1>
+  <div class="header-actions">
+    <%= link_to "+ Adaugă parcelă", new_land_path, class: "btn btn-primary" %>
+    <%= link_to "Harta", harta_path, class: "btn btn-secondary" %>
+  </div>
+</div>
+
+<form method="get" class="filter-row" style="display:flex;gap:8px;margin-bottom:14px">
+  <%= text_field_tag :q, params[:q], placeholder: "Caută după cadgenno…", class: "input" %>
+  <%= select_tag :status, options_for_select([["Toate", ""], ["Draft", "draft"], ["Imobile", "active"]], params[:status]), class: "input" %>
+  <%= submit_tag "Filtrează", class: "btn btn-secondary" %>
+</form>
+
+<% if @lands.empty? %>
+  <div class="empty-state">
+    <p>Nu există parcele cu geometrie digitizată.</p>
+    <%= link_to "Importă cgxml", new_cgxml_bulk_import_path, class: "btn btn-primary" %>
+    <%= link_to "Digitizează pe hartă", harta_path, class: "btn btn-secondary" %>
+  </div>
+<% else %>
+  <div class="table-card">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Identificator</th>
+          <th>Status</th>
+          <th>Suprafață (mp)</th>
+          <th>Sursă</th>
+          <th>Acțiuni</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @lands.each do |land| %>
+          <tr>
+            <td><%= link_to land.label, land_path(land), class: "link-primary" %></td>
+            <td>
+              <span class="badge badge-<%= land.gis_geometry&.status == 'draft' ? 'warning' : 'valid' %>">
+                <%= land.gis_geometry&.status || "—" %>
+              </span>
+            </td>
+            <td><%= land.gis_geometry&.suprafata_mp&.to_f&.round(2) || land.measuredarea %></td>
+            <td><%= land.file_description_id.present? ? "cgxml" : "digitizat" %></td>
+            <td class="actions-cell">
+              <%= link_to "Detalii", land_path(land), class: "btn btn-xs btn-secondary" %>
+              <%= link_to "Editează", edit_land_path(land), class: "btn btn-xs btn-secondary" %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination-row">
+    <%= paginate @lands %>
+  </div>
+<% end %>

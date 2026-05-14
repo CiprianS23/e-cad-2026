@@ -1,0 +1,39 @@
+<%= form_with model: land, local: true, url: land.new_record? ? lands_path : land_path(land) do |f| %>
+  <% if land.errors.any? %>
+    <div class="flash alert">
+      <strong><%= pluralize(land.errors.count, "eroare") %>:</strong>
+      <ul style="margin: 6px 0 0 18px">
+        <% land.errors.full_messages.each { |msg| %><li><%= msg %></li><% } %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="form-grid">
+    <div class="form-field">
+      <%= f.label "land[numar_cadastral]", "Cadgenno / Identificator" %>
+      <%= text_field_tag "land[numar_cadastral]", land.cadgenno, class: "input" %>
+    </div>
+    <div class="form-field">
+      <%= f.label "land[suprafata_mp]", "Suprafață (mp)" %>
+      <%= number_field_tag "land[suprafata_mp]", land.measuredarea, step: 0.01, class: "input" %>
+    </div>
+    <div class="form-field">
+      <%= f.label "land[categoria_folosinta]", "Categorie folosință" %>
+      <%= select_tag "land[categoria_folosinta]",
+            options_for_select([["—", ""], "arabil", "pasune", "faneata", "vie", "livada",
+                                "padure", "curti_constructii", "ape", "neproductiv"],
+                               land.parcels.first&.usecategory),
+            class: "input" %>
+    </div>
+    <div class="form-field" style="grid-column: span 2">
+      <%= f.label "land[geom_wkt]", "WKT (geometrie, opțional)" %>
+      <%= text_area_tag "land[geom_wkt]", land.gis_geometry&.geom&.as_text,
+            rows: 4, class: "input", placeholder: "MULTIPOLYGON(((x y, x y, ...)))" %>
+    </div>
+  </div>
+
+  <div class="form-actions" style="margin-top: 16px">
+    <%= f.submit (land.new_record? ? "Creează" : "Actualizează"), class: "btn btn-primary" %>
+    <%= link_to "Anulare", land.new_record? ? lands_path : land_path(land), class: "btn btn-secondary" %>
+  </div>
+<% end %>

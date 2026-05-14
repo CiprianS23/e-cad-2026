@@ -1,0 +1,139 @@
+<% content_for :title, "Comparativ Sporadic vs Corectat" %>
+
+<div class="page-header">
+  <div>
+    <div class="breadcrumb"><%= link_to "Fișiere CGXML", cgxml_files_path %> / Comparativ</div>
+    <h1>Analiză comparativă reguli de validare</h1>
+  </div>
+  <div class="header-actions">
+    <%= link_to "← Listă fișiere", cgxml_files_path, class: "btn btn-secondary" %>
+  </div>
+</div>
+
+<p class="hint" style="background:#eff6ff;padding:12px;border-radius:8px;margin-bottom:18px">
+  Pentru fiecare cod de eroare se afișează procentul de fișiere afectate în
+  populația <strong>Sporadic (OCPI)</strong> și <strong>Corectat (cadastru sistematic)</strong>.
+  Reguli cu rate mare pe corectat = candidate de relaxare (probabil false positive).
+  Reguli cu rate doar pe sporadic = confirmate că prind anomalii reale.
+</p>
+
+<div class="stats-row" style="margin-bottom:18px">
+  <div class="stat-card" style="background:#fef9c3">
+    <span class="stat-num"><%= @summary[:sporadic][:total] %></span>
+    <span class="stat-label">Sporadic (OCPI)</span>
+    <div style="font-size:11px;color:#6b7280;margin-top:4px">
+      <%= @summary[:sporadic][:valid] %> valid / <%= @summary[:sporadic][:errors] %> erori
+    </div>
+  </div>
+  <div class="stat-card" style="background:#dbeafe">
+    <span class="stat-num"><%= @summary[:corrected][:total] %></span>
+    <span class="stat-label">Corectat (Sascut)</span>
+    <div style="font-size:11px;color:#6b7280;margin-top:4px">
+      <%= @summary[:corrected][:valid] %> valid / <%= @summary[:corrected][:errors] %> erori
+    </div>
+  </div>
+  <div class="stat-card">
+    <span class="stat-num">
+      <%= @summary[:sporadic][:total] > 0 ?
+            "#{(100.0 * @summary[:sporadic][:valid] / @summary[:sporadic][:total]).round(1)}%" : "—" %>
+    </span>
+    <span class="stat-label">Rata valid sporadic</span>
+  </div>
+  <div class="stat-card">
+    <span class="stat-num">
+      <%= @summary[:corrected][:total] > 0 ?
+            "#{(100.0 * @summary[:corrected][:valid] / @summary[:corrected][:total]).round(1)}%" : "—" %>
+    </span>
+    <span class="stat-label">Rata valid corectat</span>
+  </div>
+</div>
+
+<%
+  verdict_for = ->(r) {
+    cp = r[:co_pct]
+    if @n_co.zero?
+      [:neutral, "fără date corectate"]
+    elsif cp >= 50
+      [:critical, "🛑 ELIMINĂ — apare pe majoritatea Sascut"]
+    elsif cp >= 20
+      [:warning,  "⚠ RELAXEAZĂ — apare prea des pe corectat"]
+    elsif cp >= 5
+      [:review,   "🔍 revizuiește — apare pe câteva corectate"]
+    elsif cp.zero? && r[:sp] > 100
+      [:strict,   "✓ STRICT — semnal real, doar sporadic"]
+    elsif r[:sp] + r[:co] == 0
+      [:silent,   "—"]
+    else
+      [:ok,       "OK"]
+    end
+  }
+
+  badge_class = ->(severity) {
+    case severity.to_s.split("/").first
+    when "error"   then "badge-error"
+    when "warning" then "badge-warning"
+    else "badge-valid"
+    end
+  }
+  bar_fill = ->(pct, color) {
+    %Q{<div style="height:8px;background:#e5e7eb;border-radius:3px;overflow:hidden;margin-top:2px">
+       <div style="width:#{[pct, 100].min}%;background:#{color};height:100%"></div>
+     </div>}.html_safe
+  }
+%>
+
+<style>
+  .comp-table { width:100%; border-collapse:collapse; font-size:13px }
+  .comp-table th, .comp-table td { padding:8px 10px; border-bottom:1px solid #e5e7eb; vertical-align:top }
+  .comp-table th { background:#f9fafb; text-align:left; font-weight:600 }
+  .comp-row-critical td { background:#fef2f2 }
+  .comp-row-warning  td { background:#fffbeb }
+  .comp-row-strict   td { background:#f0fdf4 }
+  .comp-row-silent   td { color:#9ca3af }
+  .pct-cell { font-weight:600; min-width:80px }
+  .msg-cell { color:#6b7280; font-size:12px; max-width:320px }
+</style>
+
+<div class="table-card">
+  <table class="comp-table">
+    <thead>
+      <tr>
+        <th>Cod</th>
+        <th>Severitate</th>
+        <th>Sporadic (OCPI)</th>
+        <th>Corectat (Sascut)</th>
+        <th>Verdict</th>
+        <th>Exemplu mesaj</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @rows.each do |r| %>
+        <% kind, verdict = verdict_for.call(r) %>
+        <tr class="comp-row-<%= kind %>">
+          <td><strong><%= r[:code] %></strong></td>
+          <td><span class="badge <%= badge_class.call(r[:severity]) %>"><%= r[:severity] %></span></td>
+          <td class="pct-cell">
+            <%= r[:sp] %> <span style="color:#6b7280">(<%= r[:sp_pct] %>%)</span>
+            <%= bar_fill.call(r[:sp_pct], "#eab308") %>
+          </td>
+          <td class="pct-cell">
+            <%= r[:co] %> <span style="color:#6b7280">(<%= r[:co_pct] %>%)</span>
+            <%= bar_fill.call(r[:co_pct], "#3b82f6") %>
+          </td>
+          <td><%= verdict %></td>
+          <td class="msg-cell"><%= r[:sample_msg] %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+</div>
+
+<div style="margin-top:24px;padding:14px;background:#f9fafb;border-radius:8px;font-size:13px">
+  <strong>Legendă verdict:</strong>
+  <ul style="margin:8px 0 0 18px;padding:0">
+    <li><span style="color:#dc2626">🛑 ELIMINĂ</span> — regula apare pe ≥50% din fișierele corectate (false positive sigur).</li>
+    <li><span style="color:#d97706">⚠ RELAXEAZĂ</span> — regula apare pe 20–50% din corectate (probabil prea strictă).</li>
+    <li><span style="color:#374151">🔍 revizuiește</span> — apare pe 5–20% (verifică context).</li>
+    <li><span style="color:#16a34a">✓ STRICT</span> — apare doar pe sporadic, NICIODATĂ pe corectate (semnal legitim).</li>
+  </ul>
+</div>

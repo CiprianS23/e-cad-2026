@@ -1,0 +1,35 @@
+<% content_for :title, "Clădire #{@building.label}" %>
+
+<div class="page-header">
+  <div>
+    <div class="breadcrumb">Clădire <%= @building.label %></div>
+    <h1>Clădire <%= @building.label %></h1>
+  </div>
+  <div class="header-actions">
+    <%= link_to "Vezi pe hartă", harta_path(zoom_building: @building.id), class: "btn btn-secondary" %>
+    <%= button_to "Șterge", @building, method: :delete,
+        class: "btn btn-danger", form: { data: { turbo_confirm: "Sigur ștergi clădirea #{@building.label}?" } } %>
+  </div>
+</div>
+
+<div class="info-grid">
+  <div class="info-block"><label>Identificator</label><span><%= @building.label %></span></div>
+  <div class="info-block"><label>Cadgenno</label><span><%= @building.cadgenno || "—" %></span></div>
+  <div class="info-block"><label>Build no</label><span><%= @building.buildno %></span></div>
+  <div class="info-block"><label>Destinație</label><span><%= @building.buildingdestination || "—" %></span></div>
+  <div class="info-block"><label>Suprafață măsurată</label><span><%= @building.measuredarea %> mp</span></div>
+  <div class="info-block"><label>Legal?</label><span><%= @building.islegal ? "DA" : "NU (draft)" %></span></div>
+  <% if @gis %>
+    <div class="info-block"><label>Status grafic</label>
+      <span class="badge badge-<%= @gis.status == 'draft' ? 'warning' : 'valid' %>"><%= @gis.status %></span>
+    </div>
+    <div class="info-block"><label>Suprafață (calc.)</label><span><%= @gis.suprafata_mp&.to_f&.round(2) %> mp</span></div>
+  <% end %>
+  <div class="info-block">
+    <label>Parcelă părinte</label>
+    <span><%= @building.land ? link_to(@building.land.label, land_path(@building.land)) : "—" %></span>
+  </div>
+  <% if @building.notes.present? %>
+    <div class="info-block" style="grid-column: span 2"><label>Note</label><span><%= @building.notes %></span></div>
+  <% end %>
+</div>

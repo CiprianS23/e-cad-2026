@@ -1,0 +1,10 @@
+<% content_for :title, "Editare parcelă #{@land.label}" %>
+
+<div class="page-header">
+  <h1>Editează parcela <%= @land.label %></h1>
+  <div class="header-actions">
+    <%= link_to "Înapoi", land_path(@land), class: "btn btn-secondary" %>
+  </div>
+</div>
+
+<%= render "form", land: @land %>

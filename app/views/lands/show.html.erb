@@ -1,0 +1,45 @@
+<% content_for :title, "Parcela #{@land.label}" %>
+
+<div class="page-header">
+  <div>
+    <div class="breadcrumb"><%= link_to "Lands", lands_path %> / <%= @land.label %></div>
+    <h1>Parcela <%= @land.label %></h1>
+  </div>
+  <div class="header-actions">
+    <%= link_to "Editează", edit_land_path(@land), class: "btn btn-secondary" %>
+    <%= link_to "Vezi pe hartă", harta_path(zoom_land: @land.id), class: "btn btn-secondary" %>
+    <%= button_to "Șterge", @land, method: :delete,
+        class: "btn btn-danger", form: { data: { turbo_confirm: "Sigur ștergi parcela #{@land.label}?" } } %>
+  </div>
+</div>
+
+<div class="info-grid">
+  <div class="info-block"><label>Identificator</label><span><%= @land.label %></span></div>
+  <div class="info-block"><label>Cadgenno</label><span><%= @land.cadgenno || "—" %></span></div>
+  <div class="info-block"><label>E2 identifier</label><span><%= @land.e2identifier || "—" %></span></div>
+  <div class="info-block"><label>Suprafață măsurată</label><span><%= @land.measuredarea %> mp</span></div>
+  <div class="info-block"><label>Sursă</label>
+    <span><%= @land.file_description_id.present? ? "cgxml (import)" : "digitizat local" %></span>
+  </div>
+  <% if @gis %>
+    <div class="info-block"><label>Status grafic</label>
+      <span class="badge badge-<%= @gis.status == 'draft' ? 'warning' : 'valid' %>"><%= @gis.status %></span>
+    </div>
+    <div class="info-block"><label>Suprafață (calc.)</label><span><%= @gis.suprafata_mp&.to_f&.round(2) %> mp</span></div>
+  <% end %>
+  <div class="info-block"><label>Imobil juridic?</label>
+    <span><%= @land.imobil? ? "DA — #{@land.registrations.count} intabulări" : "NU (doar grafic)" %></span>
+  </div>
+  <% if @land.notes.present? %>
+    <div class="info-block" style="grid-column: span 2"><label>Note</label><span><%= @land.notes %></span></div>
+  <% end %>
+</div>
+
+<% if @land.buildings.any? %>
+  <h2 style="margin-top: 24px">Clădiri pe această parcelă</h2>
+  <ul>
+    <% @land.buildings.includes(:gis_geometry).each do |b| %>
+      <li><%= link_to b.label, building_path(b) %> — buildno <%= b.buildno %>, <%= b.gis_geometry&.suprafata_mp&.to_f&.round(2) %> mp</li>
+    <% end %>
+  </ul>
+<% end %>

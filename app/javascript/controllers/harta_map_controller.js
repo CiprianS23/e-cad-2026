@@ -32,11 +32,12 @@ const hexToRgba = (hex, alpha) => {
 
 export default class extends Controller {
   static values = {
-    geojsonUrl:      String,
-    cgxmlGeojsonUrl: String,
-    cladiriUrl:      String,
-    uatUrl:          String,
-    mapproxyUrl:     String
+    geojsonUrl:       String,
+    cgxmlGeojsonUrl:  String,
+    cladiriUrl:       String,
+    uatUrl:           String,
+    mapproxyUrl:      String,
+    baseExtent:       Array     // [minx, miny, maxx, maxy] în EPSG:3844 — limită pan + tile loading
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────────────
@@ -49,6 +50,7 @@ export default class extends Controller {
     this._loadParcele()
     this._loadCgxml()
     this._loadCladiri()
+    this._setupZoomPersistence()
     // Re-render etichete la fiecare pan/zoom — recalculează poziția să
     // rămână în viewport chiar și când poligonul iese parțial din vedere.
     this.map.on("moveend", () => {
@@ -84,17 +86,32 @@ export default class extends Controller {
     // VIEW în Stereo 70 — toate coordonatele cursor / vertecși sunt direct în
     // EPSG:3844 (metri reali România), fără round-trip prin Web Mercator.
     // Tile-urile OSM/Ortofotoplan sunt în 3857; OL le reproject automat pe-ndelete.
+    const baseExtent = this._validExtent(this.baseExtentValue)
+    const viewOpts = {
+      projection: "EPSG:3844",
+      center:     baseExtent ? ol.extent.getCenter(baseExtent) : [500000, 500000],
+      zoom:       2,
+      minZoom:    -2,
+      maxZoom:    18
+    }
+    if (baseExtent) {
+      // Constrânge pan-ul la zona UAT + buffer (vezi HartaController#index).
+      // Tile-urile basemap au și ele `extent` aplicat (vezi _buildLayers).
+      viewOpts.extent = baseExtent
+    }
     this.map = new ol.Map({
       target: this.element,
       controls: ol.control.defaults.defaults({ attribution: true, zoom: true }),
-      view: new ol.View({
-        projection: "EPSG:3844",
-        center:     [500000, 500000],  // aprox. centru România în Stereo70
-        zoom:       2,
-        minZoom:    -2,
-        maxZoom:    18
-      })
+      view: new ol.View(viewOpts)
     })
+  }
+
+  // Stimulus Array values vin ca [] dacă atributul lipsește — întoarcem null
+  // pentru a evita aplicarea unei limite nedorite.
+  _validExtent(arr) {
+    if (!Array.isArray(arr) || arr.length !== 4) return null
+    if (!arr.every(n => typeof n === "number" && isFinite(n))) return null
+    return arr
   }
 
   _buildLayers() {
@@ -107,12 +124,19 @@ export default class extends Controller {
       extent:      [120000, 250000, 900000, 800000]
     })
 
+    // Limită spațială pentru toate layer-ele basemap (raster): OL nu cere
+    // tile-uri în afara acestui extent → trafic mult redus față de a randa
+    // toată România. Vezi HartaController#index.
+    const baseExtent = this._validExtent(this.baseExtentValue)
+    const tileLayerOpts = baseExtent ? { extent: baseExtent } : {}
+
     this._baseLayers = {}
 
     // Fallback OSM 3857 (reproject OL) — folosit dacă MapProxy nu răspunde
     const osmFallback = () => new ol.layer.Tile({
       source: new ol.source.OSM(),
-      properties: { name: "OpenStreetMap (3857 reproject)" }
+      properties: { name: "OpenStreetMap (3857 reproject)" },
+      ...tileLayerOpts
     })
 
     if (this.mapproxyUrlValue) {
@@ -124,7 +148,8 @@ export default class extends Controller {
       })
       this._baseLayers.osm = new ol.layer.Tile({
         source: osmSrc,
-        properties: { name: "OpenStreetMap (Stereo70)" }
+        properties: { name: "OpenStreetMap (Stereo70)" },
+        ...tileLayerOpts
       })
       // La prima eroare de tile (MapProxy offline) → comutăm pe OSM 3857
       const onErr = () => {
@@ -145,7 +170,8 @@ export default class extends Controller {
       })
       this._baseLayers.ortofotoplan = new ol.layer.Tile({
         source: ortoSrc,
-        properties: { name: "Ortofotoplan (Stereo70)" }
+        properties: { name: "Ortofotoplan (Stereo70)" },
+        ...tileLayerOpts
       })
     } else {
       this._baseLayers.osm = osmFallback()
@@ -163,7 +189,8 @@ export default class extends Controller {
         ],
         attributions: "© Google", crossOrigin: null, maxZoom: 20
       }),
-      properties: { name: "Google Satellite" }
+      properties: { name: "Google Satellite" },
+      ...tileLayerOpts
     })
 
     this._baseLayers.google_hybrid = new ol.layer.Tile({
@@ -176,7 +203,8 @@ export default class extends Controller {
         ],
         attributions: "© Google", crossOrigin: null, maxZoom: 20
       }),
-      properties: { name: "Google Hybrid" }
+      properties: { name: "Google Hybrid" },
+      ...tileLayerOpts
     })
 
     this._baseLayers.esri = new ol.layer.Tile({
@@ -184,7 +212,41 @@ export default class extends Controller {
         url:          "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attributions: "Tiles © Esri", crossOrigin: null, maxZoom: 19
       }),
-      properties: { name: "Esri World Imagery" }
+      properties: { name: "Esri World Imagery" },
+      ...tileLayerOpts
+    })
+
+    // Ortofotoplan Sascut 2022 (WMTS via proxy Rails — credențialele rămân
+    // server-side). TileMatrix nativ EPSG:3844, 17 niveluri (00–16).
+    // ATENȚIE axis order: WMTS publică TopLeftCorner ca "531250 646600" în
+    // ordine EPSG:3844 oficială (N, E). OL lucrează (E, N) → origin = [E, N]
+    // = [646600, 531250]. Resolution = ScaleDenominator × 0.00028 (96 dpi).
+    this._baseLayers.ortofotoplan_sascut = new ol.layer.Tile({
+      source: new ol.source.WMTS({
+        url:         "/gis/wmts/sascut/{TileMatrix}/{TileCol}/{TileRow}",
+        layer:       "sascut_2022",
+        matrixSet:   "96dpi_3844_grid",
+        format:      "image/png",
+        projection:  "EPSG:3844",
+        requestEncoding: "REST",
+        style:       "default",
+        wrapX:       false,
+        tileGrid: new ol.tilegrid.WMTS({
+          origin:      [646600, 531250],
+          resolutions: [
+            5291.6666666666, 2645.8333333333, 1322.9166666666, 529.1666666666,
+            264.5833333333, 132.2916666666, 52.9166666666, 26.4583333333,
+            13.2291666666, 6.6145833333, 2.6458333333, 1.3229166666,
+            0.5291666666, 0.2645833333, 0.1322916666, 0.0529166666, 0.0264583333
+          ],
+          matrixIds: ["00","01","02","03","04","05","06","07","08","09",
+                      "10","11","12","13","14","15","16"],
+          tileSize:  512
+        }),
+        attributions: "© geosys.ro – Ortofotoplan UAT Sascut 2022"
+      }),
+      properties: { name: "Ortofotoplan Sascut 2022 (WMTS)" },
+      ...tileLayerOpts
     })
 
     this.map.addLayer(this._baseLayers.osm)
@@ -252,10 +314,10 @@ export default class extends Controller {
     })
 
     this._overlays = {
-      uat:     this.uatLayer,
-      parcele: this.parcelLayer,
-      cladiri: this.cladiriLayer,
-      cgxml:   this.cgxmlLayer
+      uat:            this.uatLayer,
+      parcele:        this.parcelLayer,
+      cladiri:        this.cladiriLayer,
+      cgxml:          this.cgxmlLayer
     }
 
     this.map.addLayer(this.uatLayer)
@@ -399,6 +461,15 @@ export default class extends Controller {
     if (name === "parcele") this.parcelLabelsLayer?.setVisible(visible)
     if (name === "cladiri") this.cladiriLabelsLayer?.setVisible(visible)
     if (name === "cgxml")   this.cgxmlLabelsLayer?.setVisible(visible)
+    // Toggle pe „cladiri" afectează și cgxml buildings — vezi _cgxmlStyle.
+    // (Toggle pe „parcele" controlează DOAR drafturi; cgxml lands au toggle-ul
+    // lor separat „cgxml" = Imobile cgxml.)
+    if (name === "cladiri") {
+      if (!this._layerConfig) this._layerConfig = {}
+      this._layerConfig.cladiri = { ...(this._layerConfig.cladiri || {}), visible }
+      this.cgxmlLayer?.changed()
+      this.cgxmlLabelsLayer?.changed()
+    }
   }
 
   // Layer Manager API — aplicăm un set de proprietăți de stil per layer cunoscut.
@@ -417,6 +488,20 @@ export default class extends Controller {
     if (typeof merged.visible  === "boolean") layer.setVisible(merged.visible)
     if (typeof merged.opacity  === "number")  layer.setOpacity(merged.opacity)
     if (typeof merged.z_index  === "number")  layer.setZIndex(merged.z_index)
+
+    // Toggle pe „cladiri" afectează AMBELE surse — drafturi + cgxml buildings
+    // (filtrul e în _cgxmlStyle / _cgxmlLabelStyle pe entity_type='building').
+    // Forțăm redraw pe cgxml ca să re-evalueze stilurile.
+    if (layerKey === "cladiri" && typeof merged.visible === "boolean") {
+      this.cgxmlLayer?.changed()
+      this.cgxmlLabelsLayer?.changed()
+    }
+    if (layerKey === "parcele" || layerKey === "cladiri") {
+      // Label-ul drafturilor urmărește vizibilitatea layer-ului principal,
+      // ca în vechiul toggleOverlay (legacy path).
+      const labelsLayer = layerKey === "parcele" ? this.parcelLabelsLayer : this.cladiriLabelsLayer
+      if (typeof merged.visible === "boolean") labelsLayer?.setVisible(merged.visible)
+    }
 
     // Pentru layere raster (georef_plan_*): toggle bg_transparent → recreăm
     // sursa cu/fără filtru de eliminare fundal alb.
@@ -482,7 +567,7 @@ export default class extends Controller {
 
   // ── Selecție feature (pentru Edit mode) ────────────────────────────────
 
-  _setSelectedFeature(sel) {
+  _setSelectedFeature(sel, { silent = false } = {}) {
     if (!this._selectionLayer) {
       this._selectionLayer = new ol.layer.Vector({
         source: new ol.source.Vector(),
@@ -501,10 +586,12 @@ export default class extends Controller {
       this._selectionLayer.getSource().addFeature(overlay)
     }
     this._selected = sel
-    this.dispatch(sel ? "feature-selected" : "feature-deselected", {
-      detail: sel,
-      bubbles: true
-    })
+    if (!silent) {
+      this.dispatch(sel ? "feature-selected" : "feature-deselected", {
+        detail: sel,
+        bubbles: true
+      })
+    }
   }
 
   clearSelection() { this._setSelectedFeature(null) }
@@ -749,20 +836,16 @@ export default class extends Controller {
     })
   }
 
-  // Zoom contextual: extinde extent-ul ×3.5 pentru a păstra zona vecină
-  // vizibilă în jurul poligonului selectat.
+  // Zoom maxim cu poligonul integral în viewport — `view.fit` calculează cel
+  // mai înalt nivel de zoom la care extent-ul încape, cu padding mic pentru
+  // un mic spațiu vizual în jurul geometriei (~40 px pe fiecare latură).
   _zoomToFeature(feature) {
     const geom = feature.getGeometry?.()
     if (!geom) return
-    const e = geom.getExtent()
-    if (!e || !isFinite(e[0])) return
-    const cx = (e[0] + e[2]) / 2
-    const cy = (e[1] + e[3]) / 2
-    const halfW = Math.max((e[2] - e[0]) / 2, 5)  // min 5 m pentru entități mici
-    const halfH = Math.max((e[3] - e[1]) / 2, 5)
-    const k = 5
-    const padded = [cx - halfW * k, cy - halfH * k, cx + halfW * k, cy + halfH * k]
-    this.map.getView().fit(padded, { duration: 400 })
+    this.map.getView().fit(geom, {
+      padding:  [40, 40, 40, 40],
+      duration: 400
+    })
   }
 
   // ── Stiluri ──────────────────────────────────────────────────────────────
@@ -773,6 +856,7 @@ export default class extends Controller {
     const cfg      = this._layerConfig?.parcele || {}
     const useCat   = cfg.color_by_category !== false  // implicit: colorare pe categorie ON
     const baseFill = useCat ? (PARCEL_COLORS[cat] || "#6b7280") : (cfg.fill_color || "#ffffff")
+
     const strokeC  = status === "litigiu" ? "#dc2626" : (cfg.stroke_color || "#1d4ed8")
     const strokeW  = status === "litigiu" ? 2.5 : (cfg.stroke_width || 1.5)
     return new ol.style.Style({
@@ -908,6 +992,9 @@ export default class extends Controller {
   _cgxmlLabelStyle(feature, resolution) {
     if (this._layerConfig?.cgxml_labels?.visible === false) return null
     const isBld   = feature.get("entity_type") === "building"
+    // Vezi _cgxmlStyle: doar buildings sunt cuplate cu toggle-ul „cladiri";
+    // cgxml lands urmează doar toggle-ul „cgxml" (Imobile cgxml).
+    if (isBld && this._layerConfig?.cladiri?.visible === false) return null
     const maxRes  = isBld ? LABEL_MAX_RESOLUTION_CLADIRI : LABEL_MAX_RESOLUTION
     if (resolution > maxRes) return null
     const idLabel = feature.get("cadgenno") || feature.get("e2identifier") || `#${feature.get("id")}`
@@ -932,6 +1019,13 @@ export default class extends Controller {
 
   _cgxmlStyle(feature) {
     const isBuilding = feature.get("entity_type") === "building"
+    // Modelul de toggle e ASIMETRIC:
+    //   • „cgxml" (Imobile cgxml) controlează cgxml lands. Toggle parcele
+    //     NU afectează cgxml lands — sunt entități separate (în layer manager
+    //     parcele = drafturi locale).
+    //   • „cladiri" controlează AMBELE — drafturile + cgxml buildings. O clădire
+    //     e o clădire, indiferent de sursă; toggle-ul ascunde toate.
+    if (isBuilding && this._layerConfig?.cladiri?.visible === false) return null
     const cfg        = this._layerConfig?.cgxml || {}
     return new ol.style.Style({
       stroke: new ol.style.Stroke({
@@ -962,34 +1056,36 @@ export default class extends Controller {
     this.map.addOverlay(this._popup)
 
     this.map.on("singleclick", (evt) => {
-      if (this._digitizing) return  // în timpul digitizării nu afișăm popup-uri info
+      if (this._digitizing) return  // în timpul digitizării nu intervenim cu selecția info
 
-      let html = null, selected = null
+      let selected = null
       this.map.forEachFeatureAtPixel(evt.pixel, (feature, layer) => {
         const layerName = layer?.get("name")
-        if (layerName === "parcele")  { html = this._parcelPopupHtml(feature);  selected = { kind: "parcela", feature, layer } }
-        if (layerName === "cladiri")  { html = this._cladirePopupHtml(feature); selected = { kind: "cladire", feature, layer } }
-        if (layerName === "cgxml")    { html = this._cgxmlPopupHtml(feature) }
-        if (layerName === "uat")      { html = this._uatPopupHtml(feature) }
-        return html ? true : undefined
+        if (layerName === "parcele") { selected = { kind: "parcela", feature, layer }; return true }
+        if (layerName === "cladiri") { selected = { kind: "cladire", feature, layer }; return true }
+        if (layerName === "cgxml") {
+          // CGXML mixează terenuri (entity_type=land) și construcții (=building).
+          const et = feature.get("entity_type")
+          if (et === "land")     selected = { kind: "parcela", feature, layer }
+          if (et === "building") selected = { kind: "cladire", feature, layer }
+          if (selected) return true
+        }
+        return undefined
       }, { hitTolerance: 3 })
 
       // În modul multi-select: click toggle pe feature în set, fără popup/zoom.
       if (this._multiSelectMode) {
         if (selected) this._toggleFeatureInMulti(selected)
-        this._popup.setPosition(undefined)
         return
       }
 
-      if (html) {
-        el.innerHTML = html
-        this._popup.setPosition(evt.coordinate)
-      } else {
-        this._popup.setPosition(undefined)
-      }
-
-      // Highlight selecție și notificăm controllerele care ascultă (digitizare)
+      // Highlight selecție + notifică controllerele (digitizare → buton Modifică)
       this._setSelectedFeature(selected)
+      this._cancelHoverPopup()  // ascunde popup-ul dacă era în curs/afișat
+
+      // Persist focused entity în URL (zoom_land / zoom_building) — la refresh,
+      // `_zoomFromUrlParams` centrează pe entitate. Pentru click pe gol, ștergem.
+      this._updateFocusUrlParams(selected)
 
       // Zoom pe poligonul selectat (parcelă sau clădire)
       if (selected?.feature?.getGeometry) {
@@ -997,10 +1093,76 @@ export default class extends Controller {
       }
     })
 
+    // Popup info la mouse-over cu delay de 1s/geometrie. Se afișează doar dacă
+    // utilizatorul stă pe același feature minim 1 secundă. Suprimă popup-ul:
+    //  - în modul digitizare / multi-select (interferează cu interacțiunea)
+    //  - când hover-ezi pe FEATURE-UL DEJA selectat (info-ul e în sidebar);
+    //    pe ALTE features popup-ul rămâne disponibil chiar dacă ai selecție.
     this.map.on("pointermove", (evt) => {
       if (evt.dragging) return
-      const hit = this.map.hasFeatureAtPixel(evt.pixel)
-      this.map.getTargetElement().style.cursor = hit ? "pointer" : ""
+
+      if (this._digitizing || this._multiSelectMode) {
+        this._popup?.setPosition(undefined)
+        this.map.getTargetElement().style.cursor = ""
+        this._cancelHoverPopup()
+        return
+      }
+
+      let hoveredFeature = null
+      let hoveredLayer   = null
+      let hoveredKey     = null
+      this.map.forEachFeatureAtPixel(evt.pixel, (feature, layer) => {
+        const layerName = layer?.get("name")
+        if (!["parcele","cladiri","cgxml","uat"].includes(layerName)) return undefined
+        hoveredFeature = feature
+        hoveredLayer   = layer
+        const id = feature.get("id") ?? feature.get("nat_code") ?? ""
+        const et = feature.get("entity_type") || ""
+        hoveredKey = `${layerName}-${et}-${id}`
+        return true
+      }, { hitTolerance: 3 })
+
+      this.map.getTargetElement().style.cursor = hoveredFeature ? "pointer" : ""
+
+      if (!hoveredFeature) {
+        this._popup.setPosition(undefined)
+        this._cancelHoverPopup()
+        return
+      }
+
+      // Suprimă popup-ul DOAR dacă hoverezi feature-ul deja selectat.
+      if (this._selected?.feature === hoveredFeature) {
+        this._popup.setPosition(undefined)
+        this._cancelHoverPopup()
+        this._lastHoverKey = hoveredKey
+        return
+      }
+
+      // Același feature: dacă popup-ul e deja vizibil, urmărim cursorul; altfel
+      // lăsăm timer-ul în curs să-l afișeze după cele 1s.
+      if (hoveredKey === this._lastHoverKey) {
+        if (this._popupShown) this._popup.setPosition(evt.coordinate)
+        return
+      }
+
+      // Feature nou → resetăm + pornim timer 1s
+      this._cancelHoverPopup()
+      this._lastHoverKey = hoveredKey
+
+      const coord     = evt.coordinate
+      const feature   = hoveredFeature
+      const layerName = hoveredLayer.get("name")
+      this._hoverTimer = setTimeout(() => {
+        let html = null
+        if (layerName === "parcele") html = this._parcelPopupHtml(feature)
+        if (layerName === "cladiri") html = this._cladirePopupHtml(feature)
+        if (layerName === "cgxml")   html = this._cgxmlPopupHtml(feature)
+        if (layerName === "uat")     html = this._uatPopupHtml(feature)
+        if (!html) return
+        el.innerHTML = html
+        this._popup.setPosition(coord)
+        this._popupShown = true
+      }, 1000)
     })
   }
 
@@ -1017,7 +1179,7 @@ export default class extends Controller {
           <dt>Proprietar</dt><dd>${f.get("proprietar") || "—"}</dd>
           <dt>Status</dt><dd><span class="badge badge-${f.get("status")}">${f.get("status")}</span></dd>
         </dl>
-        <a href="/parcele_cadastrale/${f.get("id")}" class="btn btn-sm btn-primary" style="margin-top:6px">Detalii</a>
+        <a href="/lands/${f.get("id")}" class="btn btn-sm btn-primary" style="margin-top:6px">Detalii</a>
       </div>
     `
   }
@@ -1036,7 +1198,7 @@ export default class extends Controller {
           <dt>Localitate</dt><dd>${f.get("localitate") || "—"}</dd>
           <dt>Proprietar</dt><dd>${f.get("proprietar") || "—"}</dd>
         </dl>
-        <a href="/cladiri_cadastrale/${f.get("id")}" class="btn btn-sm btn-primary" style="margin-top:6px">Detalii</a>
+        <a href="/buildings/${f.get("id")}" class="btn btn-sm btn-primary" style="margin-top:6px">Detalii</a>
       </div>
     `
   }
@@ -1044,21 +1206,62 @@ export default class extends Controller {
   _cgxmlPopupHtml(f) {
     const isBuilding = f.get("entity_type") === "building"
     const title      = isBuilding ? `Construcție #${f.get("buildno") ?? f.get("id")}` : "Imobil"
-    const filename   = f.get("filename") || "—"
-    const fileLink   = f.get("file_description_id")
-      ? `<a href="/cgxml_files/${f.get("file_description_id")}" target="_blank">${filename}</a>` : filename
+    const ie         = f.get("cadgenno") || f.get("e2identifier") || "—"
     const mp = (v) => v != null ? `${Number(v).toLocaleString("ro-RO", { maximumFractionDigits: 2 })} mp` : "—"
+    // Detaliile (proprietari + acte) se cer async, pe baza id-ului — vezi `_loadPopupDetails`.
+    const popupId = `popup-${isBuilding ? "b" : "l"}-${f.get("id")}`
+    setTimeout(() => this._loadPopupDetails(f.get("id"), isBuilding, popupId), 0)
     return `
-      <div class="map-popup cgxml-popup">
+      <div class="map-popup cgxml-popup" id="${popupId}">
         <div class="popup-title">${title}</div>
         <table class="popup-table">
-          <tr><th>Fișier</th><td>${fileLink}</td></tr>
-          <tr><th>Versiune</th><td>${f.get("fileversion") || "—"}</td></tr>
+          <tr><th>Nr. IE</th><td>${ie}</td></tr>
           <tr><th>Suprafață</th><td>${mp(f.get("measuredarea"))}</td></tr>
-          ${f.get("cadgenno") ? `<tr><th>Nr. cadastral</th><td>${f.get("cadgenno")}</td></tr>` : ""}
+          <tr><th>Proprietari</th><td data-role="owners"><em>se încarcă…</em></td></tr>
+          <tr><th>Acte</th><td data-role="deeds"><em>se încarcă…</em></td></tr>
         </table>
       </div>
     `
+  }
+
+  // Cere /lands/:id/popup_info.json (sau /buildings/...) și populează popup-ul.
+  // Sigur la închidere rapidă a popup-ului: dacă nodul nu mai există, ignoră.
+  async _loadPopupDetails(id, isBuilding, popupId) {
+    const url = isBuilding ? `/buildings/${id}/popup_info.json` : `/lands/${id}/popup_info.json`
+    try {
+      const res  = await fetch(url, { headers: { Accept: "application/json" } })
+      if (!res.ok) return
+      const data = await res.json()
+      const root = document.getElementById(popupId)
+      if (!root) return  // popup-ul s-a închis între timp
+      const ownersEl = root.querySelector('[data-role="owners"]')
+      const deedsEl  = root.querySelector('[data-role="deeds"]')
+      if (ownersEl) {
+        const owners = (data.owners || [])
+          .filter(o => o && (o.lastname || o.firstname))
+          .map(o => [o.lastname, o.fatherinitial, o.firstname].filter(Boolean).join(" "))
+        ownersEl.innerHTML = owners.length ? owners.map(o => `<div>${o}</div>`).join("") : "—"
+      }
+      if (deedsEl) {
+        const fmtDate = (d) => {
+          if (!d) return ""
+          try { return new Date(d).toLocaleDateString("ro-RO") } catch (_) { return d }
+        }
+        const deeds = (data.deeds || [])
+          .filter(d => d && (d.deednumber || d.deedtype))
+          .map(d => {
+            const parts = []
+            if (d.deedtype)   parts.push(d.deedtype)
+            if (d.deednumber) parts.push(`nr. ${d.deednumber}`)
+            if (d.deeddate)   parts.push(fmtDate(d.deeddate))
+            if (d.authority)  parts.push(`(${d.authority})`)
+            return parts.join(" ")
+          })
+        deedsEl.innerHTML = deeds.length ? deeds.map(d => `<div>${d}</div>`).join("") : "—"
+      }
+    } catch (e) {
+      // network error — lăsăm "se încarcă..." să devină — pe retry / alt click
+    }
   }
 
   _uatPopupHtml(f) {
@@ -1071,12 +1274,17 @@ export default class extends Controller {
     try {
       const res  = await fetch(this.geojsonUrlValue)
       const data = await res.json()
+      this.parcelLayer.getSource().clear()
       this._addGeoJSON(this.parcelLayer, data)
-      this._fitToLayer(this.parcelLayer)
-      this._loadUatForCenter(this.parcelLayer)
+      if (!this._parceleLoaded) {
+        this._fitToLayer(this.parcelLayer)
+        this._loadUatForCenter(this.parcelLayer)
+        this._parceleLoaded = true
+      }
     } catch (e) {
       console.warn("Nu s-au putut încărca parcelele:", e)
     }
+    this._zoomFromUrlParams()
   }
 
   async _loadCgxml() {
@@ -1084,14 +1292,17 @@ export default class extends Controller {
     try {
       const res  = await fetch(this.cgxmlGeojsonUrlValue)
       const data = await res.json()
+      this.cgxmlLayer.getSource().clear()
       this._addGeoJSON(this.cgxmlLayer, data)
-      if (this.parcelLayer.getSource().getFeatures().length === 0) {
+      if (!this._cgxmlLoaded && this.parcelLayer.getSource().getFeatures().length === 0) {
         this._fitToLayer(this.cgxmlLayer)
         this._loadUatForCenter(this.cgxmlLayer)
       }
+      this._cgxmlLoaded = true
     } catch (e) {
       console.warn("Nu s-au putut încărca imobilele CGXML:", e)
     }
+    this._zoomFromUrlParams()
   }
 
   async _loadCladiri() {
@@ -1099,9 +1310,114 @@ export default class extends Controller {
     try {
       const res  = await fetch(this.cladiriUrlValue)
       const data = await res.json()
+      this.cladiriLayer.getSource().clear()
       this._addGeoJSON(this.cladiriLayer, data)
     } catch (e) {
       console.warn("Nu s-au putut încărca clădirile:", e)
+    }
+    this._zoomFromUrlParams()
+  }
+
+  // Persist entitatea focalizată în URL ca query params (`zoom_land` /
+  // `zoom_building`). `history.replaceState` schimbă URL-ul fără reload — la
+  // refresh manual, `_zoomFromUrlParams` reaplică centrarea.
+  // Anulează un timer de hover în curs și ascunde popup-ul dacă era afișat.
+  _cancelHoverPopup() {
+    if (this._hoverTimer) { clearTimeout(this._hoverTimer); this._hoverTimer = null }
+    if (this._popupShown) { this._popup?.setPosition(undefined); this._popupShown = false }
+    this._lastHoverKey = null
+  }
+
+  _updateFocusUrlParams(sel) {
+    try {
+      const url = new URL(window.location.href)
+      url.searchParams.delete("zoom_land")
+      url.searchParams.delete("zoom_building")
+      // Resetăm și zoom-ul persistat dacă selecția se schimbă/se șterge —
+      // altfel nivelul vechi rămâne aplicat la refresh peste o altă parcelă.
+      url.searchParams.delete("z")
+      if (sel?.kind === "cladire") {
+        url.searchParams.set("zoom_building", sel.feature.get("id"))
+      } else if (sel?.kind === "parcela") {
+        url.searchParams.set("zoom_land", sel.feature.get("id"))
+      }
+      window.history.replaceState({}, "", url)
+    } catch (_) { /* no-op */ }
+  }
+
+  // Setează listener pe `moveend` care actualizează `?z=…` din URL CÂND
+  // există o selecție focalizată. La refresh, `_zoomFromUrlParams` folosește
+  // valoarea ca să restaureze nivelul de zoom (în loc de fit pe feature).
+  _setupZoomPersistence() {
+    if (this._zoomPersistInit) return
+    this._zoomPersistInit = true
+    this.map.on("moveend", () => {
+      if (this._restoringView) return
+      try {
+        const url = new URL(window.location.href)
+        const hasFocus = url.searchParams.has("zoom_land") || url.searchParams.has("zoom_building")
+        if (!hasFocus) {
+          if (url.searchParams.has("z")) {
+            url.searchParams.delete("z")
+            window.history.replaceState({}, "", url)
+          }
+          return
+        }
+        const z = this.map.getView().getZoom()
+        if (!Number.isFinite(z)) return
+        url.searchParams.set("z", z.toFixed(2))
+        window.history.replaceState({}, "", url)
+      } catch (_) { /* no-op */ }
+    })
+  }
+
+  // Centrează pe parcela/clădirea cerută prin URL (`?zoom_land=ID` /
+  // `?zoom_building=ID`) — link „Vezi pe hartă" din /lands/:id, /buildings/:id
+  // și/sau persistat după click pe entitate (vezi `_updateFocusUrlParams`).
+  // Apelat după fiecare layer load; flag-ul `_zoomedFromUrl` previne re-zoom.
+  _zoomFromUrlParams() {
+    if (this._zoomedFromUrl) return
+    const url    = new URL(window.location.href)
+    const landId = url.searchParams.get("zoom_land")
+    const bldId  = url.searchParams.get("zoom_building")
+    if (!landId && !bldId) return
+
+    const findIn = (layer, predicate) => layer?.getSource().getFeatures().find(predicate)
+    let feat = null
+    if (landId) {
+      const id = String(landId)
+      feat = findIn(this.parcelLayer, f => String(f.get("id")) === id) ||
+             findIn(this.cgxmlLayer,  f => f.get("entity_type") === "land" && String(f.get("id")) === id)
+    } else if (bldId) {
+      const id = String(bldId)
+      feat = findIn(this.cladiriLayer, f => String(f.get("id")) === id) ||
+             findIn(this.cgxmlLayer,   f => f.get("entity_type") === "building" && String(f.get("id")) === id)
+    }
+    if (!feat) return
+    this._zoomedFromUrl = true
+    const savedZoom = parseFloat(url.searchParams.get("z"))
+    if (Number.isFinite(savedZoom)) {
+      // Restaurăm nivelul de zoom salvat (după ce user-a zoom-ait manual peste
+      // default-ul fit-to-feature). Centrăm pe feature pentru ca tot să fie
+      // vizibil. `_restoringView` previne loop-ul moveend → URL update.
+      const ext = feat.getGeometry().getExtent()
+      const cx  = (ext[0] + ext[2]) / 2
+      const cy  = (ext[1] + ext[3]) / 2
+      this._restoringView = true
+      this.map.getView().setCenter([cx, cy])
+      this.map.getView().setZoom(savedZoom)
+      setTimeout(() => { this._restoringView = false }, 350)
+    } else {
+      this._zoomToFeature(feat)
+    }
+
+    // Re-selectează feature-ul ca să apară highlightat + butoanele Modifică/
+    // Șterge din sidebar să fie active după refresh.
+    const kind = url.searchParams.get("zoom_building") ? "cladire" : "parcela"
+    const layerOwning = [this.parcelLayer, this.cladiriLayer, this.cgxmlLayer]
+      .find(l => l?.getSource().getFeatures().includes(feat))
+    if (layerOwning) {
+      this._setSelectedFeature({ kind, feature: feat, layer: layerOwning })
     }
   }
 

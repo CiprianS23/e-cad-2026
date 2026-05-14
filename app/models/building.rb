@@ -10,6 +10,15 @@ class Building < ApplicationRecord
   has_many :contested_x_entities,   dependent: :destroy
   has_many :contesteds,             through: :contested_x_entities
 
+  has_one :gis_geometry, class_name: "GisBuildingGeometry", dependent: :destroy
+
+  scope :with_geometry, -> { joins(:gis_geometry) }
+  scope :drafts,        -> { joins(:gis_geometry).where(gis_building_geometries: { status: "draft" }) }
+
+  def label
+    cadgenno.presence || "B##{id}"
+  end
+
   validates :buildno, presence: true
   validates :islegal, inclusion: { in: [ true, false ] }
 end

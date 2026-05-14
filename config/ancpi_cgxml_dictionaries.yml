@@ -1,0 +1,775 @@
+BUILDDEST:
+- code: CA
+  name: constructii anexa
+- code: CAS
+  name: constructii administrative si social culturale
+- code: CIE
+  name: constructii industriale si edilitare
+- code: CL
+  name: constructii de locuinte
+COMMONPARTS:
+- code: ACOPERIS
+  name: Acoperis
+- code: ALTE_SPATII
+  name: Alte spatii comune
+- code: BALCON
+  name: Balcon
+- code: BOXA
+  name: Boxa
+- code: CAMERA_TEHNICA
+  name: Camera tehnica
+- code: CASA_ASCENSORULUI
+  name: Casa ascensorului
+- code: CASA_SCARII
+  name: Casa scarii
+- code: CENTRALA_TERMICA
+  name: Centrala termica
+- code: COS_FUM
+  name: Cos de fum
+- code: DUSURI_COMUNE
+  name: Dusuri comune
+- code: GHENA
+  name: Ghena
+- code: HOLURI
+  name: Holuri
+- code: LOGIE
+  name: Logie
+- code: PIVNITA
+  name: Pivnita
+- code: POD
+  name: Pod
+- code: RAMPA_ACCES
+  name: Rampa de acces
+- code: SCARA_ACCES
+  name: Scara de acces
+- code: SCARI_EXTERIOARE
+  name: Scari exterioare
+- code: SPALATORIE
+  name: Spalatorie
+- code: SUBSOL
+  name: Subsol
+- code: TERASA
+  name: Terasa
+- code: USCATORIE
+  name: Uscatorie
+COUNTRY:
+- code: AD
+  name: Andorra
+- code: AE
+  name: United Arab Emirates
+- code: AF
+  name: Afghanistan
+- code: AG
+  name: Antigua And Barbuda
+- code: AI
+  name: Anguilla
+- code: AL
+  name: Albania
+- code: AM
+  name: Armenia
+- code: AN
+  name: Netherlands Antilles
+- code: AO
+  name: Angola
+- code: AQ
+  name: Antarctica
+- code: AR
+  name: Argentina
+- code: AS
+  name: American Samoa
+- code: AT
+  name: Austria
+- code: AU
+  name: Australia
+- code: AW
+  name: Aruba
+- code: AX
+  name: Aland Islands
+- code: AZ
+  name: Azerbaijan
+- code: BA
+  name: Bosnia And Herzegovina
+- code: BB
+  name: Barbados
+- code: BD
+  name: Bangladesh
+- code: BE
+  name: Belgium
+- code: BF
+  name: Burkina Faso
+- code: BG
+  name: Bulgaria
+- code: BH
+  name: Bahrain
+- code: BI
+  name: Burundi
+- code: BJ
+  name: Benin
+- code: BM
+  name: Bermuda
+- code: BN
+  name: Brunei Darussalam
+- code: BO
+  name: Bolivia
+- code: BR
+  name: Brazil
+- code: BS
+  name: Bahamas
+- code: BT
+  name: Bhutan
+- code: BV
+  name: Bouvet Island
+- code: BW
+  name: Botswana
+- code: BY
+  name: Belarus
+- code: BZ
+  name: Belize
+- code: CA
+  name: Canada
+- code: CC
+  name: Cocos (Keeling) Islands
+- code: CD
+  name: Congo, The Democratic Republic Of The
+- code: CF
+  name: Central African Republic
+- code: CG
+  name: Congo
+- code: CH
+  name: Switzerland
+- code: CI
+  name: Côte D'Ivoire
+- code: CK
+  name: Cook Islands
+- code: CL
+  name: Chile
+- code: CM
+  name: Cameroon
+- code: CN
+  name: China
+- code: CO
+  name: Colombia
+- code: CR
+  name: Costa Rica
+- code: CS
+  name: Serbia And Montenegro
+- code: CU
+  name: Cuba
+- code: CV
+  name: Cape Verde
+- code: CX
+  name: Christmas Island
+- code: CY
+  name: Cyprus
+- code: CZ
+  name: Czech Republic
+- code: DE
+  name: Germany
+- code: DJ
+  name: Djibouti
+- code: DK
+  name: Denmark
+- code: DM
+  name: Dominica
+- code: DO
+  name: Dominican Republic
+- code: DZ
+  name: Algeria
+- code: EC
+  name: Ecuador
+- code: EE
+  name: Estonia
+- code: EG
+  name: Egypt
+- code: EH
+  name: Western Sahara
+- code: ER
+  name: Eritrea
+- code: ES
+  name: Spain
+- code: ET
+  name: Ethiopia
+- code: FI
+  name: Finland
+- code: FJ
+  name: Fiji
+- code: FK
+  name: Falkland Islands (Malvinas)
+- code: FM
+  name: Micronesia, Federated States Of
+- code: FO
+  name: Faroe Islands
+- code: FR
+  name: France
+- code: GA
+  name: Gabon
+- code: GB
+  name: United Kingdom
+- code: GD
+  name: Grenada
+- code: GE
+  name: Georgia
+- code: GF
+  name: French Guiana
+- code: GH
+  name: Ghana
+- code: GI
+  name: Gibraltar
+- code: GL
+  name: Greenland
+- code: GM
+  name: Gambia
+- code: GN
+  name: Guinea
+- code: GP
+  name: Guadeloupe
+- code: GQ
+  name: Equatorial Guinea
+- code: GR
+  name: Greece
+- code: GS
+  name: South Georgia And The South Sandwich Islands
+- code: GT
+  name: Guatemala
+- code: GU
+  name: Guam
+- code: GW
+  name: Guinea-Bissau
+- code: GY
+  name: Guyana
+- code: HK
+  name: Hong Kong
+- code: HM
+  name: Heard Island And Mcdonald Islands
+- code: HN
+  name: Honduras
+- code: HR
+  name: Croatia
+- code: HT
+  name: Haiti
+- code: HU
+  name: Hungary
+- code: ID
+  name: Indonesia
+- code: IE
+  name: Ireland
+- code: IL
+  name: Israel
+- code: IN
+  name: India
+- code: IO
+  name: British Indian Ocean Territory
+- code: IQ
+  name: Iraq
+- code: IR
+  name: Iran, Islamic Republic Of
+- code: IS
+  name: Iceland
+- code: IT
+  name: Italy
+- code: JM
+  name: Jamaica
+- code: JO
+  name: Jordan
+- code: JP
+  name: Japan
+- code: KE
+  name: Kenya
+- code: KG
+  name: Kyrgyzstan
+- code: KH
+  name: Cambodia
+- code: KI
+  name: Kiribati
+- code: KM
+  name: Comoros
+- code: KN
+  name: Saint Kitts And Nevis
+- code: KP
+  name: Korea, Democratic People'S Republic Of
+- code: KR
+  name: Korea, Republic Of
+- code: KW
+  name: Kuwait
+- code: KY
+  name: Cayman Islands
+- code: KZ
+  name: Kazakhstan
+- code: LA
+  name: Lao People'S Democratic Republic
+- code: LB
+  name: Lebanon
+- code: LC
+  name: Saint Lucia
+- code: LI
+  name: Liechtenstein
+- code: LK
+  name: Sri Lanka
+- code: LR
+  name: Liberia
+- code: LS
+  name: Lesotho
+- code: LT
+  name: Lithuania
+- code: LU
+  name: Luxembourg
+- code: LV
+  name: Latvia
+- code: LY
+  name: Libyan Arab Jamahiriya
+- code: MA
+  name: Morocco
+- code: MC
+  name: Monaco
+- code: MD
+  name: Moldova, Republic Of
+- code: MG
+  name: Madagascar
+- code: MH
+  name: Marshall Islands
+- code: MK
+  name: Macedonia, The Former Yugoslav Republic Of
+- code: ML
+  name: Mali
+- code: MM
+  name: Myanmar
+- code: MN
+  name: Mongolia
+- code: MO
+  name: Macao
+- code: MP
+  name: Northern Mariana Islands
+- code: MQ
+  name: Martinique
+- code: MR
+  name: Mauritania
+- code: MS
+  name: Montserrat
+- code: MT
+  name: Malta
+- code: MU
+  name: Mauritius
+- code: MV
+  name: Maldives
+- code: MW
+  name: Malawi
+- code: MX
+  name: Mexico
+- code: MY
+  name: Malaysia
+- code: MZ
+  name: Mozambique
+- code: NA
+  name: Namibia
+- code: NC
+  name: New Caledonia
+- code: NE
+  name: Niger
+- code: NF
+  name: Norfolk Island
+- code: NG
+  name: Nigeria
+- code: NI
+  name: Nicaragua
+- code: NL
+  name: Netherlands
+- code: 'NO'
+  name: Norway
+- code: NP
+  name: Nepal
+- code: NR
+  name: Nauru
+- code: NU
+  name: Niue
+- code: NZ
+  name: New Zealand
+- code: OM
+  name: Oman
+- code: PA
+  name: Panama
+- code: PE
+  name: Peru
+- code: PF
+  name: French Polynesia
+- code: PG
+  name: Papua New Guinea
+- code: PH
+  name: Philippines
+- code: PK
+  name: Pakistan
+- code: PL
+  name: Poland
+- code: PM
+  name: Saint Pierre And Miquelon
+- code: PN
+  name: Pitcairn
+- code: PR
+  name: Puerto Rico
+- code: PS
+  name: Palestinian Territory, Occupied
+- code: PT
+  name: Portugal
+- code: PW
+  name: Palau
+- code: PY
+  name: Paraguay
+- code: QA
+  name: Qatar
+- code: RE
+  name: Réunion
+- code: RO
+  name: Romania
+- code: RU
+  name: Russian Federation
+- code: RW
+  name: Rwanda
+- code: SA
+  name: Saudi Arabia
+- code: SB
+  name: Solomon Islands
+- code: SC
+  name: Seychelles
+- code: SD
+  name: Sudan
+- code: SE
+  name: Sweden
+- code: SG
+  name: Singapore
+- code: SH
+  name: Saint Helena
+- code: SI
+  name: Slovenia
+- code: SJ
+  name: Svalbard And Jan Mayen
+- code: SK
+  name: Slovakia
+- code: SL
+  name: Sierra Leone
+- code: SM
+  name: San Marino
+- code: SN
+  name: Senegal
+- code: SO
+  name: Somalia
+- code: SR
+  name: Suriname
+- code: ST
+  name: Sao Tome And Principe
+- code: SV
+  name: El Salvador
+- code: SY
+  name: Syrian Arab Republic
+- code: SZ
+  name: Swaziland
+- code: TC
+  name: Turks And Caicos Islands
+- code: TD
+  name: Chad
+- code: TF
+  name: French Southern Territories
+- code: TG
+  name: Togo
+- code: TH
+  name: Thailand
+- code: TJ
+  name: Tajikistan
+- code: TK
+  name: Tokelau
+- code: TL
+  name: Timor-Leste
+- code: TM
+  name: Turkmenistan
+- code: TN
+  name: Tunisia
+- code: TO
+  name: Tonga
+- code: TR
+  name: Turkey
+- code: TT
+  name: Trinidad And Tobago
+- code: TV
+  name: Tuvalu
+- code: TW
+  name: Taiwan, Province Of China
+- code: TZ
+  name: Tanzania, United Republic Of
+- code: UA
+  name: Ukraine
+- code: UG
+  name: Uganda
+- code: UM
+  name: United States Minor Outlying Islands
+- code: US
+  name: United States
+- code: UY
+  name: Uruguay
+- code: UZ
+  name: Uzbekistan
+- code: VA
+  name: Holy See (Vatican City State)
+- code: VC
+  name: Saint Vincent And The Grenadines
+- code: VE
+  name: Venezuela
+- code: VG
+  name: Virgin Islands, British
+- code: VI
+  name: Virgin Islands, U.S.
+- code: VN
+  name: Viet Nam
+- code: VU
+  name: Vanuatu
+- code: WF
+  name: Wallis And Futuna
+- code: WS
+  name: Samoa
+- code: YE
+  name: Yemen
+- code: YT
+  name: Mayotte
+- code: ZA
+  name: South Africa
+- code: ZM
+  name: Zambia
+- code: ZW
+  name: Zimbabwe
+CURRENCY:
+- code: ATS
+  name: ATS
+- code: CAD
+  name: CAD
+- code: CHF
+  name: CHF
+- code: DEM
+  name: DEM
+- code: DKK
+  name: DKK
+- code: EIR
+  name: EIR
+- code: EUR
+  name: EUR
+- code: GBP
+  name: GBP
+- code: HUF
+  name: HUF
+- code: INT
+  name: INT
+- code: JPY
+  name: JPY
+- code: LEI
+  name: LEI
+- code: ROL
+  name: ROL
+- code: RON
+  name: RON
+- code: TRY
+  name: TRY
+- code: USD
+  name: USD
+DISTRICT:
+- code: CAR
+  name: Careul
+- code: CART
+  name: Cartier
+- code: CVART
+  name: Cvartal
+- code: MICRO
+  name: Micro
+DOCT:
+- code: ACTIUNE_INSTANTA
+  name: actiune in instanta
+- code: ACT_NORMATIV
+  name: act normativ
+- code: ACT_NOTARIAL
+  name: act notarial
+- code: ADMINISTRATIVE_1
+  name: act administrativ
+- code: CERTIFICAT_GREFA1
+  name: certificat grefa
+- code: FISA_INTERVIU
+  name: fisa de interviu
+- code: HOTARARE_JUDECATOREASCA
+  name: hotarare judecatoreasca
+- code: INSCRIS_SUB_SEMNATURA_PRIVATA
+  name: inscris sub semnatura privata
+- code: ORDONANTA
+  name: ordonanta
+- code: SOMATIE
+  name: somatie
+IDCARDTYPE:
+- code: BI
+  name: Buletin de identitate
+- code: CI
+  name: Carte de identitate
+- code: PASS
+  name: Paşaport
+ITYPE:
+- code: APARTMENT
+  name: apartament
+- code: BUILDING
+  name: constructie
+- code: LAND
+  name: teren
+OT_CAD:
+- code: AMALGAMATION
+  name: Alipire imobile
+- code: CREATE_UI
+  name: Apartamentare
+- code: DISMEMBER
+  name: Dezmembrare imobil
+- code: DISMEMBER_AMALGAMATION_UI
+  name: Alipire/Dezlipire UI
+- code: FIRST_REGISTRATION
+  name: Prima inregistrare imobil
+- code: FIRST_REGISTRATION_UI
+  name: Prima inregistrare UI
+- code: RECREATE_UI
+  name: Reapartamentare
+- code: RECTIFY_BOUNDARIES
+  name: Rectificare hotar
+- code: UPDATE_DATA_LAND
+  name: Actualizare date imobil
+- code: UPDATE_DATA_UI
+  name: Actualizare date UI
+QUOTA_TYPE:
+- code: ABSOLUTE_QUOTA
+  name: Cota absoluta (supraf.)
+- code: FRACTION_QUOTA
+  name: Cota fractionara
+- code: PERCENTAGE_QUOTA
+  name: Cota procentuala
+REGISTRATIONTYPE:
+- code: INTAB
+  name: Intabulare
+- code: NOTATION
+  name: Notare
+- code: POSESION_REGISTATION
+  name: Inscrierea posesiei
+- code: PROVISIONALENTRY
+  name: Inscrierea provizorie
+RIGHTTYPE:
+- code: ADMINISTRARE
+  name: ADMINISTRARE
+- code: COMODAT
+  name: COMODAT
+- code: CONCESIUNE
+  name: CONCESIUNE
+- code: FOLOSINTA
+  name: FOLOSINTA
+- code: FOLOSINTA CU TITLU GRATUIT
+  name: FOLOSINTA CU TITLU GRATUIT
+- code: FOLOSINTA SPECIALA
+  name: FOLOSINTA SPECIALA
+- code: HABITATIE
+  name: HABITATIE
+- code: INCHIRIERE
+  name: INCHIRIERE
+- code: IPOTECA
+  name: IPOTECA
+- code: IPOTECA LEGALA
+  name: IPOTECA LEGALA
+- code: LEASING IMOBILIAR
+  name: LEASING IMOBILIAR
+- code: PRIVILEGIU IMOBILIAR
+  name: PRIVILEGIU IMOBILIAR
+- code: PROPRIETATE
+  name: PROPRIETATE
+- code: SERVITUTE
+  name: SERVITUTE
+- code: SUPERFICIE
+  name: SUPERFICIE
+- code: UZ
+  name: UZ
+- code: UZUFRUCT
+  name: UZUFRUCT
+- code: UZUFRUCT VIAGER
+  name: UZUFRUCT VIAGER
+ST:
+- code: AL
+  name: Aleea
+- code: BDUL
+  name: Bulevardul
+- code: CALEA
+  name: Calea
+- code: CAREU
+  name: Careul
+- code: DRUMUL
+  name: Drumul
+- code: FND
+  name: Fundatura
+- code: FNDC
+  name: Fundacul
+- code: INTR
+  name: Intrarea
+- code: PREL
+  name: Prelungirea
+- code: PSJ
+  name: Pasajul
+- code: PIATA
+  name: Piata
+- code: SOS
+  name: Soseaua
+- code: SPLAIUL
+  name: Splaiul
+- code: STR
+  name: Strada
+- code: STRADELA
+  name: Stradela
+- code: STRD
+  name: Stradela
+- code: ZONA
+  name: Zona
+TITLETYPE:
+- code: ACCESIUNE
+  name: Accesiune
+- code: CONSTITUIRE
+  name: Constituire
+- code: CONSTRUIRE
+  name: Construire
+- code: CONVENTIE
+  name: Conventie
+- code: EXPROPRIERE
+  name: Expropriere
+- code: HOTARARE
+  name: Hotarare Judecatoreasca
+- code: IESIRE_INDIVIZIUNE
+  name: Iesire Din Indiviziune
+- code: LEGE
+  name: Lege
+- code: SUCCESIUNE
+  name: Succesiune
+- code: UZUCAPIUNE
+  name: Uzucapiune
+- code: adjudecare
+  name: Adjudecare
+- code: reconstituire
+  name: Reconstituire
+USECAT:
+- code: A
+  name: arabil
+- code: ALTELE
+  name: altele
+- code: CC
+  name: curti constructii
+- code: CF
+  name: cai ferate
+- code: DR
+  name: drum
+- code: F
+  name: faneata
+- code: HB
+  name: ape statatoare
+- code: HR
+  name: ape curgatoare
+- code: L
+  name: livada
+- code: N
+  name: neproductiv
+- code: NA
+  name: nedeterminata
+- code: P
+  name: pasune
+- code: PD
+  name: padure
+- code: V
+  name: vie

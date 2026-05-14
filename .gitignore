@@ -33,6 +33,9 @@
 /node_modules
 yarn-error.log
 
+# Python venvs (OCR sidecar — recreate cu pip install -r requirements.txt)
+/script/python/venv/
+
 # macOS
 .DS_Store
 **/__MACOSX/

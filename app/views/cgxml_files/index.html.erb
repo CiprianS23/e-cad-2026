@@ -3,6 +3,7 @@
 <div class="page-header">
   <h1>Fișiere CGXML importate</h1>
   <div class="header-actions">
+    <%= link_to "📊 Comparativ", comparison_cgxml_files_path, class: "btn btn-secondary" %>
     <%= link_to "Import fișier nou", new_cgxml_import_path, class: "btn btn-primary" %>
   </div>
 </div>
@@ -24,6 +25,21 @@
     <span class="stat-num"><%= @stats[:pending] %></span>
     <span class="stat-label">În așteptare</span>
   </div>
+  <div class="stat-card" style="background:#dbeafe">
+    <span class="stat-num"><%= @stats[:corrected] %></span>
+    <span class="stat-label">Corectate (sistematic)</span>
+  </div>
+  <div class="stat-card" style="background:#fef9c3">
+    <span class="stat-num"><%= @stats[:sporadic] %></span>
+    <span class="stat-label">Sporadic (OCPI)</span>
+  </div>
+</div>
+
+<div class="filter-row" style="display:flex;gap:8px;margin:14px 0;font-size:14px">
+  <span>Filtrează:</span>
+  <%= link_to "Toate", cgxml_files_path, class: "btn btn-xs #{params[:source].blank? ? 'btn-primary' : 'btn-secondary'}" %>
+  <%= link_to "Doar corectate", cgxml_files_path(source: "corrected"), class: "btn btn-xs #{params[:source] == 'corrected' ? 'btn-primary' : 'btn-secondary'}" %>
+  <%= link_to "Doar sporadic", cgxml_files_path(source: "sporadic"), class: "btn btn-xs #{params[:source] == 'sporadic' ? 'btn-primary' : 'btn-secondary'}" %>
 </div>
 
 <% if @files.empty? %>
@@ -51,6 +67,9 @@
           <tr>
             <td>
               <%= link_to fd.filename, cgxml_file_path(fd), class: "link-primary" %>
+              <% if fd.is_systematic_corrected %>
+                <span class="badge badge-valid" title="Livrabil corectat cadastru sistematic">Sistematic</span>
+              <% end %>
               <div class="text-muted text-xs"><%= fd.imported_at&.strftime("%d.%m.%Y %H:%M") || "—" %></div>
             </td>
             <td><%= fd.fileversion || "—" %></td>

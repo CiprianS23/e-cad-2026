@@ -39,10 +39,12 @@ class UatBoundariesController < ApplicationController
         FROM uat_boundaries u
         WHERE u.geom IS NOT NULL
           AND (
-            EXISTS (SELECT 1 FROM parcele_cadastrale p
-                    WHERE p.geom IS NOT NULL AND ST_Intersects(u.geom, p.geom))
-            OR EXISTS (SELECT 1 FROM cladiri_cadastrale c
-                       WHERE c.geom IS NOT NULL AND ST_Intersects(u.geom, c.geom))
+            EXISTS (SELECT 1 FROM gis_land_geometries g
+                    WHERE ST_Intersects(u.geom, g.geom))
+            OR EXISTS (SELECT 1 FROM gis_building_geometries g
+                       WHERE ST_Intersects(u.geom, g.geom))
+            OR EXISTS (SELECT 1 FROM points p
+                       WHERE p.coordinates IS NOT NULL AND ST_Intersects(u.geom, p.coordinates))
           )
       ) subq
     SQL
