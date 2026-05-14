@@ -842,3 +842,281 @@ e-cad-2026-assets (GitHub privat) Release v1.0.0-dev-snapshot:
 **Schema e-CAD existentă: neatinsă. Tabele noi cu prefix `gis_`. Pe `points` (CGXML originals) NU s-a scris nimic — corecțiile trăiesc în `gis_imobile` cu FK `land_id` opțional.**
 
 **Restanță pentru iterația C:** parcelarea propriu-zisă în Faza 3 (direcție/limită desenată + `ParcelDivider` aplicat per zonă), apoi Faza 4 (best-fit global) și Faza 5 (commit definitiv în `parcele_cadastrale`).
+
+---
+
+# SESIUNILE 2026‑05‑12 → 2026‑05‑15 — CGXML ca sursă unică + UX selecție/editare + persistență
+
+> Refactor major: aplicația abandonează tabelele paralele `parcele_cadastrale`/`cladiri_cadastrale` și consumă direct schema CGXML (lands, buildings, points, persons, registrations, deeds, addresses). Modulul GIS adaugă cache geometric pe lands/buildings, restul rămâne neatins.
+> Plus: eliminare totală OCR pe planuri cadastrale (modul ineficient), îmbogățire popup info, persistență cross‑refresh, edit live cu suprafață și distanțe.
+>
+> Commit consolidat: `add2be1`.
+
+---
+
+## 1. Tranziție `parcele_cadastrale` → `lands` / `buildings`
+
+**Motivație:** modelul paralel construit la 9 mai duplica informația CGXML deja existentă în baza dezvoltării partenerului. Decizia: dezvoltarea GIS scrie geometriile direct în cache‑uri `gis_*_geometries` legate prin FK la `lands` / `buildings`, iar tabelele intermediare dispar.
+
+**Schimbări:**
+
+- Migrație nouă `db/migrate/20260512090001_create_gis_land_geometries.rb` — cache MultiPolygon EPSG:3844 + index GIST + status (`draft`/`active`) + uniq pe `land_id`.
+- Migrație nouă `db/migrate/20260512090002_create_gis_building_geometries.rb` — analog pentru clădiri.
+- Migrație de drop `20260512090003_drop_parcele_cadastrale_and_cladiri_cadastrale.rb` — elimină tabelele paralele.
+- Controllere noi `LandsController`, `BuildingsController` — CRUD + `geojson` + `lookup` + `popup_info` (vezi 4).
+- Modele noi `GisLandGeometry`, `GisBuildingGeometry` cu validări topologice (`geom_topologic_valid`, `nu_se_suprapune_cu_alte_parcele`, `geom_nu_e_duplicat`) și WKT setter dual‑callback (`before_validation` + `before_save` — vezi 5).
+- Controllere/views/modele vechi (`parcele_cadastrale_controller`, `parcela_cadastrala`, `cladire_cadastrala` etc.) — șterse.
+
+---
+
+## 2. CGXML — import, validare, dicționare
+
+**Cerință:** import bulk de fișiere CGXML + validare XSD/ANCPI + viewer comparativ.
+
+**Componente noi:**
+
+- `app/controllers/cgxml_bulk_imports_controller.rb` + view `cgxml_bulk_imports/new.html.erb` — upload mai multor fișiere odată, dispatch către job-uri.
+- `app/jobs/cgxml_import_job.rb`, `app/jobs/cgxml_revalidate_job.rb` — procesare async (Sidekiq).
+- `app/services/cgxml/` — modul nou:
+  - `ancpi_rules.rb` — regulile de validare semantică ANCPI (peste 50 KB).
+  - `ancpi_dictionaries.rb` — coduri de stradă, județe etc.
+  - `cnp_validator.rb` — validare CNP/CUI cu cifră de control.
+- `config/ancpi_cgxml_dictionaries.yml` — dicționarele extrase din kit-ul oficial.
+- `app/views/cgxml_files/comparison.html.erb` — comparare side-by-side a două versiuni de fișier.
+- Migrație `20260512110001_add_is_systematic_corrected_to_file_descriptions.rb` — flag pentru fișierele corectate manual.
+
+---
+
+## 3. Eliminare OCR pe planuri cadastrale
+
+**Motivație:** modulul OCR (PaddleOCR + extracție labels nr parcelă din planurile vechi georeferențiate) era prea fragil pentru deploy practic — recunoștea inconsistent, dădea fals pozitivi, schematic polygons cădeau peste imobile reale.
+
+**Eliminate:**
+
+- Controllere: `gis/plan_ocr_labels_controller.rb`.
+- Model + tabel: `GisPlanOcrLabel` + `gis_plan_ocr_labels` (3 migrații rollback‑uite + `add_sat_and_type_to_gis_georef_plans`).
+- Jobs: `gis/plan_ocr_job.rb`, `gis/boundary_extract_job.rb`.
+- Servicii: `BoundaryExtractor`, `OcrLandMatcher`, `PaddleOcrAdapter`, `PlanOcrService`, `SchematicPolygonBuilder`.
+- Scripturi Python: `ocr_paddle.py`, `boundary_extract.py` (păstrat `tp_extract.py`/`tp_ocr_batch.py`/`tp_validate.py` — proiect separat OCR acte proprietate).
+- View `ocr_review.html.erb` + JS controller `ocr_review_controller.js`.
+- Câmpurile `plan_type` + `sat_siruta_code` din `gis_georef_plans` (fără sens fără matcher OCR).
+- Status `schematic` din `gis_land_geometries.STATUSES` + 1 rând rezidual șters.
+
+---
+
+## 4. Selecție + editare CGXML — UX integrat
+
+### 4.1 Click selectează, hover info, „Modifică" intră în edit
+
+**Înainte:** popup-ul pe click; edit mode separat declanșat din meniu.
+
+**Acum** (`harta_map_controller.js` + `digitizare_controller.js`):
+
+- **Singleclick** pe parcelă/clădire/cgxml feature → `_setSelectedFeature(sel)` → digitizare-controller primește event, activează butoanele „Modifică"/„Șterge", populează formularul, persistă `?zoom_land=ID` (sau `zoom_building`) în URL.
+- **CGXML** mapate la kind: `entity_type=land`→parcela, `entity_type=building`→cladire.
+- **Hover** pe orice feature (parcele/cladiri/cgxml/uat) → popup cu delay **1 s** (timer); cancel automat la mouse leave; cache `_lastHoverKey` previne re-randarea celulelor async; suprimat când hover-ezi feature-ul deja selectat (info e în sidebar).
+- **Popup CGXML** afișează Nr IE, suprafață + async fetch `/lands|buildings/:id/popup_info.json` care completează proprietari + acte (filtrate `righttype ILIKE '%proprietat%'`).
+- **Fundal popup** transparent (`rgba(255,255,255,0.78)` + `backdrop-filter: blur(4px)`).
+
+### 4.2 Edit mode — vertecși vizuali + topology aware
+
+**Vertecșii:**
+
+- **Primar** (poligonul editat): pătrate roșii (`RegularShape`, 4 puncte, angle π/4, fill #dc2626).
+- **Vecini editabili** (parcele/cladiri layer, same kind, în 1 m): cerculețe portocalii (#f59e0b) — incluși în Modify Collection → drag pe vertex partajat mută în ambele poligoane (topology-aware editing).
+- **Vecini doar‑vizuali** (CGXML „lipiți" de feature-ul curent — JSTS `distance ≤ 0.05 m`): cerculețe gri-bleu (#64748b) — randați pentru referință, NU în Modify.
+
+**Etichete live:**
+
+- **Distanțe muchii** plasate în interiorul poligonului, deplasate ~1 m / 30 % spre centroid, **rotate pe direcția muchiei** (`-atan2(dy, dx)`, normalizat în [−π/2, π/2] ca textul să nu apară upside‑down).
+- **Suprafață centrală** (shoelace JS pe `_verts`, fără round‑trip server) afișată **de la al 3‑lea vertex**, atât în desenare cât și în post‑draw modify / edit. Format: `XX.YY mp` sub 1000 mp.
+
+**Snap (OSNAP) și ORTHO:**
+
+- Modurile OSnap (endpoint/midpoint/nearest/centroid) persistă în `localStorage["harta:snapModes"]`. La connect, checkbox-urile se sincronizează cu starea salvată via `_syncSnapModeCheckboxes()`.
+- `onSnapModeChange` reconstruiește Snap interaction când e activ `_draw`, `_editing` SAU `_postDrawModify` (anterior doar `_draw`).
+- Nearest funcționează acum în edit (anterior `_enterEditMode` reseta `_snapModes` la `["endpoint"]`).
+
+### 4.3 Post‑draw modify — ajustare înainte de save
+
+`_onDrawEnd` nu mai oprește interacțiunea cu geometria: instalează automat o `ol.interaction.Modify` pe feature-ul tocmai închis. Drag pe vertex / click pe muchie + drag (vertex nou) / Shift+click (șterge). Snap rămâne activ. `change` listener re-atașat → `_verts` + suprafață + topology se actualizează live. Cleanup în `clearAll()` și `_teardown()`.
+
+### 4.4 Salvare AJAX — rămâne pe hartă
+
+`saveParcel` / `saveBuilding` nu mai apelează `form.submit()` (care ar fi redirectat la `/lands/:id`). În schimb `_submitNewFeatureAjax(form, kind)`: POST `FormData` cu `Accept: application/json`, ignoră `data.redirect`, afișează status verde „✓ Parcela salvată", apoi `clearAll()` + reload layere.
+
+Exit din edit (Save/Anulează) — același pattern: `_exitEditMode()` async, reîncarcă layerele, apoi re-selectează silent feature-ul editat (`_setSelectedFeature(..., { silent: true })`) ca highlight + butoane sidebar să rămână.
+
+### 4.5 Popup info + sidebar auto‑populat
+
+**Endpoint nou** `GET /lands/:id/popup_info.json` și `GET /buildings/:id/popup_info.json` (`LandsController#popup_info`, `BuildingsController#popup_info`):
+
+```json
+{
+  "cadgenno": "...", "e2identifier": "...",
+  "categoria_folosinta": "A",
+  "address": { "judet": "BACAU", "localitate": "SASCUT", "strada": "...", "numar": "..." },
+  "owners": [{ "lastname", "firstname", "fatherinitial" }],
+  "deeds":  [{ "deedtype", "deednumber", "authority", "deeddate" }]
+}
+```
+
+Logica:
+- Owners + deeds: JOIN `registration_x_entities → registrations → persons|deeds` filtrat pe `righttype ILIKE '%proprietat%'`.
+- Address: dublu‑JOIN `addresses.siruta → siruta_uats` (locality) și `addresses.sirsup → siruta_uats` (UAT, fallback când `siruta` e NULL — caz frecvent în CGXML).
+- Categorie: prima `parcels.usecategory` linkată la land.
+
+**`_populateFormFromSelection(sel)` (digitizare-controller):**
+
+- Sync din proprietățile GeoJSON: comută între form Parcelă / Clădire, completează `numar_cadastral` (cadgenno), `suprafata_mp` (measuredarea), pentru clădiri `destinatie` + `regim_inaltime`.
+- Async via popup_info: completează `judet`, `localitate`, `categoria_folosinta`/`destinatie`, `proprietar` (lista concatenată cu `;`).
+- Guard `if (this._selected?.feature !== f) return` — evită suprascrierea dacă selecția s-a schimbat între request și răspuns.
+- La deselect → `_clearSelectionForm()` golește toate inputurile.
+- Câmpul „Suprafață mp" din formularul Parcelă → convertit la `hidden_field` (display dublu eliminat — rămâne secțiunea „Suprafață" de mai jos).
+
+### 4.6 Persistență zoom + selecție + base layer la refresh
+
+**URL params** (`history.replaceState`):
+
+- `zoom_land=ID` / `zoom_building=ID` — entitatea focalizată; setate la click, șterse la click pe gol sau la ștergere.
+- `z=18.50` — nivel de zoom salvat la `moveend` (când URL are zoom_land/building) via `_setupZoomPersistence()`.
+
+**`_zoomFromUrlParams`** la load:
+
+1. Caută feature în parcele/cladiri/cgxml layer.
+2. Dacă `z` prezent → `setCenter(centroid)` + `setZoom(z)` (flag `_restoringView` previne loop moveend → URL update).
+3. Altfel → `_zoomToFeature(feat)` (modificat: `view.fit(geom, padding: [40,40,40,40])` — zoom maxim cu polygon integral în viewport, anterior extindea bbox ×5).
+4. `_setSelectedFeature(...)` non-silent → digitizare-controller reactivează butoanele și form-ul.
+
+**Base layer** — `localStorage["harta:baseLayer"]`. `layer_manager_controller#selectBase` salvează numele; `_onMapReady` restaurează (override pe radio-ul `checked` static din HTML) înainte de `setBaseLayer`.
+
+---
+
+## 5. Topologie real‑time — fix pentru CGXML
+
+### 5.1 Cauze identificate
+
+1. **Bug exclusion**: `parcele_geom_join` returna `g.id AS gis_id` (gis_geom.id), dar clientul trimitea `editIdValue = feature.get("id") = land.id`. SQL-ul nu excludea poligonul curent → ST_Difference se calcula față de sine însuși → niciun gap real nu trecea de filtru.
+2. **CGXML invizibil**: join-ul cita doar `gis_land_geometries`, ignorând thousands de lands CGXML cu geometria reconstruită din `points` (fluxul standard /harta/cgxml_geojson).
+3. **Prag sliver prea mare**: `gap_min = 0.50 mp` — slivers reali (1-10 cm²) treceau neobservați.
+
+### 5.2 Soluții
+
+**`parcele_geom_join` și `cladiri_geom_join` (`digitizare_controller.rb`):**
+
+- Returnează `entity_id` (= `land_id` / `building_id`) pentru exclusion.
+- UNION ALL cu reconstrucția polygons din `points` pentru entitățile fără cache:
+  ```sql
+  SELECT NULL AS gis_id, ll.land_id AS entity_id, ..., ST_MakePolygon(ll.line) AS geom
+  FROM (SELECT land_id, ST_MakeLine(coordinates ORDER BY no) AS line FROM points
+        WHERE land_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM gis_land_geometries gg WHERE gg.land_id = points.land_id)
+        GROUP BY land_id HAVING COUNT(*) >= 3) ll
+  JOIN lands l ON l.id = ll.land_id WHERE ST_IsValid(...)
+  ```
+- Toate query-urile (overlap, sliver, vertex-on-vertex, cladire-multi-parcela, `capture_overlap_set`) folosesc `entity_id` consistent.
+
+**Slivers (`verifica_topologie`):**
+
+- `gap_min = 0.01 mp` (epsilon pentru floating-point) → `gap_max = 1.00 mp` — prinde slivers greu vizibili, ignoră gap-urile mari (vizibile manual).
+
+**Test:** 8883 parcele accesibile prin join-ul nou (vs. doar ~50 cache-uite anterior).
+
+### 5.3 Fix critic save CGXML
+
+`phase1_save_record` apela `g.save(validate: false)` care SARE peste `before_validation`. Pentru CGXML lands fără cache (`build_gis_geometry` nou), `atribuie_geom_din_wkt` nu rula → `geom` rămânea NULL → `PG::NotNullViolation`.
+
+Fix în `GisLandGeometry` și `GisBuildingGeometry`: al doilea callback `before_save :atribuie_geom_din_wkt, if: -> { @geom_wkt.present? && geom.blank? }` — rulează ca rezervă când validations sunt skipped.
+
+---
+
+## 6. Vertecșii vecinilor în desenare nouă
+
+`_onDrawStart` apelează `_refreshDrawVisualNeighbors()` (debounced 250 ms) la fiecare `change` pe geometria în curs. Folosește `_findVisualNeighbors(_currentFeature)` (JSTS `distance ≤ 0.05 m`) → vertecșii imobilelor CGXML „lipite" de bbox-ul curent apar treptat pe măsură ce desenezi.
+
+Pe `clearAll()`:
+- Reset `_selected = null`, `clearSelection`, `_updateFocusUrlParams(null)` (curăță și URL params).
+- `_clearSelectionForm()` golește toate inputurile + `areaActTarget.value = ""`.
+- Previne risc save accidental cu date din parcela anterior selectată.
+
+---
+
+## 7. Schimbări minore conexe
+
+- **Ștergere individuală** funcționează acum și din edit mode: `deleteSelected` apelează `_resetEditUIState()` dacă `_editing` (helper sincron extras, fără reload/reselect) înainte de DELETE, apoi reload toate layerele (parcele/cladiri/cgxml).
+- **Indexul planurilor de georef** (`gis/georef_plans/index.html.erb`) — eliminat coloana „OCR" + „Sat/Tip".
+- **Harta index view** — eliminat data-attribute `ocr-boundaries-url`.
+
+---
+
+## Sumar fișiere atinse — sesiunile 12–15 mai
+
+```
+# Migrații (4)
+db/migrate/20260512090001_create_gis_land_geometries.rb
+db/migrate/20260512090002_create_gis_building_geometries.rb
+db/migrate/20260512090003_drop_parcele_cadastrale_and_cladiri_cadastrale.rb
+db/migrate/20260512110001_add_is_systematic_corrected_to_file_descriptions.rb
+
+# Modele
+app/models/gis_land_geometry.rb         # NOU
+app/models/gis_building_geometry.rb     # NOU
+app/models/land.rb                      # mod. — has_one :gis_geometry
+app/models/building.rb                  # mod.
+app/models/file_description.rb          # mod. — is_systematic_corrected
+app/models/parcela_cadastrala.rb        # ȘTERS
+app/models/cladire_cadastrala.rb        # ȘTERS
+
+# Controllere
+app/controllers/lands_controller.rb              # NOU — CRUD + popup_info
+app/controllers/buildings_controller.rb          # NOU
+app/controllers/cgxml_bulk_imports_controller.rb # NOU
+app/controllers/gis/wmts_proxy_controller.rb     # NOU
+app/controllers/digitizare_controller.rb         # mod. major — entity_id + UNION points
+app/controllers/harta_controller.rb              # mod.
+app/controllers/cgxml_files_controller.rb        # mod. — comparison
+app/controllers/cgxml_validation_errors_controller.rb # mod.
+app/controllers/uat_boundaries_controller.rb     # mod.
+app/controllers/parcele_cadastrale_controller.rb # ȘTERS
+app/controllers/cladiri_cadastrale_controller.rb # ȘTERS
+
+# Servicii
+app/services/cgxml/ancpi_rules.rb        # NOU (~52 KB)
+app/services/cgxml/ancpi_dictionaries.rb # NOU
+app/services/cgxml/cnp_validator.rb      # NOU
+app/services/cgxml_import_service.rb     # mod.
+app/services/cgxml_validation_service.rb # mod.
+config/ancpi_cgxml_dictionaries.yml      # NOU
+
+# Jobs
+app/jobs/cgxml_import_job.rb            # NOU
+app/jobs/cgxml_revalidate_job.rb        # NOU
+
+# Frontend JS
+app/javascript/controllers/digitizare_controller.js     # mod. major
+app/javascript/controllers/harta_map_controller.js      # mod. major
+app/javascript/controllers/layer_manager_controller.js  # mod. — base layer persist
+
+# Views
+app/views/lands/{index,show,edit,new,_form}.html.erb  # NOU
+app/views/buildings/show.html.erb                     # NOU
+app/views/cgxml_bulk_imports/new.html.erb             # NOU
+app/views/cgxml_files/comparison.html.erb             # NOU
+app/views/cgxml_files/index.html.erb                  # mod.
+app/views/gis/georef_plans/{index,edit}.html.erb      # mod. — fără OCR
+app/views/harta/index.html.erb                        # mod. major
+app/views/layouts/application.html.erb                # mod.
+app/views/parcele_cadastrale/*                        # ȘTERSE
+app/views/cladiri_cadastrale/show.html.erb            # ȘTERS
+
+# CSS
+app/assets/stylesheets/application.css   # mod. — popup transparent
+
+# Rute / config
+config/routes.rb                         # mod. — lands/buildings, popup_info, wmts_proxy, fără OCR
+config/initializers/inflections.rb       # mod.
+
+# Schema regenerată
+db/schema.rb                             # ver. 2026_05_12_110001 (post-rollback OCR)
+```
+
+**Commit:** `add2be1 — Refactor major hartă: selecție/editare CGXML + UX persistat`
