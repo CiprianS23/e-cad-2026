@@ -14,13 +14,16 @@ export default class extends Controller {
     snapTolerance: { type: Number, default: 15 },
     editKind:      String,
     editId:        String,
-    saveBatchUrl:  String
+    saveBatchUrl:  String,
+    cleanupUrl:    String
   }
 
   static targets = [
     "panel", "panelBody", "editTopoMirror",
     "snapSlider", "snapToleranceVal", "snapModes",
-    "btnStart", "btnEdit", "btnDelete", "btnClose", "btnUndo", "btnAudit", "auditList",
+    "metricSnapToggle", "metricSnapSlider", "metricSnapVal",
+    "btnStart", "btnEdit", "btnDelete", "btnMove", "btnClose", "btnUndo", "btnAudit", "auditList",
+    "cleanupSlider", "cleanupVal", "btnCleanup", "cleanupResult",
     "btnMultiSelect", "btnPolygonSelect", "btnDeleteMulti", "multiSelectInfo",
     "dxfFileInput", "dxfMapping",
     "btnExportZone", "btnExportZonePoly", "btnExportZoneSubmit", "exportFormat",
@@ -59,6 +62,16 @@ export default class extends Controller {
       } catch (_) { return null }
     })()
     this._snapModes         = new Set(savedSnapModes || ["endpoint", "midpoint"])
+    // Snap metric — `_metricSnap.enabled` true → pixelTolerance se recalculează
+    // ca metricValue / view.getResolution() la fiecare _refreshSnap și la
+    // change:resolution; valoare persistată via localStorage.
+    const savedMetric = (() => {
+      try { return JSON.parse(localStorage.getItem("harta:metricSnap") || "null") } catch (_) { return null }
+    })()
+    this._metricSnap = {
+      enabled: !!(savedMetric && savedMetric.enabled),
+      meters:  Number((savedMetric && savedMetric.meters)) || 0.5
+    }
     this._polygonValid      = false
     this._polygonSimple     = false
     this._topologyIssues    = []
@@ -151,11 +164,14 @@ export default class extends Controller {
           return new ol.style.Style({
             text: new ol.style.Text({
               text,
-              font:      "700 13px system-ui, sans-serif",
-              fill:      new ol.style.Fill({ color: "#0f172a" }),
-              stroke:    new ol.style.Stroke({ color: "#ffffff", width: 3 }),
-              textAlign: "center",
-              overflow:  true
+              font:        "700 15px system-ui, sans-serif",
+              fill:        new ol.style.Fill({ color: "#0f172a" }),
+              stroke:      new ol.style.Stroke({ color: "#ffffff", width: 4 }),
+              textAlign:   "center",
+              overflow:    true,
+              backgroundFill:   new ol.style.Fill({ color: "rgba(255,255,255,0.85)" }),
+              backgroundStroke: new ol.style.Stroke({ color: "#1f2937", width: 1 }),
+              padding:     [4, 6, 4, 6]
             })
           })
         }
@@ -182,6 +198,7 @@ export default class extends Controller {
 
     // Reflectă în UI modurile OSNAP restaurate din localStorage.
     this._syncSnapModeCheckboxes()
+    this._syncMetricSnapUI()
   }
 
   disconnect() {
@@ -283,6 +300,10 @@ export default class extends Controller {
     if (!raw) return
     this.cmdInputTarget.value = ""
 
+    // Înainte de parsing coordonate: încearcă comenzile text (AutoCAD-like).
+    // Returnează `true` dacă raw e o comandă recunoscută → exit aici.
+    if (this._dispatchCommand(raw)) return
+
     const isDistance   = /^-?\d+(\.\d+)?$/.test(raw)
     const isRelOrPolar = raw.startsWith("@")
     const isAbsolute   = !isDistance && !isRelOrPolar
@@ -347,6 +368,267 @@ export default class extends Controller {
     }, 3500)
   }
 
+  // ── Comenzi text (AutoCAD-like) — invocate prin Enter pe command line ─────
+  // Aliasuri: PAR/P/PARCELA, CL/CLA/CLADIRE, I/IN/INCHIDE, A/ESC/ANULEAZA,
+  // U/UNDO, R/REDO, S/DEL/STERGE, M/MOD/MODIFICA, SV/SAVE/SALVEAZA,
+  // Z/ZOOM, H/?/HELP.
+  _dispatchCommand(raw) {
+    const cmd = raw.toUpperCase()
+    const aliases = {
+      // Pornire desenare
+      P: "PARCELA", PAR: "PARCELA", PARCELA: "PARCELA",
+      CL: "CLADIRE", CLA: "CLADIRE", CLADIRE: "CLADIRE",
+      // Control geometrie
+      I: "CLOSE", IN: "CLOSE", INCHIDE: "CLOSE",
+      A: "CANCEL", ESC: "CANCEL", ANULEAZA: "CANCEL",
+      U: "UNDO", UNDO: "UNDO",
+      R: "REDO", REDO: "REDO",
+      // Selecție + transformări
+      S: "DELETE", DEL: "DELETE", STERGE: "DELETE",
+      M: "EDIT", MOD: "EDIT", MODIFICA: "EDIT",
+      MV: "MOVE", MUT: "MOVE", MUTA: "MOVE", MOVE: "MOVE",
+      RO: "ROTATE", ROT: "ROTATE", ROTATE: "ROTATE", ROTESTE: "ROTATE",
+      SV: "SAVE", SAVE: "SAVE", SALVEAZA: "SAVE",
+      Z: "ZOOM", ZOOM: "ZOOM",
+      H: "HELP", "?": "HELP", HELP: "HELP"
+    }
+    const action = aliases[cmd]
+    if (!action) return false  // nu e comandă — lasă parserul de coords să încerce
+
+    switch (action) {
+      case "PARCELA":
+        this.switchToParcel?.(); this.startDrawing()
+        this._cmdHint("▶ Digitizare parcelă pornită.", false)
+        break
+      case "CLADIRE":
+        this.switchToBuilding?.(); this.startDrawing()
+        this._cmdHint("▶ Digitizare clădire pornită.", false)
+        break
+      case "CLOSE":
+        if (this._draw && this._verts.length >= 3) {
+          this.closePolygon()
+          this._cmdHint("✓ Poligon închis. Continuă ajustare vertecși sau Salvează.", false)
+        } else {
+          this._cmdHint("Niciun poligon de închis sau < 3 vertecși.", true)
+        }
+        break
+      case "CANCEL":
+        if (this._postDrawTransform) { this._cancelTransform(); this._cmdHint("✕ Transformare anulată.", false) }
+        else if (this._editing) { this.cancelEdit?.(); this._cmdHint("✕ Edit anulat.", false) }
+        else if (this._draw || this._postDrawModify) { this.clearAll(); this._cmdHint("✕ Desenare anulată.", false) }
+        else this._cmdHint("Nimic de anulat.", true)
+        break
+      case "UNDO":
+        this._undo()
+        break
+      case "REDO":
+        this._redo()
+        break
+      case "DELETE":
+        if (this._selected) { this.deleteSelected(); this._cmdHint("🗑 Ștergere…", false) }
+        else this._cmdHint("Niciun poligon selectat.", true)
+        break
+      case "EDIT":
+        if (this._selected) { this.editSelected(); this._cmdHint("✎ Mod edit activ.", false) }
+        else this._cmdHint("Niciun poligon selectat.", true)
+        break
+      case "MOVE":
+        this._startMove()
+        break
+      case "ROTATE":
+        this._startRotate()
+        break
+      case "SAVE":
+        if (this._editing)            this.saveEdit?.()
+        else if (this._entityType === "cladire") this.saveBuilding()
+        else                          this.saveParcel()
+        break
+      case "ZOOM":
+        if (this._selected?.feature) this._hartaMap?._zoomToFeature?.(this._selected.feature)
+        else this._cmdHint("Selectează un poligon înainte de ZOOM.", true)
+        break
+      case "HELP":
+        this._cmdHint("Comenzi: PAR | CL | I (închide) | A (anulează) | U (undo) | R (redo) | M (modifică) | S (șterge) | SV (save) | Z (zoom)", false)
+        break
+    }
+    return true
+  }
+
+  // Undo unificat: în mod draw → elimină ultimul vertex; în post-draw modify
+  // sau edit nu avem încă history geometrică completă, doar din vertex stack.
+  _undo() {
+    if (this._draw && this._verts.length > 0) {
+      const last = this._verts[this._verts.length - 1]
+      if (!this._redoStack) this._redoStack = []
+      this._redoStack.push({ x: last.x, y: last.y })
+      this.undoVertex()
+      this._cmdHint(`↶ Undo vertex (${this._verts.length} rămași).`, false)
+      return
+    }
+    this._cmdHint("Nimic de făcut UNDO.", true)
+  }
+
+  _redo() {
+    if (this._draw && this._redoStack?.length) {
+      const v = this._redoStack.pop()
+      try {
+        this._draw.appendCoordinates([[v.x, v.y]])
+        this._cmdHint(`↷ Redo vertex (${this._verts.length} totale).`, false)
+      } catch (e) {
+        this._cmdHint(`Eroare REDO: ${e.message}`, true)
+      }
+      return
+    }
+    this._cmdHint("Nimic de făcut REDO.", true)
+  }
+
+  // ── Mută poligon (translație) ─────────────────────────────────────────────
+  // Necesită selecție. Intră automat în edit mode (geometria se modifică, se
+  // salvează prin SV/Salvează modificări via flow-ul existent). Drag pe orice
+  // punct al poligonului = translație.
+  _startMove() {
+    if (!this._ensureSelectedForTransform("MUT")) return
+    if (this._postDrawTransform) this._cancelTransform()
+
+    const feature = this._selected.feature
+    const layer   = this._selected.layer
+    if (!this._editing) {
+      this.editKindValue = this._selected.kind
+      this.editIdValue   = String(feature.get("id"))
+      this._enterEditMode(feature, layer)
+    }
+
+    // Translate doar pe primary (vecinii topology-aware rămân în Modify
+    // existent ca să nu pierdem snap-ul pe vertecșii lor).
+    this._translate = new ol.interaction.Translate({
+      features: new ol.Collection([this._editFeature])
+    })
+    this.map.addInteraction(this._translate)
+    // Reașezăm Snap-ul deasupra Translate-ului — OL procesează interacțiunile
+    // în ordine inversă (top-down). Snap PESTE Translate înseamnă că coords
+    // ajustate de Snap intră în Translate → drag-ul „prinde" vertecși vecini.
+    if (this._snap && this.map) {
+      this.map.removeInteraction(this._snap)
+      this.map.addInteraction(this._snap)
+    }
+    this._postDrawTransform = "move"
+    this._injectMoveControls()
+    this._cmdHint("MUT: drag pe poligon — OSnap activ · butoane Salvează/Anulează în panou.", false)
+  }
+
+  // Buton dedicat „Salvează mutarea" + „Anulează" în sidebar — injectat la
+  // începutul panel-body pentru vizibilitate maximă în timpul operațiunii.
+  _injectMoveControls() {
+    if (!this.hasPanelBodyTarget) return
+    this.element.querySelector(".digi-move-controls")?.remove()
+    const div = document.createElement("section")
+    div.className = "digi-section digi-move-controls"
+    div.innerHTML = `
+      <div class="digi-section-label">Mutare poligon (translație)</div>
+      <ul class="digi-parcela-hint" style="margin:6px 0;padding-left:18px;line-height:1.6">
+        <li><b>Drag</b> pe geometrie → translație cu OSnap activ pe vertecșii vecinilor</li>
+      </ul>
+      <button type="button" class="btn btn-primary btn-sm"
+              data-action="click->digitizare#saveMove"
+              style="width:100%;margin-top:6px">💾 Salvează mutarea</button>
+      <button type="button" class="btn btn-secondary btn-sm"
+              data-action="click->digitizare#cancelMove"
+              style="width:100%;margin-top:6px">✕ Anulează mutarea</button>
+    `
+    this.panelBodyTarget.insertBefore(div, this.panelBodyTarget.firstChild)
+  }
+
+  _removeMoveControls() {
+    this.element.querySelector(".digi-move-controls")?.remove()
+  }
+
+  // Acțiuni publice pentru butoanele din panoul Mutare.
+  saveMove() {
+    this._removeMoveControls()
+    this.saveEdit?.()
+  }
+
+  cancelMove() {
+    this._cancelTransform()
+    this._removeMoveControls()
+    this.cancelEdit?.()
+  }
+
+  // ── Rotește poligon ───────────────────────────────────────────────────────
+  // Pivot = centroidul poligonului. Mouse-move = preview rotație live; click
+  // primul = anchor (baseline); click al doilea = commit. ESC / A anulează.
+  _startRotate() {
+    if (!this._ensureSelectedForTransform("ROT")) return
+    if (this._postDrawTransform) this._cancelTransform()
+
+    const feature = this._selected.feature
+    if (!this._editing) {
+      this.editKindValue = this._selected.kind
+      this.editIdValue   = String(feature.get("id"))
+      this._enterEditMode(feature, this._selected.layer)
+    }
+
+    const geom  = this._editFeature.getGeometry()
+    const ext   = geom.getExtent()
+    const pivot = [(ext[0] + ext[2]) / 2, (ext[1] + ext[3]) / 2]
+    this._rotateBaseline   = geom.clone()
+    this._rotatePivot      = pivot
+    this._rotateStartAngle = null
+    this._postDrawTransform = "rotate"
+
+    this._rotateMoveKey = this.map.on("pointermove", (e) => {
+      const cur = e.coordinate
+      const a   = Math.atan2(cur[1] - pivot[1], cur[0] - pivot[0])
+      if (this._rotateStartAngle === null) {
+        this._rotateStartAngle = a
+        return
+      }
+      const delta = a - this._rotateStartAngle
+      const rotated = this._rotateBaseline.clone()
+      rotated.rotate(delta, pivot)
+      this._editFeature.setGeometry(rotated)  // dispatch change → live area/topology
+    })
+    this._rotateClickKey = this.map.on("singleclick", () => {
+      // Commit la al doilea click (primul stabilește anchor-ul prin pointermove)
+      if (this._rotateStartAngle === null) return
+      this._endRotate()
+      this._cmdHint("✓ Rotație aplicată. SV salvează.", false)
+    })
+    this._cmdHint("ROT: mișcă mouse-ul pentru rotație · click confirmă · A anulează.", false)
+  }
+
+  _endRotate() {
+    if (this._rotateMoveKey)  { ol.Observable.unByKey(this._rotateMoveKey);  this._rotateMoveKey = null }
+    if (this._rotateClickKey) { ol.Observable.unByKey(this._rotateClickKey); this._rotateClickKey = null }
+    this._rotateBaseline   = null
+    this._rotatePivot      = null
+    this._rotateStartAngle = null
+    this._postDrawTransform = null
+  }
+
+  // Anulează orice transformare în curs (apelat din _cancelTransform sau
+  // command „A"/cancelEdit). Restaurează geometria originală pentru rotate.
+  _cancelTransform() {
+    if (this._postDrawTransform === "move" && this._translate && this.map) {
+      this.map.removeInteraction(this._translate)
+      this._translate = null
+      this._removeMoveControls()
+    }
+    if (this._postDrawTransform === "rotate") {
+      if (this._rotateBaseline) this._editFeature?.setGeometry(this._rotateBaseline)
+      this._endRotate()
+    }
+    this._postDrawTransform = null
+  }
+
+  _ensureSelectedForTransform(label) {
+    if (!this._selected) {
+      this._cmdHint(`${label}: niciun poligon selectat.`, true)
+      return false
+    }
+    return true
+  }
+
   startDrawing() {
     if (!this.map) return
     this.clearAll()
@@ -369,7 +651,91 @@ export default class extends Controller {
     this.btnStartTarget.classList.add("btn-active")
     this.btnCloseTarget.disabled = false
     this.btnUndoTarget.disabled  = false
-    this._setStatus("Clic pe hartă pentru primul vertex. Dublu-clic pentru închidere. F8=ORTHO.")
+    const hint = this._metricSnap?.enabled
+      ? `METRIC (${this._metricSnap.meters.toFixed(1)} m): desenezi liber. La SAVE, vertecșii în rază se vor potrivi automat pe vertecșii vecinilor.`
+      : "Clic pe hartă pentru primul vertex. Dublu-clic pentru închidere. F8=ORTHO."
+    this._setStatus(hint)
+  }
+
+  // Colectează toți vertecșii (ca puncte [x,y]) din feature-urile vecine
+  // (parcele + cladiri + cgxml) — folosiți de _applyMetricSnapping pentru a
+  // muta vertecșii desenați spre cei mai apropiați din raza metric configurată.
+  _collectNeighborVerticesForMatch() {
+    const out = []
+    const refs = this._hartaMap
+      ? [this._hartaMap.parcelLayer, this._hartaMap.cgxmlLayer, this._hartaMap.cladiriLayer]
+      : []
+    refs.forEach(layer => {
+      layer?.getSource().getFeatures().forEach(f => {
+        if (f === this._editFeature || f === this._currentFeature) return
+        const geom = f.getGeometry?.()
+        if (!geom) return
+        const t = geom.getType()
+        const rings = t === "Polygon" ? geom.getCoordinates()
+                    : t === "MultiPolygon" ? geom.getCoordinates().flat()
+                    : []
+        rings.forEach(ring => {
+          const v = ring.length > 1 ? ring.slice(0, -1) : ring
+          v.forEach(c => out.push([c[0], c[1]]))
+        })
+      })
+    })
+    return out
+  }
+
+  // Match METRIC: pentru fiecare vertex curent (din _verts sau din _editFeature),
+  // caută cel mai apropiat vertex existent din raza `meters`. Dacă găsește,
+  // suprascrie coord cu vertex-ul existent EXACT. Returnează nr de potriviri.
+  // Apelat doar din save flows când `_metricSnap.enabled = true`.
+  _applyMetricSnapping() {
+    if (!this._metricSnap?.enabled) return 0
+    const meters = this._metricSnap.meters
+    const targets = this._collectNeighborVerticesForMatch()
+    if (targets.length === 0) return 0
+    const findNearest = ([x, y]) => {
+      let best = null, bestD = meters
+      for (const [tx, ty] of targets) {
+        const d = Math.hypot(tx - x, ty - y)
+        if (d <= bestD) { bestD = d; best = [tx, ty] }
+      }
+      return best
+    }
+
+    let matched = 0
+    // Cazul edit / post-draw modify: lucrăm pe geometria feature-ului.
+    const targetFeat = this._editFeature || this._currentFeature
+    if (targetFeat) {
+      const geom = targetFeat.getGeometry()
+      const type = geom.getType()
+      let coords = null
+      if (type === "Polygon") {
+        coords = geom.getCoordinates().map(ring => {
+          return ring.map(c => {
+            const m = findNearest(c)
+            if (m) { matched++; return m }
+            return c
+          })
+        })
+        geom.setCoordinates(coords)
+      } else if (type === "MultiPolygon") {
+        coords = geom.getCoordinates().map(poly => poly.map(ring => {
+          return ring.map(c => {
+            const m = findNearest(c)
+            if (m) { matched++; return m }
+            return c
+          })
+        }))
+        geom.setCoordinates(coords)
+      }
+    }
+    // Cazul draw nou (înainte de _onDrawEnd, dar la noi save vine după close):
+    // sincronizăm _verts cu noua geometrie ca _buildWkt să folosească coords corecte.
+    if (this._currentFeature) {
+      const ring = this._currentFeature.getGeometry().getCoordinates()[0] || []
+      const actual = ring.length > 1 ? ring.slice(0, -1) : ring
+      this._verts = actual.map(c => ({ x: c[0], y: c[1] }))
+    }
+    return matched
   }
 
   closePolygon() {
@@ -455,7 +821,41 @@ export default class extends Controller {
   toleranceChanged() {
     this.snapToleranceValue = parseInt(this.snapSliderTarget.value)
     this.snapToleranceValTarget.textContent = this.snapToleranceValue
-    if (this._draw) this._refreshSnap()
+    if (this._draw || this._editing || this._postDrawModify) this._refreshSnap()
+  }
+
+  // Toggle pixel ↔ metric snap. Activarea dezactivează slider-ul în pixeli
+  // (vizual disable) și activează slider-ul în metri.
+  onMetricSnapToggle(evt) {
+    this._metricSnap.enabled = !!evt.target.checked
+    if (this.hasMetricSnapSliderTarget) this.metricSnapSliderTarget.disabled = !this._metricSnap.enabled
+    if (this.hasSnapSliderTarget)       this.snapSliderTarget.disabled       =  this._metricSnap.enabled
+    this._persistMetricSnap()
+    if (this._draw || this._editing || this._postDrawModify) this._refreshSnap()
+  }
+
+  onMetricSnapChange() {
+    if (!this.hasMetricSnapSliderTarget) return
+    this._metricSnap.meters = parseFloat(this.metricSnapSliderTarget.value)
+    if (this.hasMetricSnapValTarget) this.metricSnapValTarget.textContent = this._metricSnap.meters.toFixed(1)
+    this._persistMetricSnap()
+    if (this._metricSnap.enabled && (this._draw || this._editing || this._postDrawModify)) this._refreshSnap()
+  }
+
+  _persistMetricSnap() {
+    try { localStorage.setItem("harta:metricSnap", JSON.stringify(this._metricSnap)) } catch (_) { /* no-op */ }
+  }
+
+  // Sincronizează UI cu starea metric-snap restaurată din localStorage (apel
+  // la connect, după ce target-urile sunt disponibile).
+  _syncMetricSnapUI() {
+    if (this.hasMetricSnapToggleTarget) this.metricSnapToggleTarget.checked = !!this._metricSnap.enabled
+    if (this.hasMetricSnapSliderTarget) {
+      this.metricSnapSliderTarget.value    = this._metricSnap.meters
+      this.metricSnapSliderTarget.disabled = !this._metricSnap.enabled
+    }
+    if (this.hasMetricSnapValTarget) this.metricSnapValTarget.textContent = this._metricSnap.meters.toFixed(1)
+    if (this.hasSnapSliderTarget)    this.snapSliderTarget.disabled       =  this._metricSnap.enabled
   }
 
   updateDiff() { this._updateDiffDisplay() }
@@ -484,6 +884,8 @@ export default class extends Controller {
 
   async saveParcel() {
     if (!await this._validateBeforeSave()) return
+    const m = this._applyMetricSnapping()
+    if (m) this._setStatus(`METRIC: ${m} vertex(i) potriviți pe vecini.`, "ok")
     this.wktFieldTarget.value      = this._buildWkt("MULTIPOLYGON")
     this.saveAreaFieldTarget.value = this._areaCalc > 0 ? this._areaCalc.toFixed(4) : ""
     await this._submitNewFeatureAjax(this.saveFormTarget, "parcela")
@@ -491,6 +893,8 @@ export default class extends Controller {
 
   async saveBuilding() {
     if (!await this._validateBeforeSave()) return
+    const m = this._applyMetricSnapping()
+    if (m) this._setStatus(`METRIC: ${m} vertex(i) potriviți pe vecini.`, "ok")
     this.wktFieldCladireTarget.value      = this._buildWkt("MULTIPOLYGON")
     this.saveAreaFieldCladireTarget.value = this._areaCalc > 0 ? this._areaCalc.toFixed(4) : ""
     await this._submitNewFeatureAjax(this.saveFormCladireTarget, "cladire")
@@ -535,10 +939,10 @@ export default class extends Controller {
     this._setStatus("Verificare topologie…")
     await this._calcArea()
     await this._verifyTopology()
-    return this._guardSavable()
+    return await this._guardSavable()
   }
 
-  _guardSavable() {
+  async _guardSavable() {
     if (this._verts.length < 3) {
       this._setStatus("Niciun poligon pentru salvare (minim 3 vertecși).", "warn")
       return false
@@ -553,8 +957,37 @@ export default class extends Controller {
     }
     if (this._topologyHasErrors) {
       const errs = this._topologyIssues.filter(i => i.severity === "error")
-      this._setStatus(`Conflict topologic: ${errs.length} eroare(i) cu vecinii — vezi panoul.`, "warn")
-      return false
+      const fixables  = errs.filter(i => i.fixable)
+      const hardBlock = errs.filter(i => !i.fixable)
+      if (hardBlock.length > 0) {
+        this._setStatus(`Conflict topologic: ${hardBlock.length} eroare(i) > 1 mp — corectează manual și vezi panoul.`, "warn")
+        return false
+      }
+      if (fixables.length > 0) {
+        // Toate erorile sunt ≤ 1 mp (goluri sau suprapuneri) → întreabă user-ul.
+        const totals = {
+          slivers:  fixables.filter(i => i.type === "sliver").length,
+          overlaps: fixables.filter(i => i.type === "overlap").length
+        }
+        const parts = []
+        if (totals.slivers)  parts.push(`${totals.slivers} gol(uri)`)
+        if (totals.overlaps) parts.push(`${totals.overlaps} suprapunere(i)`)
+        const ans = confirm(
+          `Detectat ${parts.join(" + ")} ≤ 1 mp cu vecinii.\n\n` +
+          `OK = fixează automat (snap vertecși pe vecini + elimină ≤ 1 mp) și salvează\n` +
+          `Anulează = salvează cu erorile actuale (toleranță ≤ 1 mp acceptată)`
+        )
+        if (ans) {
+          // Force METRIC snap radius 1.0 m pentru auto-fix; restaurează după.
+          const oldEnabled = this._metricSnap?.enabled
+          const oldRadius  = this._metricSnap?.meters
+          this._metricSnap = { enabled: true, meters: 1.0 }
+          const m = this._applyMetricSnapping()
+          this._metricSnap = { enabled: oldEnabled, meters: oldRadius || 0.5 }
+          this._setStatus(`Auto-fix: ${m} vertex(i) potriviți pe vecini.`, "ok")
+          await this._verifyTopology()
+        }
+      }
     }
     return true
   }
@@ -1750,6 +2183,21 @@ export default class extends Controller {
         this.btnDeleteTarget.title = "Click pe un poligon de pe hartă pentru a-l selecta"
       }
     }
+    if (this.hasBtnMoveTarget) {
+      this.btnMoveTarget.disabled = !sel
+      if (sel) {
+        const label = sel.feature.get("numar_cadastral") || `#${sel.feature.get("id")}`
+        this.btnMoveTarget.title = `Mută ${sel.kind} ${label} — drag pe geometrie, SV salvează`
+      } else {
+        this.btnMoveTarget.title = "Click pe un poligon de pe hartă pentru a-l selecta"
+      }
+    }
+  }
+
+  // Acțiune publică pentru butonul „Mută" din sidebar — proxy la `_startMove`
+  // ca să poată fi declanșat și prin command line (MUT/MV) și prin click.
+  moveSelected() {
+    this._startMove()
   }
 
   async deleteSelected() {
@@ -1867,6 +2315,78 @@ export default class extends Controller {
     this.multiSelectInfoTarget.textContent = count === 0
       ? "Selecție multiplă activă — 0 selectate"
       : `${count} selectate`
+  }
+
+  onCleanupThresholdChange() {
+    if (!this.hasCleanupSliderTarget) return
+    const v = parseFloat(this.cleanupSliderTarget.value)
+    if (this.hasCleanupValTarget) this.cleanupValTarget.textContent = v.toFixed(2)
+  }
+
+  // Curățare topologică pe zona selectată (multi-select). Trimite IDs +
+  // threshold către `/digitizare/cleanup_topology`, afișează rezumatul.
+  async runCleanupTopology() {
+    const items = this._hartaMap?.getMultiSelection?.() || []
+    if (items.length === 0) {
+      this._setCleanupResult('Niciun poligon selectat. Activează „Selecție multiplă" și marchează zona.', "warn")
+      return
+    }
+    const threshold = this.hasCleanupSliderTarget ? parseFloat(this.cleanupSliderTarget.value) : 0.5
+    const msg = `Curățare topologică pe ${items.length} poligon(e) cu prag ${threshold.toFixed(2)} mp.\n\n` +
+                `Vor fi snap-uite vertecșii pe laturi comune și eliminate goluri/suprapuneri ≤ ${threshold.toFixed(2)} mp.\n` +
+                `Suprafețele se păstrează în ±1 mp; ce depășește = sărit.\n\nContinui?`
+    if (!confirm(msg)) return
+
+    if (this.hasBtnCleanupTarget) this.btnCleanupTarget.disabled = true
+    this._setCleanupResult("Curățare în curs…", "info")
+
+    try {
+      const payload = {
+        items:     items.map(it => ({ kind: it.kind, id: it.feature.get("id") })),
+        threshold: threshold
+      }
+      const res = await fetch(this.cleanupUrlValue, {
+        method:  "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": this._csrf(),
+          "Accept":       "application/json"
+        },
+        body: JSON.stringify(payload)
+      })
+      const data = await res.json()
+      if (!data.ok) {
+        this._setCleanupResult(`Eroare: ${data.error || res.status}`, "warn")
+        return
+      }
+      const lines = []
+      lines.push(`<strong>${data.summary}</strong>`)
+      if (data.modified.length) {
+        lines.push(`✓ Modificate: ${data.modified.map(m => m.label + ` (Δ${m.delta.toFixed(2)} mp)`).join(", ")}`)
+      }
+      if (data.skipped.length) {
+        lines.push(`⊘ Sărite: ${data.skipped.map(s => `${s.label} — ${s.reason}`).join("; ")}`)
+      }
+      if (data.errors.length) {
+        lines.push(`⚠ Erori: ${data.errors.map(e => `${e.label}: ${e.message}`).join("; ")}`)
+      }
+      this._setCleanupResult(lines.join("<br>"), data.errors.length ? "warn" : "ok")
+      // Reload layere pentru a vedea geometriile noi.
+      this._hartaMap?._loadParcele?.()
+      this._hartaMap?._loadCladiri?.()
+      this._hartaMap?._loadCgxml?.()
+    } catch (e) {
+      this._setCleanupResult(`Eroare rețea: ${e.message}`, "warn")
+    } finally {
+      if (this.hasBtnCleanupTarget) this.btnCleanupTarget.disabled = false
+    }
+  }
+
+  _setCleanupResult(html, kind = "info") {
+    if (!this.hasCleanupResultTarget) return
+    const color = kind === "warn" ? "#dc2626" : kind === "ok" ? "#16a34a" : "#374151"
+    this.cleanupResultTarget.innerHTML = html
+    this.cleanupResultTarget.style.color = color
   }
 
   async deleteMultiSelected() {
@@ -1999,20 +2519,33 @@ export default class extends Controller {
       this._editEdgeLabelsSource.addFeature(f)
     }
 
-    // Eticheta centrală cu suprafața — afișată live de la al 3-lea vertex
-    // (în draw, post-draw modify, edit). Formula shoelace închide implicit
-    // poligonul (ultimul vertex → primul), deci funcționează și pe verts
-    // încă neînchiși vizual.
+    // Eticheta centrală cu suprafața — live de la al 3-lea vertex (draw,
+    // post-draw modify, edit). În MOD DRAW folosim geometria curentă a
+    // feature-ului (include cursor-ul ca phantom vertex) → eticheta reflectă
+    // suprafața vizuală reală, inclusiv unde cursor-ul închide poligonul.
+    // În alte moduri (edit / post-draw) folosim shoelace pe _verts.
     if (verts.length >= 3) {
-      let s = 0
-      for (let i = 0; i < n; i++) {
-        const a = verts[i]
-        const b = verts[(i + 1) % n]
-        s += (a.x * b.y) - (b.x * a.y)
+      let area = 0
+      let labelXY = [cx, cy]
+      const drawGeom = this._draw ? this._currentFeature?.getGeometry?.() : null
+      if (drawGeom && drawGeom.getType() === "Polygon") {
+        try {
+          area = drawGeom.getArea() || 0
+          const ip = drawGeom.getInteriorPoint?.()
+          if (ip) labelXY = ip.getCoordinates()
+        } catch (_) { /* fallback la shoelace */ }
       }
-      const area = Math.abs(s) / 2
+      if (area === 0) {
+        let s = 0
+        for (let i = 0; i < n; i++) {
+          const a = verts[i]
+          const b = verts[(i + 1) % n]
+          s += (a.x * b.y) - (b.x * a.y)
+        }
+        area = Math.abs(s) / 2
+      }
       if (area > 0) {
-        const af = new ol.Feature(new ol.geom.Point([cx, cy]))
+        const af = new ol.Feature(new ol.geom.Point(labelXY))
         af.set("areaLabel", true)
         af.set("area", area)
         this._editEdgeLabelsSource.addFeature(af)
@@ -2271,6 +2804,9 @@ export default class extends Controller {
   async saveEdit() {
     if (!await this._validateBeforeSave()) return
 
+    const m = this._applyMetricSnapping()
+    if (m) this._setStatus(`METRIC: ${m} vertex(i) potriviți pe vecini.`, "ok")
+
     // Construim payload pentru save_batch: primary + vecini modificați
     const primary = {
       kind:         this.editKindValue,
@@ -2322,6 +2858,8 @@ export default class extends Controller {
   // reselect). Folosit din `_exitEditMode` și din `deleteSelected` (când
   // ștergerea se face direct din edit mode).
   _resetEditUIState() {
+    // Curăță orice transformare interactivă (move/rotate) înainte de exit edit.
+    if (this._postDrawTransform) this._cancelTransform()
     if (this._modify && this.map) this.map.removeInteraction(this._modify)
     this._modify = null
 

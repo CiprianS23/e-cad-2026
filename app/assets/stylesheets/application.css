@@ -1607,3 +1607,61 @@ nav.pagination a:hover  { background: #f3f4f6; }
   cursor: pointer;
 }
 .btn-divizare-launch:hover { background: #e5e7eb; }
+
+/* ── Pagina /jurnal_modificari — randare markdown ────────────────────── */
+.jurnal-md {
+  max-width: 900px;
+  margin: 24px auto;
+  padding: 0 16px 64px;
+  color: #1a1a2e;
+  line-height: 1.6;
+  font-size: 14px;
+}
+.jurnal-md h1 { font-size: 26px; margin-top: 32px; border-bottom: 2px solid #1d4ed8; padding-bottom: 6px; }
+.jurnal-md h2 { font-size: 22px; margin-top: 28px; color: #1e293b; }
+.jurnal-md h3 { font-size: 18px; margin-top: 22px; color: #334155; }
+.jurnal-md h4 { font-size: 15px; margin-top: 18px; color: #475569; }
+.jurnal-md p  { margin: 8px 0; }
+.jurnal-md ul, .jurnal-md ol { margin: 8px 0; padding-left: 24px; }
+.jurnal-md li { margin: 4px 0; }
+.jurnal-md hr { border: 0; border-top: 1px solid #e2e8f0; margin: 32px 0; }
+.jurnal-md blockquote {
+  border-left: 4px solid #94a3b8;
+  background: #f1f5f9;
+  margin: 12px 0;
+  padding: 8px 12px;
+  color: #475569;
+  font-style: italic;
+}
+.jurnal-md code {
+  background: #f1f5f9;
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: #0f172a;
+}
+.jurnal-md pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.jurnal-md pre code { background: transparent; color: inherit; padding: 0; }
+.jurnal-md table {
+  border-collapse: collapse;
+  margin: 12px 0;
+  width: 100%;
+  font-size: 13px;
+}
+.jurnal-md th, .jurnal-md td {
+  border: 1px solid #e2e8f0;
+  padding: 6px 10px;
+  text-align: left;
+}
+.jurnal-md th { background: #f8fafc; font-weight: 600; }
+.jurnal-md strong { color: #0f172a; }
+.jurnal-md a { color: #1d4ed8; text-decoration: underline; }

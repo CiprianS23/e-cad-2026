@@ -7,9 +7,9 @@ const STEREO70 = "+proj=sterea +lat_0=46 +lon_0=25 +k=0.99975 +x_0=500000 +y_0=5
 
 // Prag rezoluție (metri/pixel) peste care etichetele se ascund.
 // Convenție: scale = resolution × 96 dpi × 39.37 inch/m ≈ resolution × 3779.5
-// Deci pragul 1:10000 corespunde la ~2.645 m/px.
-const LABEL_MAX_RESOLUTION         = 2.645   // ≈ scara 1:10 000
-const LABEL_MAX_RESOLUTION_CLADIRI = 2.645   // ≈ scara 1:10 000
+// Pragul 1:2000 → ~0.529 m/px (etichetele apar doar zoom-in dincolo de 1:2000).
+const LABEL_MAX_RESOLUTION         = 0.529   // ≈ scara 1:2 000
+const LABEL_MAX_RESOLUTION_CLADIRI = 0.529   // ≈ scara 1:2 000
 
 const PARCEL_COLORS = {
   arabil:            "#22c55e",
@@ -87,12 +87,15 @@ export default class extends Controller {
     // EPSG:3844 (metri reali România), fără round-trip prin Web Mercator.
     // Tile-urile OSM/Ortofotoplan sunt în 3857; OL le reproject automat pe-ndelete.
     const baseExtent = this._validExtent(this.baseExtentValue)
+    // maxZoom 25 → permite zoom-in până la ~1:1 (resolution ~0.0003 m/px =
+    // scara 1:1 cu formula resolution × 3779.5). Anterior maxZoom 18 limita
+    // la ~1:50, prea mic pentru detalii cadastrale (vertecși la cm).
     const viewOpts = {
       projection: "EPSG:3844",
       center:     baseExtent ? ol.extent.getCenter(baseExtent) : [500000, 500000],
       zoom:       2,
       minZoom:    -2,
-      maxZoom:    18
+      maxZoom:    25
     }
     if (baseExtent) {
       // Constrânge pan-ul la zona UAT + buffer (vezi HartaController#index).
@@ -1452,6 +1455,6 @@ export default class extends Controller {
     const features = layer.getSource().getFeatures()
     if (features.length === 0) return
     const extent = layer.getSource().getExtent()
-    this.map.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 18, duration: 300 })
+    this.map.getView().fit(extent, { padding: [40, 40, 40, 40], maxZoom: 20, duration: 300 })
   }
 }

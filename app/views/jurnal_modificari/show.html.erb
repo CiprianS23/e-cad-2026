@@ -1,0 +1,17 @@
+<% content_for :title, "Jurnal de modificări" %>
+
+<div class="page-header">
+  <div>
+    <div class="breadcrumb">
+      <%= link_to "← Înapoi la hartă", harta_path %>
+    </div>
+    <h1>📋 Jurnal de modificări</h1>
+    <% if @file_mtime %>
+      <small style="color:#64748b">Actualizat ultima dată: <%= l @file_mtime, format: :long rescue @file_mtime %></small>
+    <% end %>
+  </div>
+</div>
+
+<article class="jurnal-md">
+  <%= @html %>
+</article>

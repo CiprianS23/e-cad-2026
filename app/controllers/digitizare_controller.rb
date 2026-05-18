@@ -45,11 +45,15 @@ class DigitizareController < ApplicationController
         AND ST_Area(ST_Intersection(t.geom, np.geom)) > ?
     SQL
     ActiveRecord::Base.connection.select_all(overlap_sql).each do |row|
+      area_mp = row["area"].to_f
+      # Suprapunerile ≤ 1 mp = fixabile prin snap pe vertecșii vecinilor.
+      # Cele > 1 mp = hard block (necesită corectură manuală).
       issues << {
         type: "overlap", severity: "error", neighbor_kind: kind,
         neighbor_id: row["id"], neighbor_label: row["label"],
-        area: row["area"].to_f.round(3),
-        message: "Suprapunere cu #{kind} #{row['label']}: #{row['area'].to_f.round(2)} mp",
+        area: area_mp.round(3),
+        fixable: area_mp <= sliver_max_mp,
+        message: "Suprapunere cu #{kind} #{row['label']}: #{area_mp.round(2)} mp",
         geojson: row["geojson"]
       }
     end
@@ -92,11 +96,13 @@ class DigitizareController < ApplicationController
         AND ST_Area(gap_geom) < ?
     SQL
     ActiveRecord::Base.connection.select_all(sliver_sql).each do |row|
+      # Toate slivers (< 1 mp) sunt EROARE acum + fixabile prin snap pe vecini.
       issues << {
-        type: "sliver", severity: "warning", neighbor_kind: "parcela",
+        type: "sliver", severity: "error", neighbor_kind: "parcela",
         neighbor_id: row["neighbor_id"], neighbor_label: row["neighbor_label"],
         area: row["gap_area"].to_f,
-        message: "Gap între tine și parcela #{row['neighbor_label']}: #{row['gap_area']} mp",
+        fixable: true,
+        message: "Gol față de parcela #{row['neighbor_label']}: #{row['gap_area']} mp",
         geojson: row["geojson"]
       }
     end
@@ -658,6 +664,130 @@ class DigitizareController < ApplicationController
     send_data build_dxf(pts, name),
       filename: "#{name.parameterize}_#{Time.current.strftime('%Y%m%d_%H%M%S')}.dxf",
       type: "application/dxf", disposition: "attachment"
+  end
+
+  # Curățare topologică pe o zonă (set de poligoane selectate).
+  # Payload: { items: [{kind:"parcela"|"cladire", id:N}, ...], threshold: 0.5 }
+  # Algoritm:
+  #   1. Pentru fiecare poligon din set, ST_Snap la unionul tuturor celorlalte
+  #      din set, cu toleranță = threshold (m). Acțiunile lui ST_Snap:
+  #       - vertecșii apropiați de vertecșii vecinilor → snap pe acea poziție
+  #         (unificarea vertecșilor pe laturi comune)
+  #       - inserare vertex pe muchii unde un alt poligon are vertex
+  #         (asigură că laturile comune au noduri pe ambele părți)
+  #       - închide goluri / elimină suprapuneri ≤ toleranță
+  #   2. Verifică ABS(area_new - area_old) ≤ 1.0 mp → dacă DA, persistă;
+  #      altfel, sare (nu modifică), păstrând invarianta de suprafață.
+  #   3. Returnează rezumat: modificate / sărite / erori.
+  def cleanup_topology
+    items     = params[:items] || []
+    threshold = params[:threshold].presence&.to_f || 0.50
+    return render json: { ok: false, error: "Niciun poligon selectat" }, status: :bad_request if items.empty?
+    return render json: { ok: false, error: "Prag invalid" }, status: :bad_request if threshold <= 0 || threshold > 5
+
+    land_ids     = items.select { |i| (i[:kind] || i["kind"]) == "parcela" }.map { |i| (i[:id] || i["id"]).to_i }.reject(&:zero?)
+    building_ids = items.select { |i| (i[:kind] || i["kind"]) == "cladire" }.map { |i| (i[:id] || i["id"]).to_i }.reject(&:zero?)
+
+    modified = []
+    skipped  = []
+    errors   = []
+
+    # Tratează fiecare tip separat (lands ↔ lands, buildings ↔ buildings).
+    [["lands", land_ids, parcele_geom_join, "land_id", GisLandGeometry],
+     ["buildings", building_ids, cladiri_geom_join, "building_id", GisBuildingGeometry]
+    ].each do |label, ids, join_sql, fk, model|
+      next if ids.empty?
+
+      sql = ApplicationRecord.sanitize_sql_array([<<~SQL, ids, threshold])
+        WITH selected AS (
+          SELECT t.entity_id, t.label AS lbl, t.geom AS old_geom
+          FROM   (#{join_sql}) t
+          WHERE  t.entity_id IN (?)
+        ),
+        union_all AS (
+          SELECT ST_UnaryUnion(ST_Collect(old_geom)) AS u FROM selected
+          WHERE  ST_IsValid(old_geom)
+        ),
+        snapped AS (
+          SELECT s.entity_id, s.lbl, s.old_geom,
+                 ST_Snap(s.old_geom, (SELECT u FROM union_all), ?) AS new_geom
+          FROM   selected s
+          WHERE  ST_IsValid(s.old_geom)
+        )
+        SELECT entity_id, lbl,
+               ROUND(ST_Area(old_geom)::numeric, 4) AS old_area,
+               ROUND(ST_Area(new_geom)::numeric, 4) AS new_area,
+               ABS(ST_Area(new_geom) - ST_Area(old_geom)) AS delta,
+               ST_IsValid(new_geom) AS valid_new,
+               ST_AsText(ST_Multi(new_geom)) AS new_wkt
+        FROM   snapped
+      SQL
+
+      rows = ActiveRecord::Base.connection.select_all(sql).to_a
+      rows.each do |r|
+        eid     = r["entity_id"].to_i
+        next if eid <= 0   # rânduri orfane (entity_id NULL în date legacy) — skip silent
+        delta   = r["delta"].to_f
+        old_a   = r["old_area"].to_f
+        new_a   = r["new_area"].to_f
+        unless r["valid_new"]
+          skipped << { entity_id: eid, label: r["lbl"], reason: "geometrie nouă invalidă" }
+          next
+        end
+        if delta > 1.00
+          skipped << { entity_id: eid, label: r["lbl"], delta: delta.round(3),
+                       reason: "delta suprafață > 1 mp (#{delta.round(2)} mp)" }
+          next
+        end
+        # Persistă: UPDATE dacă există cache, altfel INSERT (CGXML lands/buildings
+        # fără gis_*_geometries primesc cache nou cu geometria snap-uită).
+        g = model.find_by(fk => eid)
+        begin
+          if g
+            ActiveRecord::Base.connection.execute(
+              ApplicationRecord.sanitize_sql_array([<<~SQL, r["new_wkt"], r["new_wkt"], r["new_wkt"], g.id])
+                UPDATE #{model.table_name}
+                SET    geom         = ST_Multi(ST_GeomFromText(?, 3844)),
+                       centroid     = ST_PointOnSurface(ST_GeomFromText(?, 3844)),
+                       suprafata_mp = ROUND(ST_Area(ST_GeomFromText(?, 3844))::numeric, 4),
+                       updated_at   = NOW()
+                WHERE  id = ?
+              SQL
+            )
+          else
+            # INSERT cache nou pentru lands/buildings CGXML
+            ActiveRecord::Base.connection.execute(
+              ApplicationRecord.sanitize_sql_array([<<~SQL, eid, r["new_wkt"], r["new_wkt"], r["new_wkt"]])
+                INSERT INTO #{model.table_name}
+                  (#{fk}, geom, centroid, suprafata_mp, status, created_at, updated_at)
+                VALUES (
+                  ?,
+                  ST_Multi(ST_GeomFromText(?, 3844)),
+                  ST_PointOnSurface(ST_GeomFromText(?, 3844)),
+                  ROUND(ST_Area(ST_GeomFromText(?, 3844))::numeric, 4),
+                  'active',
+                  NOW(), NOW()
+                )
+              SQL
+            )
+          end
+          modified << { entity_id: eid, label: r["lbl"], old_area: old_a, new_area: new_a, delta: delta.round(3) }
+        rescue => e
+          errors << { entity_id: eid, label: r["lbl"], message: e.message }
+        end
+      end
+    end
+
+    render json: {
+      ok:        true,
+      threshold: threshold,
+      modified:  modified,
+      skipped:   skipped,
+      errors:    errors,
+      summary:   "Modificate #{modified.length}, sărite #{skipped.length}, erori #{errors.length}"
+    }
+  rescue => e
+    render json: { ok: false, error: "Eroare server: #{e.message}" }, status: :internal_server_error
   end
 
   private

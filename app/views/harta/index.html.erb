@@ -12,7 +12,8 @@
      data-digitizare-snap-tolerance-value="15"
      data-digitizare-edit-kind-value="<%= params[:edit_kind] %>"
      data-digitizare-edit-id-value="<%= params[:edit_id] %>"
-     data-digitizare-save-batch-url-value="<%= digitizare_save_batch_path %>">
+     data-digitizare-save-batch-url-value="<%= digitizare_save_batch_path %>"
+     data-digitizare-cleanup-url-value="<%= digitizare_cleanup_topology_path %>">
   <!-- ── Sidebar stânga: filtre + layer manager + base layers (colapsibil) ── -->
   <aside class="harta-sidebar" data-controller="sidebar-toggle">
 
@@ -92,6 +93,7 @@
       </div>
 
       <%= link_to "Listă parcele", lands_path, class: "btn btn-secondary btn-sm sidebar-link" %>
+      <%= link_to "📋 Jurnal modificări", jurnal_modificari_path, class: "btn btn-secondary btn-sm sidebar-link" %>
     </div>
 
     <!-- Toggle bar — colapsare/expansiune sidebar -->
@@ -343,6 +345,19 @@
         <span data-digitizare-target="snapToleranceVal">15</span>px
       </label>
 
+      <label class="cad-status-mode" title="Snap metric: prinde vertecșii vecinilor din raza dată în metri (override toleranța în pixeli)">
+        <input type="checkbox" data-digitizare-target="metricSnapToggle"
+               data-action="change->digitizare#onMetricSnapToggle">
+        <span>METRIC</span>
+      </label>
+      <label class="cad-status-tol" title="Raza de snap în metri reali (Stereo70). Activează doar când METRIC e bifat.">
+        <input type="range" min="0.1" max="2.0" step="0.1" value="0.5" class="cad-status-slider"
+               data-digitizare-target="metricSnapSlider"
+               data-action="input->digitizare#onMetricSnapChange"
+               disabled>
+        <span data-digitizare-target="metricSnapVal">0.5</span>m
+      </label>
+
       <span class="cad-status-divider">│</span>
       <button type="button" class="cad-status-toggle"
               data-digitizare-target="orthoToggle"
@@ -401,6 +416,29 @@
           </button>
         </div>
         <div class="digi-audit-list" data-digitizare-target="auditList"></div>
+
+        <!-- Curățare topologică pe zona selectată (multi-select) -->
+        <div style="margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb">
+          <div class="digi-section-label" style="margin-bottom:6px">Curăță zona selectată</div>
+          <p class="digi-parcela-hint" style="font-size:11px;line-height:1.5;margin:0 0 6px 0">
+            Operează pe poligoanele din modul „Selecție multiplă". Unifică vertecșii pe laturi comune, elimină goluri/suprapuneri sub prag. Suprafețele se păstrează în limita de ±1&nbsp;mp; ce depășește = sărit.
+          </p>
+          <label style="display:block;margin-bottom:6px;font-size:12px">
+            Prag goluri/suprapuneri (mp):
+            <input type="range" min="0.01" max="2.0" step="0.01" value="0.5"
+                   data-digitizare-target="cleanupSlider"
+                   data-action="input->digitizare#onCleanupThresholdChange"
+                   style="width:100%">
+            <span data-digitizare-target="cleanupVal">0.50</span> mp
+          </label>
+          <button type="button" class="btn btn-primary btn-sm"
+                  data-action="click->digitizare#runCleanupTopology"
+                  data-digitizare-target="btnCleanup"
+                  style="width:100%">
+            🧹 Curăță topologic zona
+          </button>
+          <div data-digitizare-target="cleanupResult" style="margin-top:6px;font-size:11px"></div>
+        </div>
       </section>
 
       <!-- 2. Acțiuni -->
@@ -418,6 +456,13 @@
                   disabled
                   title="Click pe un poligon de pe hartă pentru a-l selecta">
             ✎ Editează
+          </button>
+          <button class="btn btn-secondary btn-sm"
+                  data-digitizare-target="btnMove"
+                  data-action="click->digitizare#moveSelected"
+                  disabled
+                  title="Translație poligon: drag pe geometrie · SV salvează · A anulează">
+            ✥ Mută
           </button>
           <button class="btn btn-danger btn-sm"
                   data-digitizare-target="btnDelete"
