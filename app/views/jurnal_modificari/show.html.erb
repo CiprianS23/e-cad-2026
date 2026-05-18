@@ -2,16 +2,38 @@
 
 <div class="page-header">
   <div>
-    <div class="breadcrumb">
-      <%= link_to "← Înapoi la hartă", harta_path %>
-    </div>
+    <div class="breadcrumb"><%= link_to "← Înapoi la hartă", harta_path %></div>
     <h1>📋 Jurnal de modificări</h1>
     <% if @file_mtime %>
-      <small style="color:#64748b">Actualizat ultima dată: <%= l @file_mtime, format: :long rescue @file_mtime %></small>
+      <small style="color:#64748b">Actualizat: <%= l @file_mtime, format: :long rescue @file_mtime %></small>
     <% end %>
   </div>
 </div>
 
-<article class="jurnal-md">
-  <%= @html %>
-</article>
+<div class="jurnal-fn">
+  <% if @entries.empty? %>
+    <p><em>Nici o intrare în jurnal încă.</em></p>
+  <% else %>
+    <% @entries.each do |entry| %>
+      <article class="jurnal-fn-card">
+        <header class="jurnal-fn-head">
+          <span class="jurnal-fn-date"><%= entry["date"] %></span>
+          <h2 class="jurnal-fn-title"><%= entry["title"] %></h2>
+          <% if entry["commit"].present? %>
+            <code class="jurnal-fn-sha"><%= entry["commit"] %></code>
+          <% end %>
+        </header>
+        <ul class="jurnal-fn-list">
+          <% (entry["functii"] || []).each do |fn| %>
+            <li class="jurnal-fn-item">
+              <details>
+                <summary><%= fn["nume"] %></summary>
+                <div class="jurnal-fn-detail"><%= simple_format(fn["detalii"].to_s.strip) %></div>
+              </details>
+            </li>
+          <% end %>
+        </ul>
+      </article>
+    <% end %>
+  <% end %>
+</div>

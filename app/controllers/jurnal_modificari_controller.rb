@@ -1,17 +1,19 @@
-require "kramdown"
+require "yaml"
 
-# Afișează `2_jurnal_modificari.md` ca pagină HTML. Conținutul e markdown
-# (sesiuni cronologice cu modificările), randat cu Kramdown.
+# Afișează jurnalul funcțional al aplicației (descrieri pentru utilizatori,
+# nu detalii tehnice). Sursă: `data/jurnal_functional.yml`. Sortare:
+# inversă-cronologică (cele mai recente primele). Detaliile funcțiunilor sunt
+# expandabile via `<details>` HTML.
 class JurnalModificariController < ApplicationController
-  JOURNAL_PATH = Rails.root.join("2_jurnal_modificari.md").freeze
+  JOURNAL_PATH = Rails.root.join("data", "jurnal_functional.yml").freeze
 
   def show
     if File.exist?(JOURNAL_PATH)
-      md = File.read(JOURNAL_PATH)
-      @html      = Kramdown::Document.new(md, input: "kramdown", auto_ids: true, syntax_highlighter: nil).to_html.html_safe
+      raw = YAML.load_file(JOURNAL_PATH, permitted_classes: [Date, Time]) || []
+      @entries = raw.sort_by { |e| e["date"].to_s }.reverse
       @file_mtime = File.mtime(JOURNAL_PATH)
     else
-      @html = "<p><em>Fișierul jurnal nu există în repo.</em></p>".html_safe
+      @entries = []
       @file_mtime = nil
     end
   end

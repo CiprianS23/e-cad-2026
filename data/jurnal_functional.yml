@@ -1,0 +1,179 @@
+# Jurnal funcțional — descrieri pentru utilizatori finali, nu detalii tehnice.
+# Format YAML structurat: fiecare intrare = o sesiune; lista de funcții apare
+# expandabilă în pagina /jurnal_modificari (ordine inversă-cronologică).
+#
+# La FIECARE commit nou, adaugă o intrare la TOP (cea mai recentă în sus).
+# Câmpuri:
+#   - date:    YYYY-MM-DD (sortare)
+#   - commit:  SHA scurt (opțional, pentru referință)
+#   - title:   titlu scurt al sesiunii (vizibil în card)
+#   - functii: listă cu nume + detalii funcționale (NU file paths, NU cod)
+#
+- date: 2026-05-18
+  commit: HEAD
+  title: "Jurnal aplicație reformulat — ordine inversă + funcțiuni expandabile"
+  functii:
+    - nume: "Pagina /jurnal_modificari restructurată"
+      detalii: |
+        Format vizual nou: carduri pe sesiune, cele mai recente sus.
+        Fiecare card listează doar funcțiunile schimbate (nume + click
+        pentru a extinde detaliile funcționale). Fără file paths, fără
+        cod, fără termeni tehnici interni. Sursa: data/jurnal_functional.yml
+        (YAML structurat, separat de jurnalul tehnic 2_jurnal_modificari.md).
+
+    - nume: "Update automat la commit"
+      detalii: |
+        La fiecare commit nou, jurnalul YAML primește o intrare nouă la
+        top, cu data sesiunii și lista de funcțiuni modificate. Aplicația
+        reflectă imediat ultima actualizare.
+
+- date: 2026-05-18
+  commit: 2290501
+  title: "Comenzi text, transformări poligon, curățare topologică, jurnal aplicație"
+  functii:
+    - nume: "Comenzi text în linia de comandă (workflow AutoCAD)"
+      detalii: |
+        Aliasuri rapide pentru toate acțiunile principale:
+        - PAR / P = pornește digitizare parcelă; CL = clădire
+        - I = închide poligon curent; A / ESC = anulează acțiune
+        - U = undo vertex; R = redo vertex (stack)
+        - M = modifică poligon selectat; S / DEL = șterge selecția
+        - MUT / MV = mută; RO / ROT = rotește
+        - SV = salvează; Z = zoom pe selecție; H / ? = afișează ajutor
+
+    - nume: "Mută poligon (translație + OSnap activ)"
+      detalii: |
+        Buton dedicat „✥ Mută" în sidebar lângă Editează/Șterge.
+        Drag pe geometrie pentru translație, cu OSnap (endpoint/midpoint/
+        nearest/centroid) activ pe vertecșii vecinilor. Butoane distincte
+        „Salvează / Anulează mutarea" în panoul de Mutare.
+
+    - nume: "Rotește poligon (în jurul centroidului)"
+      detalii: |
+        Comanda ROT din linia de comandă. Mouse-move = preview live al
+        rotației în jurul centroidului. Click = commit. ESC / A = anulează
+        și restaurează geometria inițială.
+
+    - nume: "Curățare topologică pe zonă selectată"
+      detalii: |
+        Operează pe poligoanele din modul „Selecție multiplă". Slider de
+        prag (0.01–2 mp) configurabil. Unifică vertecșii pe laturi comune
+        (același punct la ambele poligoane), elimină goluri și suprapuneri
+        sub prag. Suprafețele se păstrează în ±1 mp — depășește = sărit.
+        Imobilele CGXML fără cache geometric primesc automat unul nou.
+
+    - nume: "Etichetă suprafață live în interiorul poligonului"
+      detalii: |
+        Apare de la al 3-lea vertex în timpul digitizării și se actualizează
+        în timp real (inclusiv cu cursor-ul ca phantom vertex). Stil cu fundal
+        translucid alb, contur subțire pentru lizibilitate pe orice fundal.
+
+    - nume: "Zoom maxim — până la scara 1:1"
+      detalii: |
+        Anterior zoom-in era limitat la ~1:50. Acum poți zooma până la
+        rezoluție submetrică (~1:1) — utile pentru verificarea vertecșilor
+        cu precizie de cm. Geometriile vectoriale rămân ascuțite indiferent
+        de zoom (chiar dacă tile-urile basemap nu mai au detalii).
+
+    - nume: "Etichete poligoane vizibile de la scara 1:2000"
+      detalii: |
+        Nr cadastral + suprafața apar pe poligoane începând cu zoom 1:2000
+        (anterior 1:10000). Etichetele dispar la scări mai mici pentru a nu
+        aglomera hărtia la vedere de ansamblu.
+
+    - nume: "Snap METRIC — match la save"
+      detalii: |
+        Buton METRIC + slider (0.1–2.0 m) în bara de status. Activat:
+        desenezi liber, fără restricții real-time. La save, vertecșii în
+        raza configurată se potrivesc automat pe vertecșii vecinilor.
+        Preferința persistă local (la refresh rămâne activată).
+
+    - nume: "Validare topologică pentru poligoane noi CGXML"
+      detalii: |
+        Detectează corect golurile (< 1 mp) și suprapunerile cu imobilele
+        CGXML, nu doar cele din digitizare locală. Toate gap-urile sub 1 mp
+        sunt semnalate ca erori vizibile în panou. La save cu erori fixabile
+        (≤ 1 mp): prompt cu OK = fixează automat și salvează / Anulează =
+        salvează cu erorile actuale (toleranța ≤ 1 mp acceptată).
+        Erorile > 1 mp blochează save-ul, necesită corectură manuală.
+
+    - nume: "Pagină Jurnal de modificări în aplicație"
+      detalii: |
+        Link în sidebar „📋 Jurnal modificări" deschide o pagină dedicată
+        cu lista cronologică (cele mai recente sus) a modificărilor. Pe
+        fiecare secțiune apar doar funcțiunile schimbate; click pe o
+        funcțiune extinde și arată detaliile.
+
+- date: 2026-05-15
+  commit: add2be1
+  title: "Selecție / editare CGXML, persistență stare, popup info pe hover"
+  functii:
+    - nume: "Click pe imobil selectează (popup la hover)"
+      detalii: |
+        Click pe orice parcelă/clădire (inclusiv din layer-ul CGXML) →
+        feature-ul devine selectat, butoanele Modifică / Mută / Șterge
+        se activează în sidebar. Popup info apare doar la hover (1
+        secundă întârziere) — nu mai apare la click și nu apare deloc
+        pentru imobilul deja selectat (info-ul e în sidebar).
+
+    - nume: "Popup info pentru imobile CGXML"
+      detalii: |
+        La hover pe un imobil: Nr IE, suprafață, proprietari (cu nume +
+        inițială tată) și acte aferente dreptului de proprietate (cu tip,
+        număr, autoritate, dată). Datele se încarcă asincron.
+
+    - nume: 'Edit vertecși la click pe „Modifică"'
+      detalii: |
+        Butonul „✎ Modifică" intră în mod editare: vertecșii primarului
+        apar ca pătrate roșii, vertecșii vecinilor editabili (parcele/cladiri
+        cache) ca cerculețe portocalii, vertecșii imobilelor CGXML lipite
+        ca cerculețe gri-bleu (doar vizualizare). Drag pe vertex partajat
+        mută în ambele poligoane (topology-aware). Click pe muchie + drag =
+        vertex nou. Shift+click = șterge vertex.
+
+    - nume: "Distanțe muchii afișate aliniat pe direcție"
+      detalii: |
+        În interiorul poligonului editat, fiecare muchie are eticheta cu
+        lungimea în metri, rotită pe direcția laturii (nu mai e orizontal
+        permanent).
+
+    - nume: "Persistență la refresh: selecție + zoom + base layer + OSnap"
+      detalii: |
+        Entitatea selectată rămâne focalizată după refresh pagină (URL
+        primește ?zoom_land=ID sau ?zoom_building=ID + ?z=NIVEL).
+        Harta de bază aleasă (OSM / Google / Esri / Ortofotoplan) și
+        modurile OSnap (endpoint/midpoint/nearest/centroid) se restaurează
+        identic.
+
+    - nume: "Form sidebar auto-completat la selecție"
+      detalii: |
+        Click pe imobil → comutarea automată Parcelă / Clădire în formularul
+        din sidebar și completarea Nr cadastral, suprafață, județ, localitate,
+        categoria de folosință, proprietari. Câmpul „Suprafață" e ascuns din
+        formularul Parcelă (apare în secțiunea dedicată Suprafață cu calculat
+        PostGIS + din act + diferență procentuală).
+
+    - nume: "Save fără părăsire hartă"
+      detalii: |
+        După Salvează (nou poligon sau edit), rămâi pe hartă — layerele
+        se reîncarcă automat și poligonul nou-creat / modificat e
+        evidențiat. Anterior te ducea la pagina detalii cu „Vezi pe hartă".
+
+    - nume: "Vezi pe hartă cu focus pe entitate"
+      detalii: |
+        Butonul „Vezi pe hartă" din /lands/:id sau /buildings/:id centrează
+        harta exact pe poligonul respectiv (zoom max cu poligonul integral
+        în viewport).
+
+    - nume: "Vertecșii vecinilor în desenare nouă"
+      detalii: |
+        În timpul digitizării, vertecșii imobilelor CGXML lipite (în 5 cm
+        toleranță) de poligonul în curs apar ca cerculețe gri-bleu —
+        referință vizuală pentru aliniere cu vecini existenți.
+
+    - nume: "Eliminare modul OCR pe planuri cadastrale"
+      detalii: |
+        Modulul OCR pentru detectare nr parcelă pe planuri vechi
+        georeferențiate a fost eliminat — era prea fragil (fals pozitivi,
+        schematic polygons cădeau peste imobile reale). Planurile rămân,
+        doar partea OCR a dispărut.
