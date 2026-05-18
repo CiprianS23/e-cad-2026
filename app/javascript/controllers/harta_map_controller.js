@@ -1347,74 +1347,93 @@ export default class extends Controller {
     this._lastHoverKey = null
   }
 
+  // Persistă entitatea focalizată în CACHE-ul UTILIZATORULUI (localStorage),
+  // nu în URL. URL-ul rămâne curat; restaurarea funcționează doar local pe
+  // browser-ul utilizatorului. (URL params `zoom_land/zoom_building` mai sunt
+  // citite la load pentru link-uri externe „Vezi pe hartă" din /lands/:id.)
   _updateFocusUrlParams(sel) {
     try {
-      const url = new URL(window.location.href)
-      url.searchParams.delete("zoom_land")
-      url.searchParams.delete("zoom_building")
-      // Resetăm și zoom-ul persistat dacă selecția se schimbă/se șterge —
-      // altfel nivelul vechi rămâne aplicat la refresh peste o altă parcelă.
-      url.searchParams.delete("z")
-      if (sel?.kind === "cladire") {
-        url.searchParams.set("zoom_building", sel.feature.get("id"))
-      } else if (sel?.kind === "parcela") {
-        url.searchParams.set("zoom_land", sel.feature.get("id"))
+      if (!sel) {
+        localStorage.removeItem("harta:lastEntity")
+        return
       }
-      window.history.replaceState({}, "", url)
+      const id = sel.feature.get("id")
+      if (!id) return
+      const kind = sel.kind === "cladire" ? "cladire" : "parcela"
+      const view = this.map?.getView?.()
+      localStorage.setItem("harta:lastEntity", JSON.stringify({
+        kind, id: String(id),
+        center: view?.getCenter?.() || null,
+        zoom:   view?.getZoom?.() || null,
+        ts:     Date.now()
+      }))
     } catch (_) { /* no-op */ }
   }
 
-  // Setează listener pe `moveend` care actualizează `?z=…` din URL CÂND
-  // există o selecție focalizată. La refresh, `_zoomFromUrlParams` folosește
-  // valoarea ca să restaureze nivelul de zoom (în loc de fit pe feature).
+  // Setează listener pe `moveend` care actualizează zoom-ul + center-ul
+  // în localStorage CÂND există o entitate focalizată (selectată). La refresh,
+  // `_zoomFromUrlParams` folosește valoarea ca să restaureze view-ul.
   _setupZoomPersistence() {
     if (this._zoomPersistInit) return
     this._zoomPersistInit = true
     this.map.on("moveend", () => {
       if (this._restoringView) return
       try {
-        const url = new URL(window.location.href)
-        const hasFocus = url.searchParams.has("zoom_land") || url.searchParams.has("zoom_building")
-        if (!hasFocus) {
-          if (url.searchParams.has("z")) {
-            url.searchParams.delete("z")
-            window.history.replaceState({}, "", url)
-          }
-          return
-        }
-        const z = this.map.getView().getZoom()
-        if (!Number.isFinite(z)) return
-        url.searchParams.set("z", z.toFixed(2))
-        window.history.replaceState({}, "", url)
+        const raw = localStorage.getItem("harta:lastEntity")
+        if (!raw) return
+        const data = JSON.parse(raw)
+        if (!data?.id) return
+        const view = this.map.getView()
+        data.center = view.getCenter()
+        data.zoom   = view.getZoom()
+        data.ts     = Date.now()
+        localStorage.setItem("harta:lastEntity", JSON.stringify(data))
       } catch (_) { /* no-op */ }
     })
   }
 
-  // Centrează pe parcela/clădirea cerută prin URL (`?zoom_land=ID` /
-  // `?zoom_building=ID`) — link „Vezi pe hartă" din /lands/:id, /buildings/:id
-  // și/sau persistat după click pe entitate (vezi `_updateFocusUrlParams`).
+  // Restaurează ultima entitate focalizată din cache utilizator (localStorage)
+  // sau, ca fallback, dintr-un URL param explicit (`?zoom_land=ID` / `zoom_building`)
+  // — util pentru link-uri externe gen „Vezi pe hartă" din /lands/:id.
   // Apelat după fiecare layer load; flag-ul `_zoomedFromUrl` previne re-zoom.
   _zoomFromUrlParams() {
     if (this._zoomedFromUrl) return
+
+    // 1) URL param (priorită — navigare explicită)
     const url    = new URL(window.location.href)
     const landId = url.searchParams.get("zoom_land")
     const bldId  = url.searchParams.get("zoom_building")
-    if (!landId && !bldId) return
+    let target   = null
+    if (landId) target = { kind: "parcela", id: String(landId), savedZoom: parseFloat(url.searchParams.get("z")) }
+    else if (bldId) target = { kind: "cladire", id: String(bldId), savedZoom: parseFloat(url.searchParams.get("z")) }
+
+    // 2) Fallback: cache utilizator (last entity edited / selected)
+    if (!target) {
+      try {
+        const raw = localStorage.getItem("harta:lastEntity")
+        if (raw) {
+          const data = JSON.parse(raw)
+          if (data?.id) {
+            target = { kind: data.kind, id: String(data.id), savedZoom: data.zoom, savedCenter: data.center }
+          }
+        }
+      } catch (_) { /* no-op */ }
+    }
+    if (!target) return
 
     const findIn = (layer, predicate) => layer?.getSource().getFeatures().find(predicate)
+    const cgxmlEt = target.kind === "cladire" ? "building" : "land"
     let feat = null
-    if (landId) {
-      const id = String(landId)
-      feat = findIn(this.parcelLayer, f => String(f.get("id")) === id) ||
-             findIn(this.cgxmlLayer,  f => f.get("entity_type") === "land" && String(f.get("id")) === id)
-    } else if (bldId) {
-      const id = String(bldId)
-      feat = findIn(this.cladiriLayer, f => String(f.get("id")) === id) ||
-             findIn(this.cgxmlLayer,   f => f.get("entity_type") === "building" && String(f.get("id")) === id)
+    if (target.kind === "parcela") {
+      feat = findIn(this.parcelLayer, f => String(f.get("id")) === target.id) ||
+             findIn(this.cgxmlLayer,  f => f.get("entity_type") === cgxmlEt && String(f.get("id")) === target.id)
+    } else {
+      feat = findIn(this.cladiriLayer, f => String(f.get("id")) === target.id) ||
+             findIn(this.cgxmlLayer,   f => f.get("entity_type") === cgxmlEt && String(f.get("id")) === target.id)
     }
     if (!feat) return
     this._zoomedFromUrl = true
-    const savedZoom = parseFloat(url.searchParams.get("z"))
+    const savedZoom = target.savedZoom
     if (Number.isFinite(savedZoom)) {
       // Restaurăm nivelul de zoom salvat (după ce user-a zoom-ait manual peste
       // default-ul fit-to-feature). Centrăm pe feature pentru ca tot să fie
@@ -1432,11 +1451,10 @@ export default class extends Controller {
 
     // Re-selectează feature-ul ca să apară highlightat + butoanele Modifică/
     // Șterge din sidebar să fie active după refresh.
-    const kind = url.searchParams.get("zoom_building") ? "cladire" : "parcela"
     const layerOwning = [this.parcelLayer, this.cladiriLayer, this.cgxmlLayer]
       .find(l => l?.getSource().getFeatures().includes(feat))
     if (layerOwning) {
-      this._setSelectedFeature({ kind, feature: feat, layer: layerOwning })
+      this._setSelectedFeature({ kind: target.kind, feature: feat, layer: layerOwning })
     }
   }
 

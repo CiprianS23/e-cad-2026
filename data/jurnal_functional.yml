@@ -11,6 +11,87 @@
 #
 - date: 2026-05-18
   commit: HEAD
+  title: "Toolbar floating peste hartă, SVG icons unitar, persistență pe cache utilizator"
+  functii:
+    - nume: "Bara de acțiuni mutată în viewport (stil AutoCAD/QGIS)"
+      detalii: |
+        Toate butoanele de acțiune (Digitizare, Închide, Undo, Redo, Reset,
+        Modifică, Mută, Șterge, Selecție multiplă, Lasso, Șterge bulk) au
+        fost mutate dintr-un panou lateral într-o bară plutitoare peste
+        hartă. Toolbar-ul se poate trage cu un mâner (⋮⋮ în stânga) în alt
+        colț al hărții, poziția persistă local per browser. Butoanele
+        contextuale (Modifică/Mută/Șterge) apar doar când există selecție;
+        Închide/Undo/Redo doar în desenare; badge cu număr pe Selecție
+        multiplă când e activă.
+
+    - nume: "Iconuri SVG unitare peste toată aplicația"
+      detalii: |
+        Înlocuire totală emoji → SVG monochrome stil Lucide (creion, coș,
+        dischetă, glob, mătură, lupă, lasso, etc.). Helper Rails `icon`
+        produce iconul prin nume; toate butoanele din toolbar + sidebar +
+        formulare au același set vizual. Stroke uniform, currentColor →
+        preiau culoarea textului butonului; alinare automată cu textul
+        prin CSS `.btn-icon`. Iconuri din panourile contextuale (Modifică,
+        Mută) au același design ca cele din toolbar.
+
+    - nume: "Undo/Redo pe vertecșii desenării"
+      detalii: |
+        Butoane noi Undo (↶) și Redo (↷) în toolbar. Anulează ultimul
+        vertex plasat; refacă vertecșii anulați (stack). Disabled când
+        nu e nimic de făcut. Aceeași logică expusă și prin comenzi text
+        U / R în linia de comandă.
+
+    - nume: "Refresh restaurează ultima parcelă editată"
+      detalii: |
+        Aplicația ține minte (în cache-ul browserului tău, nu pe server)
+        ultima parcelă/clădire pe care ai dat click sau ai editat-o,
+        împreună cu zoom-ul și centrul curent. La F5, ecranul se
+        repoziționează automat pe ea cu același nivel de zoom. URL-ul
+        rămâne curat (fără query params). Link-urile externe „Vezi pe
+        hartă" din pagina detalii rămân funcționale via URL param.
+
+    - nume: "Suprafață dublă: live în polygon + în bara de status"
+      detalii: |
+        În timpul digitizării, suprafața apare în două locuri simultan:
+        eticheta în centrul vizual al poligonului (urmărește forma)
+        și câmpul „Suprafață" din bara de status de jos. Ambele se
+        actualizează la fiecare schimbare a geometriei, inclusiv
+        cu cursor-ul ca phantom vertex.
+
+    - nume: "Cursor indicator vizibil în digitizare"
+      detalii: |
+        Pe poziția unde va fi plasat următorul vertex apare un cerc
+        albastru semitransparent cu halou alb + o cruciuliță „+" portocaliu-
+        albastră. Vezi mereu clar unde vei da click.
+
+    - nume: "Vertecșii vecinilor apar de la primul click"
+      detalii: |
+        Imediat ce plasezi primul vertex, vertecșii imobilelor CGXML din
+        raza de 5 m apar ca cerculețe gri-bleu — referință vizuală pentru
+        aliniere cu vecini existenți. Anterior apăreau abia după al 3-lea
+        vertex.
+
+    - nume: "Auto-fit poligon în viewport la fiecare vertex"
+      detalii: |
+        După plasarea fiecărui vertex nou, dacă poligonul + spațiu de
+        lookahead (30% din latura cea mai mare) iese din viewport, ecranul
+        se ajustează automat ca tot poligonul să rămână vizibil.
+
+    - nume: "Curățare topologică pe viewport"
+      detalii: |
+        Buton nou „Curăță viewport" lângă „Curăță selecția" — colectează
+        automat toate poligoanele vizibile în vederea curentă (parcele +
+        clădiri + CGXML), aplică unificarea vertecșilor și elimină
+        goluri/suprapuneri sub prag.
+
+    - nume: "Selecție multiplă include drumuri/ape/poligoane lungi"
+      detalii: |
+        Lasso poligon și box select prind acum și poligoanele care doar
+        intersectează zona desenată — important pentru drumuri, ape,
+        păduri care ies în afara perimetrului de selecție.
+
+- date: 2026-05-18
+  commit: 423c52c
   title: "Curățare topologică pe viewport + selecție multiplă completă (CGXML)"
   functii:
     - nume: "Curățare topologică pe viewport-ul vizibil"

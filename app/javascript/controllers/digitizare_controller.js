@@ -22,7 +22,8 @@ export default class extends Controller {
     "panel", "panelBody", "editTopoMirror",
     "snapSlider", "snapToleranceVal", "snapModes",
     "metricSnapToggle", "metricSnapSlider", "metricSnapVal",
-    "btnStart", "btnEdit", "btnDelete", "btnMove", "btnClose", "btnUndo", "btnAudit", "auditList",
+    "mapToolbar", "multiSelectBadge",
+    "btnStart", "btnEdit", "btnDelete", "btnMove", "btnClose", "btnUndo", "btnRedo", "btnAudit", "auditList",
     "cleanupSlider", "cleanupVal", "btnCleanup", "btnCleanupViewport", "cleanupResult",
     "btnMultiSelect", "btnPolygonSelect", "btnDeleteMulti", "multiSelectInfo",
     "dxfFileInput", "dxfMapping",
@@ -199,6 +200,8 @@ export default class extends Controller {
     // Reflectă în UI modurile OSNAP restaurate din localStorage.
     this._syncSnapModeCheckboxes()
     this._syncMetricSnapUI()
+    this._restoreToolbarPosition()
+    this._updateToolbarVisibility()
   }
 
   disconnect() {
@@ -454,6 +457,10 @@ export default class extends Controller {
     return true
   }
 
+  // Acțiuni publice pentru butoanele toolbar Undo/Redo (proxy la _undo/_redo).
+  undoAction() { this._undo(); this._updateUndoRedoState() }
+  redoAction() { this._redo(); this._updateUndoRedoState() }
+
   // Undo unificat: în mod draw → elimină ultimul vertex; în post-draw modify
   // sau edit nu avem încă history geometrică completă, doar din vertex stack.
   _undo() {
@@ -480,6 +487,17 @@ export default class extends Controller {
       return
     }
     this._cmdHint("Nimic de făcut REDO.", true)
+  }
+
+  // Actualizează starea disabled pe butoanele Undo/Redo din toolbar.
+  // Apelat la fiecare schimbare a stack-urilor (drawn vertices / redo stack).
+  _updateUndoRedoState() {
+    if (this.hasBtnUndoTarget) {
+      this.btnUndoTarget.disabled = !(this._draw && this._verts.length > 0)
+    }
+    if (this.hasBtnRedoTarget) {
+      this.btnRedoTarget.disabled = !(this._draw && this._redoStack?.length > 0)
+    }
   }
 
   // ── Mută poligon (translație) ─────────────────────────────────────────────
@@ -522,21 +540,27 @@ export default class extends Controller {
     if (!this.hasPanelBodyTarget) return
     this.element.querySelector(".digi-move-controls")?.remove()
     const div = document.createElement("section")
-    div.className = "digi-section digi-move-controls"
+    // Reutilizăm `.digi-edit-panel` ca să aibă același design ca panoul de
+    // edit (header gălbui, border-left warn, padding identic).
+    div.className = "digi-section digi-edit-panel digi-move-controls"
     div.innerHTML = `
-      <div class="digi-section-label">Mutare poligon (translație)</div>
+      <div class="digi-edit-header">Mutare poligon (translație)</div>
       <ul class="digi-parcela-hint" style="margin:6px 0;padding-left:18px;line-height:1.6">
         <li><b>Drag</b> pe geometrie → translație cu OSnap activ pe vertecșii vecinilor</li>
       </ul>
-      <button type="button" class="btn btn-primary btn-sm"
-              data-action="click->digitizare#saveMove"
-              style="width:100%;margin-top:6px">💾 Salvează mutarea</button>
-      <button type="button" class="btn btn-secondary btn-sm"
-              data-action="click->digitizare#cancelMove"
-              style="width:100%;margin-top:6px">✕ Anulează mutarea</button>
+      <button type="button" class="btn btn-primary btn-sm digi-ctx-btn"
+              data-action="click->digitizare#saveMove">${this._iconSave()} Salvează mutarea</button>
+      <button type="button" class="btn btn-secondary btn-sm digi-ctx-btn"
+              data-action="click->digitizare#cancelMove">${this._iconCancel()} Anulează mutarea</button>
     `
     this.panelBodyTarget.insertBefore(div, this.panelBodyTarget.firstChild)
   }
+
+  // Iconuri SVG inline pentru butoanele de context (același set ca toolbar).
+  // currentColor = culoarea butonului din clasă (btn-primary alb, btn-secondary închis).
+  _iconSave()   { return `<svg class="digi-ctx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>` }
+  _iconCancel() { return `<svg class="digi-ctx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>` }
+  _iconExternal() { return `<svg class="digi-ctx-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>` }
 
   _removeMoveControls() {
     this.element.querySelector(".digi-move-controls")?.remove()
@@ -632,6 +656,14 @@ export default class extends Controller {
   startDrawing() {
     if (!this.map) return
     this.clearAll()
+    // Curățare DEFENSIVĂ pentru interacțiunile reziduale din alte module:
+    // poly-select lasso, multi-select dragbox, export draw — orice ar putea
+    // intercepta primul click pe hartă în loc să-l lase la noul Draw.
+    this._hartaMap?._endPolygonSelect?.()
+    this._hartaMap?.disableMultiSelect?.()
+    if (this._exportDraw && this.map) {
+      this.map.removeInteraction(this._exportDraw); this._exportDraw = null
+    }
 
     this._hartaMap?.setDigitizing(true)
 
@@ -650,7 +682,10 @@ export default class extends Controller {
 
     this.btnStartTarget.classList.add("btn-active")
     this.btnCloseTarget.disabled = false
-    this.btnUndoTarget.disabled  = false
+    this.btnUndoTarget.disabled  = true   // disabled până la primul vertex
+    if (this.hasBtnRedoTarget) this.btnRedoTarget.disabled = true
+    this._redoStack = []                  // resetăm stack-ul de redo la pornire desen
+    this._updateToolbarVisibility?.()
     const hint = this._metricSnap?.enabled
       ? `METRIC (${this._metricSnap.meters.toFixed(1)} m): desenezi liber. La SAVE, vertecșii în rază se vor potrivi automat pe vertecșii vecinilor.`
       : "Clic pe hartă pentru primul vertex. Dublu-clic pentru închidere. F8=ORTHO."
@@ -765,7 +800,13 @@ export default class extends Controller {
     if (this._postDrawModify && this.map) { this.map.removeInteraction(this._postDrawModify); this._postDrawModify = null }
     if (this._geomChangeKey) { ol.Observable.unByKey(this._geomChangeKey); this._geomChangeKey = null }
     if (this._snap && this.map) { this.map.removeInteraction(this._snap); this._snap = null }
+    // Curățare reziduuri de la operațiuni Mută/Rotește dacă au rămas active
+    // (previne consumul primului click pe map de către alt interaction).
+    if (this._postDrawTransform) this._cancelTransform?.()
+    if (this._modify && this.map) { this.map.removeInteraction(this._modify); this._modify = null }
     this._currentFeature = null
+    this._editing = false
+    this._editFeature = null
     this._hartaMap?.setDigitizing(false)
     this._drawSource.clear()
     this._topoSource?.clear()
@@ -776,6 +817,7 @@ export default class extends Controller {
     this.btnUndoTarget.disabled  = true
     this._updateSaveAvailability()
     this._updateVertexList()
+    this._updateToolbarVisibility?.()
     this.areaCalcTarget.textContent  = "—"
     this.areaDiffTarget.textContent  = "—"
     if (this.hasAreaActTarget)        this.areaActTarget.value = ""
@@ -789,6 +831,7 @@ export default class extends Controller {
     this._hartaMap?._updateFocusUrlParams?.(null)
     this._clearSelectionForm()
     this._updateEditButton()
+    this._updateToolbarVisibility?.()
     this._setStatus("Toți vertecșii au fost șterși.")
   }
 
@@ -848,6 +891,74 @@ export default class extends Controller {
 
   // Sincronizează UI cu starea metric-snap restaurată din localStorage (apel
   // la connect, după ce target-urile sunt disponibile).
+  // ── Floating toolbar: drag + persistență + vizibilitate contextuală ────
+
+  onToolbarGripDown(evt) {
+    if (!this.hasMapToolbarTarget) return
+    evt.preventDefault()
+    const tb   = this.mapToolbarTarget
+    const rect = tb.getBoundingClientRect()
+    const offX = evt.clientX - rect.left
+    const offY = evt.clientY - rect.top
+    tb.classList.add("is-dragging")
+
+    const onMove = (e) => {
+      const parent = tb.offsetParent || document.body
+      const pr = parent.getBoundingClientRect()
+      let x = e.clientX - pr.left - offX
+      let y = e.clientY - pr.top  - offY
+      // clamp în viewport
+      x = Math.max(0, Math.min(x, parent.clientWidth  - tb.offsetWidth))
+      y = Math.max(0, Math.min(y, parent.clientHeight - tb.offsetHeight))
+      tb.style.left   = `${x}px`
+      tb.style.top    = `${y}px`
+      tb.style.right  = "auto"
+      tb.style.bottom = "auto"
+    }
+    const onUp = () => {
+      tb.classList.remove("is-dragging")
+      document.removeEventListener("mousemove", onMove)
+      document.removeEventListener("mouseup",   onUp)
+      try {
+        localStorage.setItem("harta:toolbarPos", JSON.stringify({
+          left: tb.style.left, top: tb.style.top
+        }))
+      } catch (_) { /* no-op */ }
+    }
+    document.addEventListener("mousemove", onMove)
+    document.addEventListener("mouseup",   onUp)
+  }
+
+  _restoreToolbarPosition() {
+    if (!this.hasMapToolbarTarget) return
+    try {
+      const saved = JSON.parse(localStorage.getItem("harta:toolbarPos") || "null")
+      if (saved && saved.left && saved.top) {
+        this.mapToolbarTarget.style.left   = saved.left
+        this.mapToolbarTarget.style.top    = saved.top
+        this.mapToolbarTarget.style.right  = "auto"
+        this.mapToolbarTarget.style.bottom = "auto"
+      }
+    } catch (_) { /* no-op */ }
+  }
+
+  // Ascunde butoanele neaplicabile contextual:
+  //  - Editare/Mută/Șterge: doar când există o selecție
+  //  - Închide/Undo: doar în timpul desenării
+  //  - Șterge bulk: doar în multi-select mode + cu items selectate
+  _updateToolbarVisibility() {
+    const hide = (target, condition) => {
+      const el = this[`has${target}Target`] ? this[`${target[0].toLowerCase()}${target.slice(1)}Target`] : null
+      if (el) el.classList.toggle("map-tb-btn--hidden", !condition)
+    }
+    hide("BtnEdit",   !!this._selected)
+    hide("BtnMove",   !!this._selected)
+    hide("BtnDelete", !!this._selected)
+    hide("BtnClose",  !!this._draw)
+    hide("BtnUndo",   !!this._draw)
+    // btnDeleteMulti rămâne controlat prin atribut hidden direct în _onMultiSelectionChanged
+  }
+
   _syncMetricSnapUI() {
     if (this.hasMetricSnapToggleTarget) this.metricSnapToggleTarget.checked = !!this._metricSnap.enabled
     if (this.hasMetricSnapSliderTarget) {
@@ -915,6 +1026,16 @@ export default class extends Controller {
       if (res.ok && data.ok) {
         this._setStatus(`✓ ${kind === "cladire" ? "Clădirea" : "Parcela"} a fost salvată.`, "ok")
         this.clearAll()
+        // Persistă noul poligon în URL — la refresh, ecranul se centrează
+        // pe el. `clearAll` a șters URL-ul; setăm DUPĂ. Resetăm și
+        // `_zoomedFromUrl` ca să se aplice zoom imediat după reload.
+        const m = data.redirect?.match(/\/(lands|buildings)\/(\d+)/)
+        if (m && this._hartaMap) {
+          const newKind = m[1] === "buildings" ? "cladire" : "parcela"
+          const mockSel = { kind: newKind, feature: { get: (k) => k === "id" ? m[2] : null } }
+          this._hartaMap._updateFocusUrlParams?.(mockSel)
+          this._hartaMap._zoomedFromUrl = false
+        }
         // Reload layere ca să apară noul poligon
         this._hartaMap?._loadParcele?.()
         this._hartaMap?._loadCladiri?.()
@@ -1161,6 +1282,7 @@ export default class extends Controller {
     // Extragem vertecșii inițiali — OL a creat deja geometria înainte de drawstart,
     // deci listener-ul de „change" nu vede primul vertex (ar pierde populația _verts)
     this._extractVerts(this._currentFeature.getGeometry())
+    this._lastVertexCount = this._verts.length
     this._geomChangeKey = this._currentFeature.getGeometry().on("change", (e) => {
       this._extractVerts(e.target)
       if (this._verts.length >= 3) {
@@ -1172,9 +1294,40 @@ export default class extends Controller {
       // Update vecinii vizuali pe măsură ce poligonul crește (bbox-ul se extinde)
       clearTimeout(this._neighborDebounce)
       this._neighborDebounce = setTimeout(() => this._refreshDrawVisualNeighbors(), 250)
+      // Detectăm adăugare reală de vertex (vs simplă mișcare cursor) și
+      // refacem zoom-ul ca poligonul COMPLET să rămână în viewport.
+      if (this._verts.length > this._lastVertexCount) {
+        this._lastVertexCount = this._verts.length
+        this._fitPolygonInViewport()
+      } else if (this._verts.length < this._lastVertexCount) {
+        this._lastVertexCount = this._verts.length
+      }
     })
     // Inițial — fără vecini (bbox prea mic), dar pregătim source-ul.
     this._refreshDrawVisualNeighbors()
+  }
+
+  // Asigură că poligonul curent (cu toți vertecșii confirmați + spațiu pentru
+  // cursor) e vizibil în viewport. Apelat după fiecare vertex adăugat sau
+  // eliminat. Folosește bbox-ul cu un buffer = 30% din latura cea mai mare,
+  // ca să rămână loc de „lookahead" pentru următorul vertex.
+  _fitPolygonInViewport() {
+    if (!this._currentFeature || !this.map) return
+    const geom = this._currentFeature.getGeometry?.()
+    if (!geom) return
+    let ext
+    try { ext = geom.getExtent() } catch (_) { return }
+    if (!ext || !isFinite(ext[0]) || ext[0] === Infinity) return
+    const w = ext[2] - ext[0]
+    const h = ext[3] - ext[1]
+    const maxDim = Math.max(w, h, 1)
+    const pad = maxDim * 0.30  // 30% lookahead pentru următorul vertex
+    const padded = [ext[0] - pad, ext[1] - pad, ext[2] + pad, ext[3] + pad]
+    const view = this.map.getView()
+    const viewExt = view.calculateExtent(this.map.getSize())
+    // Dacă poligonul + lookahead e deja fully în view, nu refacem.
+    if (ol.extent.containsExtent(viewExt, padded)) return
+    view.fit(padded, { padding: [60, 60, 60, 60], maxZoom: 22, duration: 300 })
   }
 
   // Re-randează vertecșii vecinilor (cerculețe gri-bleu) în jurul poligonului
@@ -1304,11 +1457,31 @@ export default class extends Controller {
     // o a doua linie pe direcția liberă a cursorului.
     if (this._orthoEnabled && type === "LineString") return null
 
+    // Sketch point la cursor (Point feature): mai mare + cruciuliță pentru
+    // vizibilitate maximă — utilizatorul vede CLAR unde va fi următorul vertex.
+    if (type === "Point") {
+      return [
+        new ol.style.Style({
+          image: new ol.style.Circle({
+            radius: 7,
+            fill:   new ol.style.Fill({ color: "rgba(29, 78, 216, 0.4)" }),
+            stroke: new ol.style.Stroke({ color: "#ffffff", width: 2 })
+          })
+        }),
+        new ol.style.Style({
+          image: new ol.style.RegularShape({
+            points: 4, radius: 11, radius2: 0, angle: 0,  // cruciuliță „+"
+            stroke: new ol.style.Stroke({ color: "#1d4ed8", width: 1.5 })
+          })
+        })
+      ]
+    }
+
     return new ol.style.Style({
       stroke: new ol.style.Stroke({ color: "#1d4ed8", width: 2 }),
       fill:   new ol.style.Fill({ color: "rgba(147, 197, 253, 0.25)" }),
       image:  new ol.style.Circle({
-        radius: 4,
+        radius: 5,
         fill:   new ol.style.Fill({ color: "#1d4ed8" }),
         stroke: new ol.style.Stroke({ color: "#fff", width: 2 })
       })
@@ -2062,6 +2235,7 @@ export default class extends Controller {
     if (this._draw || this._editing) return
     this._selected = sel
     this._updateEditButton()
+    this._updateToolbarVisibility?.()
     this._populateAreaFromSelection(sel)
     this._populateFormFromSelection(sel)
   }
@@ -2165,13 +2339,12 @@ export default class extends Controller {
     const sel = this._selected
     if (this.hasBtnEditTarget) {
       this.btnEditTarget.disabled = !sel
+      // Actualizăm DOAR title (tooltip); textContent ar suprascrie SVG-ul.
       if (sel) {
         const label = sel.feature.get("numar_cadastral") || `#${sel.feature.get("id")}`
-        this.btnEditTarget.title = `Editează ${sel.kind} ${label}`
-        this.btnEditTarget.textContent = `✎ Editează ${sel.kind} ${label}`
+        this.btnEditTarget.title = `Editează ${sel.kind} ${label} (comandă: M)`
       } else {
-        this.btnEditTarget.title = "Click pe un poligon de pe hartă pentru a-l selecta"
-        this.btnEditTarget.textContent = "✎ Editează"
+        this.btnEditTarget.title = "Modifică vertecșii poligonului selectat (comandă: M)"
       }
     }
     if (this.hasBtnDeleteTarget) {
@@ -2232,6 +2405,7 @@ export default class extends Controller {
         this._hartaMap?._updateFocusUrlParams?.(null)
         this._selected = null
         this._updateEditButton()
+    this._updateToolbarVisibility?.()
         // Reload toate layerele relevante (feature-ul poate fi în parcele
         // sau în cgxml — sau în cladiri/cgxml pentru clădiri).
         this._hartaMap?._loadParcele?.()
@@ -2269,10 +2443,8 @@ export default class extends Controller {
   _onPolygonSelectMode(detail) {
     this._polygonSelectActive = !!detail?.active
     if (this.hasBtnPolygonSelectTarget) {
-      const btn = this.btnPolygonSelectTarget
-      btn.classList.toggle("btn-primary", this._polygonSelectActive)
-      btn.classList.toggle("btn-secondary", !this._polygonSelectActive)
-      btn.setAttribute("aria-pressed", String(this._polygonSelectActive))
+      // Stilul de „activ" e dat de CSS pe [aria-pressed=true] în floating toolbar.
+      this.btnPolygonSelectTarget.setAttribute("aria-pressed", String(this._polygonSelectActive))
     }
     if (this._polygonSelectActive) {
       this._setStatus("Desenează poligonul de selecție: click vertecși, dublu-click închide, Esc anulează.", "info")
@@ -2282,10 +2454,7 @@ export default class extends Controller {
   _onMultiSelectMode(detail) {
     this._multiSelectActive = !!detail?.active
     if (this.hasBtnMultiSelectTarget) {
-      const btn = this.btnMultiSelectTarget
-      btn.classList.toggle("btn-primary", this._multiSelectActive)
-      btn.classList.toggle("btn-secondary", !this._multiSelectActive)
-      btn.setAttribute("aria-pressed", String(this._multiSelectActive))
+      this.btnMultiSelectTarget.setAttribute("aria-pressed", String(this._multiSelectActive))
     }
     this._renderMultiSelectInfo(0)
     if (!this._multiSelectActive && this.hasBtnDeleteMultiTarget) {
@@ -2310,11 +2479,24 @@ export default class extends Controller {
   }
 
   _renderMultiSelectInfo(count) {
-    if (!this.hasMultiSelectInfoTarget) return
-    if (!this._multiSelectActive) { this.multiSelectInfoTarget.textContent = ""; return }
-    this.multiSelectInfoTarget.textContent = count === 0
-      ? "Selecție multiplă activă — 0 selectate"
-      : `${count} selectate`
+    if (this.hasMultiSelectInfoTarget) {
+      if (!this._multiSelectActive) {
+        this.multiSelectInfoTarget.textContent = ""
+      } else {
+        this.multiSelectInfoTarget.textContent = count === 0
+          ? "Selecție multiplă activă — 0 selectate"
+          : `${count} selectate`
+      }
+    }
+    // Badge pe butonul din toolbar — afișează N când selecție multiplă activă + count > 0.
+    if (this.hasMultiSelectBadgeTarget) {
+      if (this._multiSelectActive && count > 0) {
+        this.multiSelectBadgeTarget.textContent = String(count)
+        this.multiSelectBadgeTarget.hidden = false
+      } else {
+        this.multiSelectBadgeTarget.hidden = true
+      }
+    }
   }
 
   onCleanupThresholdChange() {
@@ -2558,11 +2740,11 @@ export default class extends Controller {
       this._editEdgeLabelsSource.addFeature(f)
     }
 
-    // Eticheta centrală cu suprafața — live de la al 3-lea vertex (draw,
-    // post-draw modify, edit). În MOD DRAW folosim geometria curentă a
-    // feature-ului (include cursor-ul ca phantom vertex) → eticheta reflectă
-    // suprafața vizuală reală, inclusiv unde cursor-ul închide poligonul.
-    // În alte moduri (edit / post-draw) folosim shoelace pe _verts.
+    // Eticheta cu suprafața în interiorul poligonului — live de la al 3-lea
+    // vertex. Poziție: getInteriorPoint() (garantat în polygon, chiar non-convex).
+    // În MOD DRAW folosim geometria OL (include cursor) → suprafața vizuală
+    // corespunde cu ce vede utilizatorul. La edit / post-draw folosim shoelace
+    // pe _verts. Bara de jos (statusArea) e actualizată separat în _updateLiveArea.
     if (verts.length >= 3) {
       let area = 0
       let labelXY = [cx, cy]
@@ -2657,15 +2839,36 @@ export default class extends Controller {
   _findVisualNeighbors(feature) {
     if (!this._hartaMap?.cgxmlLayer) return []
     const editGeom = feature.getGeometry()
-    const editExt  = editGeom.getExtent()
-    // Buffer mic pentru bbox-search (sub-metru e suficient pentru a prinde
-    // toate poligoanele candidate la touch).
-    const bbox     = ol.extent.buffer(editExt, 0.20)
-    const expectEt = this.editKindValue === "cladire" ? "building" : "land"
-    const parser   = this._hartaMap._getJstsParser?.()
-    const jstsEdit = parser ? parser.read(editGeom) : null
-    const touchTol = 0.05      // 5 cm — toleranță floating-point pentru „lipit"
+    if (!editGeom) return []
+    const kind     = this._draw ? this._entityType : this.editKindValue
+    const expectEt = kind === "cladire" ? "building" : "land"
     const out      = []
+
+    // ── Mod DRAW: bbox-proximitate, fără JSTS ─────────────────────────
+    // În timpul desenării (chiar cu 1 vertex), arătăm imediat vecinii din
+    // raza ~5 m a poligonului curent (bbox extins). Nu folosim JSTS pentru
+    // că poligonul cu <3 vertecși are LinearRing invalid (throws). User
+    // are referință vizuală în jurul cursor-ului încă de la primul click.
+    if (this._draw) {
+      const draftRadius = 5.0    // metri în jurul bbox-ului
+      const bbox = ol.extent.buffer(editGeom.getExtent(), draftRadius)
+      this._hartaMap.cgxmlLayer.getSource().forEachFeatureInExtent(bbox, (f) => {
+        if (f === feature) return
+        if (f.get("entity_type") !== expectEt) return
+        out.push(f)
+      })
+      return out
+    }
+
+    // ── Mod EDIT / POST-DRAW MODIFY: JSTS strict 5 cm ─────────────────
+    const bbox     = ol.extent.buffer(editGeom.getExtent(), 0.20)
+    const parser   = this._hartaMap._getJstsParser?.()
+    let jstsEdit = null
+    if (parser) {
+      try { jstsEdit = parser.read(editGeom) }
+      catch (_) { jstsEdit = null }
+    }
+    const touchTol = 0.05
     this._hartaMap.cgxmlLayer.getSource().forEachFeatureInExtent(bbox, (f) => {
       if (f === feature) return
       if (f.get("entity_type") !== expectEt) return
@@ -2673,7 +2876,7 @@ export default class extends Controller {
         try {
           const jstsCand = parser.read(f.getGeometry())
           if (jstsEdit.distance(jstsCand) > touchTol) return
-        } catch (_) { return }   // skip features cu geometrii ne-parsabile
+        } catch (_) { return }
       }
       out.push(f)
     })
@@ -2810,7 +3013,8 @@ export default class extends Controller {
     const ent = this.element.querySelector(".digi-entity-toggle")
     if (ent) ent.style.display = "none"
 
-    // Inject panou de edit (idempotent)
+    // Inject panou de edit (idempotent). Folosim acelasi pattern de design
+    // (header gălbui, hint listă, butoane cu iconuri SVG) ca panoul de mutare.
     if (this.element.querySelector(".digi-edit-panel")) return
     const panel = document.createElement("section")
     panel.className = "digi-section digi-edit-panel"
@@ -2823,14 +3027,10 @@ export default class extends Controller {
       </ul>
       <div class="digi-edit-topo-mirror" data-digitizare-target="editTopoMirror"
            style="margin-top:8px;font-size:11px;display:flex;flex-direction:column;gap:3px"></div>
-      <button type="button" class="btn btn-primary btn-sm digi-edit-save"
-              data-action="click->digitizare#saveEdit"
-              style="width:100%;margin-top:8px">💾 Salvează modificări</button>
-      <button type="button" class="btn btn-secondary btn-sm"
-              style="width:100%;margin-top:6px"
-              data-action="click->digitizare#cancelEdit">
-        ✕ Anulează
-      </button>
+      <button type="button" class="btn btn-primary btn-sm digi-ctx-btn digi-edit-save"
+              data-action="click->digitizare#saveEdit">${this._iconSave()} Salvează modificări</button>
+      <button type="button" class="btn btn-secondary btn-sm digi-ctx-btn"
+              data-action="click->digitizare#cancelEdit">${this._iconCancel()} Anulează</button>
     `
     // Inserăm panoul la TOP-ul panel-body, ca să fie imediat vizibil sub header
     const body = this.hasPanelBodyTarget ? this.panelBodyTarget : this.element
@@ -2947,6 +3147,7 @@ export default class extends Controller {
     this._hartaMap?.clearSelection?.()
     this._selected = null
     this._updateEditButton()
+    this._updateToolbarVisibility?.()
 
     // Reîncarcă layerele (await pentru ca re-highlight să găsească feature-ul nou)
     await Promise.all([
@@ -2970,7 +3171,15 @@ export default class extends Controller {
         return String(f.get("id")) === editedId
       })
       if (feat) {
-        hm._setSelectedFeature?.({ kind: editedKind, feature: feat, layer }, { silent: true })
+        const sel = { kind: editedKind, feature: feat, layer }
+        hm._setSelectedFeature?.(sel, { silent: true })
+        // Persistă entitatea editată în URL pentru refresh ulterior.
+        hm._updateFocusUrlParams?.(sel)
+        // Re-sincronizăm starea pe digitizare (silent select nu fires event)
+        // ca toolbar-ul să arate Edit/Mută/Șterge active (selecția există).
+        this._selected = sel
+        this._updateEditButton()
+        this._updateToolbarVisibility?.()
         break
       }
     }

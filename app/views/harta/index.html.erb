@@ -93,7 +93,9 @@
       </div>
 
       <%= link_to "Listă parcele", lands_path, class: "btn btn-secondary btn-sm sidebar-link" %>
-      <%= link_to "📋 Jurnal modificări", jurnal_modificari_path, class: "btn btn-secondary btn-sm sidebar-link" %>
+      <%= link_to jurnal_modificari_path, class: "btn btn-secondary btn-sm sidebar-link" do %>
+        <%= icon "report" %> Jurnal modificări
+      <% end %>
     </div>
 
     <!-- Toggle bar — colapsare/expansiune sidebar -->
@@ -154,8 +156,9 @@
             </button>
             <button class="btn btn-danger btn-sm"
                     data-divizare-proiect-target="btnDeleteSelected"
-                    data-action="click->divizare-proiect#deleteSelected">
-              🗑
+                    data-action="click->divizare-proiect#deleteSelected"
+                    title="Șterge conturul selectat">
+              <%= icon "trash" %>
             </button>
           </div>
 
@@ -169,13 +172,13 @@
             <button class="btn btn-primary btn-sm"
                     data-divizare-proiect-target="btnDrawContour"
                     data-action="click->divizare-proiect#startDrawContour">
-              ✏ Desenează
+              <%= icon "pencil" %> Desenează
             </button>
             <button class="btn btn-success btn-sm"
                     data-divizare-proiect-target="btnSaveContour"
                     data-action="click->divizare-proiect#saveContour"
                     disabled>
-              💾 Salvează
+              <%= icon "save" %> Salvează
             </button>
             <button class="btn btn-outline btn-sm"
                     data-divizare-proiect-target="btnResetContour"
@@ -205,7 +208,7 @@
             <button class="btn btn-primary btn-sm"
                     data-divizare-proiect-target="btnDetectCgxml"
                     data-action="click->divizare-proiect#detectCgxml">
-              🔍 Detectează imobile CGXML
+              <%= icon "search" %> Detectează imobile CGXML
             </button>
             <button class="btn btn-success btn-sm"
                     data-divizare-proiect-target="btnApplyFit"
@@ -295,7 +298,104 @@
          data-harta-map-uat-url-value="<%= uat_boundaries_geojson_path %>"
          data-harta-map-mapproxy-url-value="http://localhost:8080"
          <% if @base_extent %>data-harta-map-base-extent-value="<%= @base_extent.to_json %>"<% end %>>
+
+    <!-- ── Floating toolbar (stil AutoCAD/QGIS) — acțiuni peste viewport ── -->
+    <%# Icons: monochrome SVG (Lucide-style), 18×18, stroke-width 1.6, currentColor.
+        Atributele comune sunt mutate într-un helper Ruby cu fragment static. %>
+    <% svg = ->(content) { %(<svg class="tb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">#{content}</svg>).html_safe } %>
+    <div class="map-toolbar" data-digitizare-target="mapToolbar">
+      <div class="map-toolbar-grip"
+           data-action="mousedown->digitizare#onToolbarGripDown"
+           title="Trage pentru a muta toolbar-ul">⋮⋮</div>
+      <!-- Grup 1: Digitizare nouă -->
+      <div class="map-toolbar-group" role="group" aria-label="Creație">
+        <button type="button" class="map-tb-btn"
+                data-digitizare-target="btnStart"
+                data-action="click->digitizare#startDrawing"
+                title="Digitizare poligon nou (comandă: PAR sau CL)">
+          <%= svg.('<path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/>') %>
+        </button>
+        <button type="button" class="map-tb-btn"
+                data-digitizare-target="btnClose"
+                data-action="click->digitizare#closePolygon"
+                disabled
+                title="Închide poligonul curent (comandă: I)">
+          <%= svg.('<polygon points="12 2 22 8 22 16 12 22 2 16 2 8 12 2"/>') %>
+        </button>
+        <button type="button" class="map-tb-btn"
+                data-digitizare-target="btnUndo"
+                data-action="click->digitizare#undoAction"
+                disabled
+                title="Undo — anulează ultima acțiune (comandă: U)">
+          <%= svg.('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/>') %>
+        </button>
+        <button type="button" class="map-tb-btn"
+                data-digitizare-target="btnRedo"
+                data-action="click->digitizare#redoAction"
+                disabled
+                title="Redo — refă ultima acțiune anulată (comandă: R)">
+          <%= svg.('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5v0A5.5 5.5 0 0 0 9.5 20H13"/>') %>
+        </button>
+        <button type="button" class="map-tb-btn"
+                data-action="click->digitizare#clearAll"
+                title="Șterge tot (anulează desenare)">
+          <%= svg.('<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>') %>
+        </button>
+      </div>
+      <span class="map-toolbar-sep"></span>
+      <!-- Grup 2: Editare poligon selectat -->
+      <div class="map-toolbar-group" role="group" aria-label="Editare selecție">
+        <button type="button" class="map-tb-btn"
+                data-digitizare-target="btnEdit"
+                data-action="click->digitizare#editSelected"
+                disabled
+                title="Modifică vertecșii poligonului selectat (comandă: M)">
+          <%= svg.('<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/>') %>
+        </button>
+        <button type="button" class="map-tb-btn"
+                data-digitizare-target="btnMove"
+                data-action="click->digitizare#moveSelected"
+                disabled
+                title="Mută poligonul selectat (comandă: MUT)">
+          <%= svg.('<path d="M5 9 2 12l3 3"/><path d="m9 5 3-3 3 3"/><path d="m15 19-3 3-3-3"/><path d="m19 9 3 3-3 3"/><path d="M2 12h20"/><path d="M12 2v20"/>') %>
+        </button>
+        <button type="button" class="map-tb-btn"
+                data-digitizare-target="btnDelete"
+                data-action="click->digitizare#deleteSelected"
+                disabled
+                title="Șterge poligonul selectat (comandă: S)">
+          <%= svg.('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>') %>
+        </button>
+      </div>
+      <span class="map-toolbar-sep"></span>
+      <!-- Grup 3: Selecție multiplă -->
+      <div class="map-toolbar-group" role="group" aria-label="Selecție multiplă">
+        <button type="button" class="map-tb-btn"
+                data-digitizare-target="btnMultiSelect"
+                data-action="click->digitizare#toggleMultiSelect"
+                aria-pressed="false"
+                title="Selecție multiplă: click toggle pe poligoane sau Shift+drag pentru zonă dreptunghiulară">
+          <%= svg.('<path d="M3 5a2 2 0 0 1 2-2"/><path d="M19 3a2 2 0 0 1 2 2"/><path d="M21 19a2 2 0 0 1-2 2"/><path d="M5 21a2 2 0 0 1-2-2"/><path d="M9 3h1"/><path d="M9 21h1"/><path d="M14 3h1"/><path d="M14 21h1"/><path d="M3 9v1"/><path d="M21 9v1"/><path d="M3 14v1"/><path d="M21 14v1"/>') %>
+          <span class="map-tb-badge" data-digitizare-target="multiSelectBadge" hidden>0</span>
+        </button>
+        <button type="button" class="map-tb-btn"
+                data-digitizare-target="btnPolygonSelect"
+                data-action="click->digitizare#startPolygonSelect"
+                aria-pressed="false"
+                title="Lasso poligon: desenează poligon neregulat (intersecția selectează inclusiv drumuri lungi)">
+          <%= svg.('<path d="M7 22a5 5 0 0 1-2-4"/><path d="M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1"/><path d="M10.4 19.9c-.7.7-1.7 1.1-2.8 1.1-2.2 0-4-1.8-4-4 0-1.1.4-2.1 1.1-2.8"/>') %>
+        </button>
+        <button type="button" class="map-tb-btn"
+                data-digitizare-target="btnDeleteMulti"
+                data-action="click->digitizare#deleteMultiSelected"
+                hidden
+                disabled
+                title="Șterge toate geometriile din selecția multiplă">
+          <%= svg.('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/><circle cx="19" cy="6" r="3" fill="currentColor"/>') %>
+        </button>
+      </div>
     </div>
+    </div><!-- /#harta-map -->
 
     <!-- Linia de comandă (stil AutoCAD) — input absolut / relativ / polar -->
     <div class="cad-cmdline">
@@ -408,11 +508,11 @@
                   data-action="click->digitizare#runAuditTopologie"
                   data-digitizare-target="btnAudit"
                   data-digitizare-url-param="<%= digitizare_audit_topologie_path %>">
-            🔍 Scanează erori
+            <%= icon "search" %> Scanează erori
           </button>
           <button type="button" class="btn btn-outline btn-sm"
                   data-action="click->digitizare#clearAudit">
-            ✕ Curăță
+            <%= icon "eraser" %> Curăță
           </button>
         </div>
         <div class="digi-audit-list" data-digitizare-target="auditList"></div>
@@ -439,91 +539,25 @@
                     data-digitizare-target="btnCleanup"
                     style="flex:1"
                     title="Operează pe poligoanele din Selecție multiplă (click sau lasso poligon)">
-              🧹 Curăță selecția
+              <%= icon "broom" %> Curăță selecția
             </button>
             <button type="button" class="btn btn-secondary btn-sm"
                     data-action="click->digitizare#runCleanupViewport"
                     data-digitizare-target="btnCleanupViewport"
                     style="flex:1"
                     title="Operează pe toate poligoanele vizibile în viewport-ul curent">
-              🌐 Curăță viewport
+              <%= icon "globe" %> Curăță viewport
             </button>
           </div>
           <div data-digitizare-target="cleanupResult" style="margin-top:6px;font-size:11px"></div>
         </div>
       </section>
 
-      <!-- 2. Acțiuni -->
+      <!-- 2. Status — acțiunile sunt acum în floating toolbar peste hartă -->
       <section class="digi-section">
-        <div class="digi-section-label">Acțiuni</div>
-        <div class="digi-btn-row">
-          <button class="btn btn-primary btn-sm"
-                  data-digitizare-target="btnStart"
-                  data-action="click->digitizare#startDrawing">
-            ✏ Digitizare
-          </button>
-          <button class="btn btn-secondary btn-sm"
-                  data-digitizare-target="btnEdit"
-                  data-action="click->digitizare#editSelected"
-                  disabled
-                  title="Click pe un poligon de pe hartă pentru a-l selecta">
-            ✎ Editează
-          </button>
-          <button class="btn btn-secondary btn-sm"
-                  data-digitizare-target="btnMove"
-                  data-action="click->digitizare#moveSelected"
-                  disabled
-                  title="Translație poligon: drag pe geometrie · SV salvează · A anulează">
-            ✥ Mută
-          </button>
-          <button class="btn btn-danger btn-sm"
-                  data-digitizare-target="btnDelete"
-                  data-action="click->digitizare#deleteSelected"
-                  disabled
-                  title="Click pe un poligon de pe hartă pentru a-l selecta">
-            🗑 Șterge
-          </button>
-          <button class="btn btn-secondary btn-sm"
-                  data-digitizare-target="btnMultiSelect"
-                  data-action="click->digitizare#toggleMultiSelect"
-                  aria-pressed="false"
-                  title="Activează selecția multiplă: click toggle pe poligoane sau Shift+drag pentru zonă">
-            🔲 Selecție multiplă
-          </button>
-          <button class="btn btn-secondary btn-sm"
-                  data-digitizare-target="btnPolygonSelect"
-                  data-action="click->digitizare#startPolygonSelect"
-                  aria-pressed="false"
-                  title="Desenează poligon neregulat: click vertecși, dublu-click închide, Esc anulează">
-            🔷 Selecție poligon
-          </button>
-          <button class="btn btn-danger btn-sm"
-                  data-digitizare-target="btnDeleteMulti"
-                  data-action="click->digitizare#deleteMultiSelected"
-                  hidden
-                  disabled
-                  title="Șterge toate geometriile selectate">
-            🗑 Șterge selecția
-          </button>
-          <button class="btn btn-secondary btn-sm"
-                  data-digitizare-target="btnClose"
-                  data-action="click->digitizare#closePolygon"
-                  disabled>
-            ⬡ Închide
-          </button>
-          <button class="btn btn-secondary btn-sm"
-                  data-action="click->digitizare#undoVertex"
-                  disabled
-                  data-digitizare-target="btnUndo">
-            ↩ Undo
-          </button>
-          <button class="btn btn-outline btn-sm"
-                  data-action="click->digitizare#clearAll">
-            ✕ Șterge tot
-          </button>
-        </div>
+        <div class="digi-section-label">Status</div>
         <div class="digi-status" data-digitizare-target="statusBar">
-          Apăsați „Digitizare" pentru a începe.
+          Apăsați ✏ (toolbar pe hartă) sau tastați „PAR" pentru a începe.
         </div>
         <div class="digi-multi-info" data-digitizare-target="multiSelectInfo" style="font-size:12px;color:#ea580c;margin-top:4px;"></div>
       </section>
@@ -589,7 +623,7 @@
             <button type="button" class="btn btn-primary btn-sm"
                     style="width:100%;margin-top:8px"
                     data-action="click->digitizare#saveParcel">
-              💾 Salvează parcela
+              <%= icon "save" %> Salvează parcela
             </button>
           <% end %>
         </div>
@@ -648,7 +682,7 @@
             <button type="button" class="btn btn-primary btn-sm"
                     style="width:100%;margin-top:8px"
                     data-action="click->digitizare#saveBuilding">
-              💾 Salvează clădirea
+              <%= icon "save" %> Salvează clădirea
             </button>
           <% end %>
         </div>
@@ -725,11 +759,11 @@
                   data-action="click->digitizare#startExportZoneSelect"
                   data-digitizare-shape-param="polygon"
                   data-digitizare-target="btnExportZonePoly">
-            ✏️ Poligon
+            <%= icon "pencil" %> Poligon
           </button>
           <button type="button" class="btn btn-outline btn-sm"
                   data-action="click->digitizare#clearExportZone">
-            ✕ Curăță
+            <%= icon "eraser" %> Curăță
           </button>
         </div>
         <div class="digi-export-status" data-digitizare-target="exportStatus"
@@ -755,11 +789,11 @@
                   data-digitizare-target="btnExportZoneSubmit"
                   data-digitizare-url-param="<%= digitizare_export_zone_path %>"
                   disabled>
-            ⬇ Exportă
+            <%= icon "download" %> Exportă
           </button>
           <button type="button" class="btn btn-outline btn-sm"
                   data-action="click->digitizare#showRaport">
-            📋 Raport poligon
+            <%= icon "report" %> Raport poligon
           </button>
         </div>
       </section>
