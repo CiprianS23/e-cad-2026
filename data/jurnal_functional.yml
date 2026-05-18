@@ -11,6 +11,29 @@
 #
 - date: 2026-05-18
   commit: HEAD
+  title: "Curățare topologică pe viewport + selecție multiplă completă (CGXML)"
+  functii:
+    - nume: "Curățare topologică pe viewport-ul vizibil"
+      detalii: |
+        Buton nou „🌐 Curăță viewport" în secțiunea Topologie. Colectează
+        automat toate poligoanele vizibile în vederea curentă (parcele +
+        clădiri + imobile CGXML), aplică unificarea vertecșilor și
+        elimină goluri/suprapuneri sub pragul setat. Deduplicare
+        automată când același imobil apare în mai multe layere.
+        Util pentru curățarea unei zone întregi fără a fi nevoie să
+        faci selecție manuală.
+
+    - nume: "Selecția multiplă include drumuri/ape/imobile CGXML"
+      detalii: |
+        Lasso poligon și box-select prind acum și poligoanele care
+        DOAR intersectează zona desenată (nu doar cele complet
+        conținute) — important pentru drumuri, ape, păduri care sunt
+        de obicei poligoane lungi ce se extind dincolo de zona de
+        interes. Anterior aceste imobile erau ignorate dacă o parte
+        din ele ieșea în afara lasso-ului.
+
+- date: 2026-05-18
+  commit: 6c2a7d1
   title: "Jurnal aplicație reformulat — ordine inversă + funcțiuni expandabile"
   functii:
     - nume: "Pagina /jurnal_modificari restructurată"

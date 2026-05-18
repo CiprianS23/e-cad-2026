@@ -23,7 +23,7 @@ export default class extends Controller {
     "snapSlider", "snapToleranceVal", "snapModes",
     "metricSnapToggle", "metricSnapSlider", "metricSnapVal",
     "btnStart", "btnEdit", "btnDelete", "btnMove", "btnClose", "btnUndo", "btnAudit", "auditList",
-    "cleanupSlider", "cleanupVal", "btnCleanup", "cleanupResult",
+    "cleanupSlider", "cleanupVal", "btnCleanup", "btnCleanupViewport", "cleanupResult",
     "btnMultiSelect", "btnPolygonSelect", "btnDeleteMulti", "multiSelectInfo",
     "dxfFileInput", "dxfMapping",
     "btnExportZone", "btnExportZonePoly", "btnExportZoneSubmit", "exportFormat",
@@ -2323,28 +2323,61 @@ export default class extends Controller {
     if (this.hasCleanupValTarget) this.cleanupValTarget.textContent = v.toFixed(2)
   }
 
-  // Curățare topologică pe zona selectată (multi-select). Trimite IDs +
-  // threshold către `/digitizare/cleanup_topology`, afișează rezumatul.
+  // Curățare topologică pe zona din multi-selecție (click toggle sau lasso).
   async runCleanupTopology() {
-    const items = this._hartaMap?.getMultiSelection?.() || []
-    if (items.length === 0) {
-      this._setCleanupResult('Niciun poligon selectat. Activează „Selecție multiplă" și marchează zona.', "warn")
+    const sel = this._hartaMap?.getMultiSelection?.() || []
+    if (sel.length === 0) {
+      this._setCleanupResult('Niciun poligon selectat. Activează „Selecție multiplă" (click toggle sau 🔷 lasso poligon).', "warn")
       return
     }
+    const items = sel.map(it => ({ kind: it.kind, id: it.feature.get("id") }))
+    await this._executeCleanup(items, "Selecție multiplă")
+  }
+
+  // Curățare topologică pe toate poligoanele vizibile în viewport-ul curent.
+  // Deduplicare automată: un imobil CGXML poate apărea și în layer-ul cgxml,
+  // și în parcele (dacă are cache geometric) — păstrăm o singură intrare.
+  async runCleanupViewport() {
+    const map = this._hartaMap?.map
+    if (!map) {
+      this._setCleanupResult("Harta nu e gata.", "warn")
+      return
+    }
+    const ext = map.getView().calculateExtent(map.getSize())
+    const seen = new Map()
+    const add = (kind, id) => {
+      if (!id) return
+      const key = `${kind}-${id}`
+      if (!seen.has(key)) seen.set(key, { kind, id })
+    }
+    this._hartaMap.parcelLayer?.getSource().forEachFeatureInExtent(ext, (f) => add("parcela", f.get("id")))
+    this._hartaMap.cladiriLayer?.getSource().forEachFeatureInExtent(ext, (f) => add("cladire", f.get("id")))
+    this._hartaMap.cgxmlLayer?.getSource().forEachFeatureInExtent(ext, (f) => {
+      const et = f.get("entity_type")
+      if (et === "land")     add("parcela", f.get("id"))
+      if (et === "building") add("cladire", f.get("id"))
+    })
+    const items = Array.from(seen.values())
+    if (items.length === 0) {
+      this._setCleanupResult("Niciun poligon vizibil în viewport.", "warn")
+      return
+    }
+    await this._executeCleanup(items, "Viewport vizibil")
+  }
+
+  // Helper comun: prompt, POST, afișare rezumat, reload layere.
+  async _executeCleanup(items, sourceLabel) {
     const threshold = this.hasCleanupSliderTarget ? parseFloat(this.cleanupSliderTarget.value) : 0.5
-    const msg = `Curățare topologică pe ${items.length} poligon(e) cu prag ${threshold.toFixed(2)} mp.\n\n` +
+    const msg = `Curățare topologică pe ${items.length} poligon(e) (${sourceLabel}) cu prag ${threshold.toFixed(2)} mp.\n\n` +
                 `Vor fi snap-uite vertecșii pe laturi comune și eliminate goluri/suprapuneri ≤ ${threshold.toFixed(2)} mp.\n` +
                 `Suprafețele se păstrează în ±1 mp; ce depășește = sărit.\n\nContinui?`
     if (!confirm(msg)) return
 
-    if (this.hasBtnCleanupTarget) this.btnCleanupTarget.disabled = true
-    this._setCleanupResult("Curățare în curs…", "info")
+    [this.hasBtnCleanupTarget && this.btnCleanupTarget,
+     this.hasBtnCleanupViewportTarget && this.btnCleanupViewportTarget].forEach(b => { if (b) b.disabled = true })
+    this._setCleanupResult(`Curățare ${sourceLabel.toLowerCase()} în curs (${items.length} poligoane)…`, "info")
 
     try {
-      const payload = {
-        items:     items.map(it => ({ kind: it.kind, id: it.feature.get("id") })),
-        threshold: threshold
-      }
       const res = await fetch(this.cleanupUrlValue, {
         method:  "POST",
         headers: {
@@ -2352,7 +2385,7 @@ export default class extends Controller {
           "X-CSRF-Token": this._csrf(),
           "Accept":       "application/json"
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ items, threshold })
       })
       const data = await res.json()
       if (!data.ok) {
@@ -2360,25 +2393,31 @@ export default class extends Controller {
         return
       }
       const lines = []
-      lines.push(`<strong>${data.summary}</strong>`)
+      lines.push(`<strong>${sourceLabel}: ${data.summary}</strong>`)
       if (data.modified.length) {
-        lines.push(`✓ Modificate: ${data.modified.map(m => m.label + ` (Δ${m.delta.toFixed(2)} mp)`).join(", ")}`)
+        const sample = data.modified.slice(0, 8).map(m => m.label).join(", ")
+        const more   = data.modified.length > 8 ? ` (+${data.modified.length - 8})` : ""
+        lines.push(`✓ Modificate: ${sample}${more}`)
       }
       if (data.skipped.length) {
-        lines.push(`⊘ Sărite: ${data.skipped.map(s => `${s.label} — ${s.reason}`).join("; ")}`)
+        const sample = data.skipped.slice(0, 5).map(s => `${s.label} — ${s.reason}`).join("; ")
+        const more   = data.skipped.length > 5 ? ` (+${data.skipped.length - 5})` : ""
+        lines.push(`⊘ Sărite: ${sample}${more}`)
       }
       if (data.errors.length) {
-        lines.push(`⚠ Erori: ${data.errors.map(e => `${e.label}: ${e.message}`).join("; ")}`)
+        const sample = data.errors.slice(0, 5).map(e => `${e.label}: ${e.message}`).join("; ")
+        const more   = data.errors.length > 5 ? ` (+${data.errors.length - 5})` : ""
+        lines.push(`⚠ Erori: ${sample}${more}`)
       }
       this._setCleanupResult(lines.join("<br>"), data.errors.length ? "warn" : "ok")
-      // Reload layere pentru a vedea geometriile noi.
       this._hartaMap?._loadParcele?.()
       this._hartaMap?._loadCladiri?.()
       this._hartaMap?._loadCgxml?.()
     } catch (e) {
       this._setCleanupResult(`Eroare rețea: ${e.message}`, "warn")
     } finally {
-      if (this.hasBtnCleanupTarget) this.btnCleanupTarget.disabled = false
+      [this.hasBtnCleanupTarget && this.btnCleanupTarget,
+       this.hasBtnCleanupViewportTarget && this.btnCleanupViewportTarget].forEach(b => { if (b) b.disabled = false })
     }
   }
 

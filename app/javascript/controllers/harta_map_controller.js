@@ -664,7 +664,10 @@ export default class extends Controller {
   _selectFeaturesInExtent(extent) {
     const layers = [
       { layer: this.parcelLayer,  kind: "parcela" },
-      { layer: this.cladiriLayer, kind: "cladire" }
+      { layer: this.cladiriLayer, kind: "cladire" },
+      // CGXML — kind derivat din entity_type (land→parcela, building→cladire).
+      // Conține drumuri, ape, păduri etc. — toate ca lands extinși.
+      { layer: this.cgxmlLayer,   kind: null }
     ]
     let added = 0
     layers.forEach(({ layer, kind }) => {
@@ -674,9 +677,14 @@ export default class extends Controller {
       src.forEachFeatureIntersectingExtent(extent, (feature) => {
         const id = feature.get("id")
         if (id == null) return
-        const key = this._multiKey(kind, id)
+        let k = kind
+        if (k === null) {
+          const et = feature.get("entity_type")
+          k = et === "building" ? "cladire" : "parcela"
+        }
+        const key = this._multiKey(k, id)
         if (!this._multiSelected.has(key)) {
-          this._multiSelected.set(key, { kind, feature, layer })
+          this._multiSelected.set(key, { kind: k, feature, layer })
           added++
         }
       })
@@ -762,7 +770,10 @@ export default class extends Controller {
     const extent = olPolygon.getExtent()
     const layers = [
       { layer: this.parcelLayer,  kind: "parcela" },
-      { layer: this.cladiriLayer, kind: "cladire" }
+      { layer: this.cladiriLayer, kind: "cladire" },
+      // CGXML — kind derivat din entity_type ca să prindem și poligoanele
+      // lungi (drumuri, ape, păduri) care doar intersectează lasso-ul.
+      { layer: this.cgxmlLayer,   kind: null }
     ]
     let added = 0
     layers.forEach(({ layer, kind }) => {
@@ -772,12 +783,17 @@ export default class extends Controller {
       src.forEachFeatureIntersectingExtent(extent, (feature) => {
         const id = feature.get("id")
         if (id == null) return
-        const key = this._multiKey(kind, id)
+        let k = kind
+        if (k === null) {
+          const et = feature.get("entity_type")
+          k = et === "building" ? "cladire" : "parcela"
+        }
+        const key = this._multiKey(k, id)
         if (this._multiSelected.has(key)) return
         try {
           const jstsGeom = parser.read(feature.getGeometry())
           if (jstsSelector.intersects(jstsGeom)) {
-            this._multiSelected.set(key, { kind, feature, layer })
+            this._multiSelected.set(key, { kind: k, feature, layer })
             added++
           }
         } catch (_e) { /* geometrie invalidă — ignor */ }

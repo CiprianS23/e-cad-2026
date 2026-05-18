@@ -417,11 +417,13 @@
         </div>
         <div class="digi-audit-list" data-digitizare-target="auditList"></div>
 
-        <!-- Curățare topologică pe zona selectată (multi-select) -->
+        <!-- Curățare topologică — pe selecție multiplă sau pe viewport -->
         <div style="margin-top:10px;padding-top:8px;border-top:1px solid #e5e7eb">
-          <div class="digi-section-label" style="margin-bottom:6px">Curăță zona selectată</div>
+          <div class="digi-section-label" style="margin-bottom:6px">Curățare topologică</div>
           <p class="digi-parcela-hint" style="font-size:11px;line-height:1.5;margin:0 0 6px 0">
-            Operează pe poligoanele din modul „Selecție multiplă". Unifică vertecșii pe laturi comune, elimină goluri/suprapuneri sub prag. Suprafețele se păstrează în limita de ±1&nbsp;mp; ce depășește = sărit.
+            Unifică vertecșii pe laturi comune, elimină goluri/suprapuneri sub prag. Suprafețele se păstrează în ±1&nbsp;mp; ce depășește = sărit.<br>
+            <strong>Selecție</strong> = poligoanele din modul „Selecție multiplă" (click toggle sau lasso poligon).<br>
+            <strong>Viewport</strong> = toate poligoanele vizibile în vederea curentă.
           </p>
           <label style="display:block;margin-bottom:6px;font-size:12px">
             Prag goluri/suprapuneri (mp):
@@ -431,12 +433,22 @@
                    style="width:100%">
             <span data-digitizare-target="cleanupVal">0.50</span> mp
           </label>
-          <button type="button" class="btn btn-primary btn-sm"
-                  data-action="click->digitizare#runCleanupTopology"
-                  data-digitizare-target="btnCleanup"
-                  style="width:100%">
-            🧹 Curăță topologic zona
-          </button>
+          <div class="digi-btn-row" style="gap:4px">
+            <button type="button" class="btn btn-primary btn-sm"
+                    data-action="click->digitizare#runCleanupTopology"
+                    data-digitizare-target="btnCleanup"
+                    style="flex:1"
+                    title="Operează pe poligoanele din Selecție multiplă (click sau lasso poligon)">
+              🧹 Curăță selecția
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm"
+                    data-action="click->digitizare#runCleanupViewport"
+                    data-digitizare-target="btnCleanupViewport"
+                    style="flex:1"
+                    title="Operează pe toate poligoanele vizibile în viewport-ul curent">
+              🌐 Curăță viewport
+            </button>
+          </div>
           <div data-digitizare-target="cleanupResult" style="margin-top:6px;font-size:11px"></div>
         </div>
       </section>
