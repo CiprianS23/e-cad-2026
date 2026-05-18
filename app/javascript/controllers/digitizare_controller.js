@@ -23,9 +23,9 @@ export default class extends Controller {
     "snapSlider", "snapToleranceVal", "snapModes",
     "metricSnapToggle", "metricSnapSlider", "metricSnapVal",
     "mapToolbar", "multiSelectBadge",
-    "btnStart", "btnEdit", "btnDelete", "btnMove", "btnClose", "btnUndo", "btnRedo", "btnAudit", "auditList",
+    "btnStart", "btnEdit", "btnDelete", "btnMove", "btnRotate", "btnClose", "btnUndo", "btnRedo", "btnAudit", "auditList",
     "cleanupSlider", "cleanupVal", "btnCleanup", "btnCleanupViewport", "cleanupResult",
-    "btnMultiSelect", "btnPolygonSelect", "btnDeleteMulti", "multiSelectInfo",
+    "btnMultiSelect", "btnPolygonSelect", "btnCancelAll", "multiCountBadge", "multiSelectInfo",
     "dxfFileInput", "dxfMapping",
     "btnExportZone", "btnExportZonePoly", "btnExportZoneSubmit", "exportFormat",
     "exportLayerParcele", "exportLayerCladiri", "exportStatus",
@@ -124,6 +124,40 @@ export default class extends Controller {
     this._editVertexLayer  = new ol.layer.Vector({
       source: this._editVertexSource,
       style:  (feat) => {
+        // Pivot rotație — cerc mare portocaliu cu border alb gros (distinct)
+        if (feat.get("rotatePivot")) {
+          return new ol.style.Style({
+            image: new ol.style.Circle({
+              radius: 10,
+              fill:   new ol.style.Fill({ color: "#ea580c" }),
+              stroke: new ol.style.Stroke({ color: "#fff", width: 3 })
+            }),
+            zIndex: 10
+          })
+        }
+        // Marker move — punct de bază (verde) sau destinație (albastru)
+        if (feat.get("moveMarker")) {
+          const isBase = feat.get("moveMarker") === "base"
+          return new ol.style.Style({
+            image: new ol.style.Circle({
+              radius: 8,
+              fill:   new ol.style.Fill({ color: isBase ? "#16a34a" : "#1d4ed8" }),
+              stroke: new ol.style.Stroke({ color: "#fff", width: 2.5 })
+            }),
+            zIndex: 10
+          })
+        }
+        // Snap hover — cerc mare cyan, indicator clar pentru snap activ
+        if (feat.get("snapHover")) {
+          return new ol.style.Style({
+            image: new ol.style.Circle({
+              radius: 14,
+              fill:   new ol.style.Fill({ color: "rgba(6, 182, 212, 0.30)" }),
+              stroke: new ol.style.Stroke({ color: "#06b6d4", width: 3 })
+            }),
+            zIndex: 12
+          })
+        }
         const isVisual   = feat.get("visualNeighbor")
         const isNeighbor = feat.get("neighborVertex")
         if (isVisual || isNeighbor) {
@@ -504,6 +538,11 @@ export default class extends Controller {
   // Necesită selecție. Intră automat în edit mode (geometria se modifică, se
   // salvează prin SV/Salvează modificări via flow-ul existent). Drag pe orice
   // punct al poligonului = translație.
+  // Mută poligon — flow AutoCAD-style:
+  //   1. Click pe un vertex (punctul de bază)
+  //   2. Mișcă cursor-ul → preview translație live; OSnap activ pe vertecșii vecinilor
+  //   3. Click pe destinație → commit translație
+  //   ESC / A = restaurare baseline. Save / Cancel = în panou.
   _startMove() {
     if (!this._ensureSelectedForTransform("MUT")) return
     if (this._postDrawTransform) this._cancelTransform()
@@ -515,23 +554,290 @@ export default class extends Controller {
       this.editIdValue   = String(feature.get("id"))
       this._enterEditMode(feature, layer)
     }
+    this._beginMoveByPoints([{ feature: this._editFeature, baseline: this._editFeature.getGeometry().clone(), kind: this.editKindValue }], "move")
+  }
 
-    // Translate doar pe primary (vecinii topology-aware rămân în Modify
-    // existent ca să nu pierdem snap-ul pe vertecșii lor).
-    this._translate = new ol.interaction.Translate({
-      features: new ol.Collection([this._editFeature])
+  // Helper unificat pentru mutare punct-la-punct (single sau bulk).
+  // `items`: [{feature, baseline, kind}]. `mode`: "move" | "bulk-move".
+  //
+  // KEY INSIGHT: Modify interaction interceptează click pe vertex ca DRAG →
+  // singleclick nu mai e tras. Soluție: dezactivăm Modify cât timp e activ
+  // flow-ul click-click. Re-activăm după commit (pentru ajustări vertex post-mutare).
+  //
+  // KEY INSIGHT #2: `setGeometry()` instanță nouă → rupe listener-ul de pe
+  // geometria veche. Folosim `setCoordinates()` pe geometria existentă →
+  // change event firează → _extractVerts + _verifyTopology rulează.
+  _beginMoveByPoints(items, mode) {
+    // PREVIEW baseline = snapshot la START-ul ACESTEI mutări (current geometry).
+    // ORIGINAL baseline (baseline + baselineCoords) e cel din _startBulkMove / _startMove
+    // și NU se rescrie aici, ca să se păstreze pentru Cancel global la chain.
+    items.forEach(it => {
+      it.previewBaselineCoords = it.feature.getGeometry().getCoordinates()
+      // Backwards-compat: pentru flow-uri fără chain (single move), baselineCoords
+      // ar putea fi nesetat la intrare → folosim previewBaselineCoords ca fallback.
+      if (!it.baselineCoords) it.baselineCoords = it.previewBaselineCoords
     })
-    this.map.addInteraction(this._translate)
-    // Reașezăm Snap-ul deasupra Translate-ului — OL procesează interacțiunile
-    // în ordine inversă (top-down). Snap PESTE Translate înseamnă că coords
-    // ajustate de Snap intră în Translate → drag-ul „prinde" vertecși vecini.
-    if (this._snap && this.map) {
-      this.map.removeInteraction(this._snap)
-      this.map.addInteraction(this._snap)
+    this._moveOp = { items, basePoint: null }
+    this._postDrawTransform = mode
+    this._cmdHint("MUT: click pe vertex pentru PUNCTUL DE BAZĂ (OSnap activ).", false)
+
+    // Dezactivăm Modify ca să nu intercepteze click-urile pe vertecși.
+    if (this._modify) this._modify.setActive(false)
+
+    // Pentru single-move, randăm vertecșii poligoanelor din viewport ca ținte
+    // VIZUALE de destinație (cerculețe portocalii). Pentru bulk-move, deja
+    // făcute în _renderBulkVertices.
+    if (mode === "move" && this._editFeature) {
+      this._renderDestinationVertices(new Set([this._editFeature]))
     }
-    this._postDrawTransform = "move"
-    this._injectMoveControls()
-    this._cmdHint("MUT: drag pe poligon — OSnap activ · butoane Salvează/Anulează în panou.", false)
+
+    // Refresh Snap → include și vertecșii randați la _renderBulkVertices în
+    // _editVertexSource. Sursa default vine din parcele/cladiri/cgxml.
+    this._refreshSnap()
+
+    this._moveClickKey = this.map.on("singleclick", (evt) => {
+      if (!this._moveOp.basePoint) {
+        // Click 1 — punctul de bază: căutăm MANUAL cel mai apropiat vertex al
+        // poligoanelor în mișcare (OL Snap le exclude pentru destinație, deci
+        // nu poate snap-ui la ele aici). Toleranță 30px.
+        const clickPx = this.map.getPixelFromCoordinate(evt.coordinate)
+        const baseVert = this._findNearestMovingVertex(evt.coordinate, clickPx, 30)
+        const basePt = baseVert || [evt.coordinate[0], evt.coordinate[1]]
+        this._moveOp.basePoint = basePt
+        this._renderMoveMarker(basePt, "base")
+        this._cmdHint("MUT: click pe DESTINAȚIE (OSnap activ pe vertecșii vecinilor).", false)
+
+        // Preview live: pe pointermove translatează cu offsetul curent + arată
+        // un indicator vizual la destinația snap-uită (vertex vecin în limită).
+        this._moveMoveKey = this.map.on("pointermove", (mEvt) => {
+          const dx = mEvt.coordinate[0] - this._moveOp.basePoint[0]
+          const dy = mEvt.coordinate[1] - this._moveOp.basePoint[1]
+          this._applyMoveDelta(dx, dy)
+          // Indicator de snap: detect manual cel mai apropiat vertex de
+          // destinație (poligoanele aflate în mișcare sunt deja excluse).
+          const px = this.map.getPixelFromCoordinate(mEvt.coordinate)
+          const snapTo = this._findNearestSnapTarget(mEvt.coordinate, px, this.snapToleranceValue || 14)
+          this._renderSnapHover(snapTo)
+        })
+        return
+      }
+      // Click 2: commit la destinația snap-uită (OL Snap a modificat deja evt.coordinate)
+      const dx = evt.coordinate[0] - this._moveOp.basePoint[0]
+      const dy = evt.coordinate[1] - this._moveOp.basePoint[1]
+      this._applyMoveDelta(dx, dy)
+
+      this._removeMoveMarkers()
+      this._removeSnapHover()
+      if (this._moveMoveKey)  { ol.Observable.unByKey(this._moveMoveKey);  this._moveMoveKey = null }
+      if (this._moveClickKey) { ol.Observable.unByKey(this._moveClickKey); this._moveClickKey = null }
+      this._hartaMap?._refreshMultiSelectOverlay?.()
+
+      // Re-extragem _verts din geometria mutată + re-validăm topologia.
+      // Pentru single move, geometria primarului = _editFeature.
+      if (mode === "move" && this._editFeature) {
+        this._extractVerts(this._editFeature.getGeometry())
+        this._renderEditVertices()
+        this._calcArea()
+        this._verifyTopology()
+      }
+
+      // Re-activăm Modify (single move) ca user-ul să poată ajusta vertecși după.
+      if (mode === "move" && this._modify) this._modify.setActive(true)
+
+      // Panou save: bulk → controlul comun bulk; single → panoul existent.
+      if (mode === "bulk-move") {
+        this._bulkOp = { type: "move", items: this._moveOp.items }
+        // Transferăm items spre _bulkOp, ștergem _moveOp ca _buildSnapFeatures
+        // să nu mai excludă items (excluderea e gestionată acum de _bulkOp +
+        // snapIncludeBulkItems din _enableBulkVertexEditing).
+        this._moveOp = null
+        // Activăm editarea de vertecși pentru fiecare poligon din grup.
+        // User-ul poate corecta erorile topologice prin drag pe vertecși.
+        this._enableBulkVertexEditing(this._bulkOp.items)
+        this._injectBulkControls("Mutare bloc", this._bulkOp.items.length, [
+          "Translație aplicată din punctul de bază la destinație.",
+          "<b>Drag pe orice vertex</b> pentru ajustare topologie.",
+          "Save validează topologia înainte de persistare."
+        ])
+      } else {
+        this._injectMoveControls()
+      }
+      this._cmdHint("✓ Mutare aplicată. Drag vertex pentru ajustări sau Save.", false)
+    })
+  }
+
+  // Caută cel mai apropiat vertex de `coord` printre TOATE poligoanele din
+  // viewport, EXCLUZÂND cele aflate în mișcare. Folosit pentru indicatorul
+  // vizual de snap la destinație.
+  _findNearestSnapTarget(coord, clickPx, pxTolerance) {
+    if (!this._hartaMap || !this.map) return null
+    const exclude = new Set()
+    if (this._moveOp?.items) this._moveOp.items.forEach(it => exclude.add(it.feature))
+    if (this._bulkOp?.items) this._bulkOp.items.forEach(it => exclude.add(it.feature))
+    const view   = this.map.getView()
+    const extent = view.calculateExtent(this.map.getSize())
+    const layers = [
+      this._hartaMap.parcelLayer,
+      this._hartaMap.cladiriLayer,
+      this._hartaMap.cgxmlLayer
+    ].filter(Boolean)
+    let best = null
+    let bestPxDist = Infinity
+    layers.forEach(layer => {
+      const src = layer.getSource()
+      if (!src) return
+      src.forEachFeatureInExtent(extent, (f) => {
+        if (exclude.has(f)) return
+        const geom = f.getGeometry()
+        if (!geom) return
+        const t = geom.getType()
+        const rings = t === "Polygon" ? geom.getCoordinates()
+                    : t === "MultiPolygon" ? geom.getCoordinates().flat()
+                    : []
+        rings.forEach(ring => {
+          const verts = ring.length > 1 ? ring.slice(0, -1) : ring
+          verts.forEach(c => {
+            const px = this.map.getPixelFromCoordinate(c)
+            const d  = Math.hypot(px[0] - clickPx[0], px[1] - clickPx[1])
+            if (d < bestPxDist && d <= pxTolerance) {
+              bestPxDist = d
+              best = [c[0], c[1]]
+            }
+          })
+        })
+      })
+    })
+    return best
+  }
+
+  // Marker vizibil pentru snap-ul la destinație (cerculeț cyan mare).
+  // Marcheaza prin flag `snapHover` pentru cleanup uniform.
+  _renderSnapHover(coord) {
+    if (!this._editVertexSource) return
+    this._removeSnapHover()
+    if (!coord) return
+    const f = new ol.Feature(new ol.geom.Point(coord))
+    f.set("snapHover", true)
+    this._editVertexSource.addFeature(f)
+  }
+
+  _removeSnapHover() {
+    if (!this._editVertexSource) return
+    this._editVertexSource.getFeatures()
+      .filter(f => f.get("snapHover"))
+      .forEach(f => this._editVertexSource.removeFeature(f))
+  }
+
+  // Activează Modify pe TOATE features-urile din selecția bulk. User-ul poate
+  // trage orice vertex pentru a corecta erori topologice (overlap-uri minore,
+  // goluri) post-mutare/post-rotație. Toate schimbările sunt incluse în save.
+  _enableBulkVertexEditing(items) {
+    if (!this.map || !items?.length) return
+    if (this._bulkModify) {
+      this.map.removeInteraction(this._bulkModify)
+      this._bulkModify = null
+    }
+    const features = items.map(it => it.feature)
+    const coll = new ol.Collection(features)
+    this._bulkModify = new ol.interaction.Modify({
+      features:       coll,
+      pixelTolerance: 12,
+      deleteCondition: (e) => {
+        const oe = e.originalEvent
+        return e.type === "singleclick" && (oe?.shiftKey || oe?.altKey)
+      }
+    })
+    this.map.addInteraction(this._bulkModify)
+    this._bulkModify.on("modifyend", () => {
+      this._hartaMap?._refreshMultiSelectOverlay?.()
+      this._refreshBulkVertexCirles(items)
+    })
+    // IMPORTANT: după commit (move sau rotate), vertecșii din `_editVertexSource`
+    // au RĂMAS la pozițiile de DINAINTE de operațiune (au fost randați la start).
+    // Re-randăm imediat ca să reflecte pozițiile FINALE (post-mutare/rotație).
+    this._refreshBulkVertexCirles(items)
+    // Snap include items pentru editare vertex-on-vertex în cadrul grupului.
+    this._snapIncludeBulkItems = true
+    this._refreshSnap()
+  }
+
+  // Re-randează cerculețele de vertex pentru items după ce user-ul a făcut drag.
+  _refreshBulkVertexCirles(items) {
+    if (!this._editVertexSource) return
+    // Păstrăm visualNeighbor (vertecșii destinației) — nu se schimbă.
+    const keep = this._editVertexSource.getFeatures()
+      .filter(f => f.get("visualNeighbor") || f.get("snapHover"))
+    this._editVertexSource.clear()
+    keep.forEach(f => this._editVertexSource.addFeature(f))
+    items.forEach(it => {
+      this._addAllVertexesAsPoints(it.feature, this._editVertexSource, false)
+    })
+  }
+
+  // Caută vertex-ul cel mai apropiat de `coord` printre poligoanele din
+  // `_moveOp.items`. Toleranță în pixeli (snap rate identic cu OL Snap).
+  // Returnează [x, y] în EPSG:3844 sau null dacă nu există vertex în limită.
+  _findNearestMovingVertex(coord, clickPx, pxTolerance) {
+    if (!this._moveOp?.items) return null
+    let best = null
+    let bestPxDist = Infinity
+    this._moveOp.items.forEach(it => {
+      // Folosim previewBaselineCoords = snapshot la start-ul mutării curente
+      // (la chain, NU baselineCoords care e original pre-chain).
+      const src = it.previewBaselineCoords || it.baselineCoords
+      const t = it.feature.getGeometry().getType()
+      const rings = t === "Polygon" ? src
+                  : t === "MultiPolygon" ? src.flat()
+                  : []
+      rings.forEach(ring => {
+        const verts = ring.length > 1 ? ring.slice(0, -1) : ring
+        verts.forEach(c => {
+          const px = this.map.getPixelFromCoordinate(c)
+          const d  = Math.hypot(px[0] - clickPx[0], px[1] - clickPx[1])
+          if (d < bestPxDist && d <= pxTolerance) {
+            bestPxDist = d
+            best = [c[0], c[1]]
+          }
+        })
+      })
+    })
+    return best
+  }
+
+  // Aplică translația dx/dy pe toate features-urile din _moveOp folosind
+  // setCoordinates (păstrează instanța geometriei → change event firează).
+  // Translatează din previewBaselineCoords (snapshot la start-ul mutării), NU
+  // din baselineCoords (= original pre-chain).
+  _applyMoveDelta(dx, dy) {
+    this._moveOp.items.forEach(it => {
+      const geom = it.feature.getGeometry()
+      const t = geom.getType()
+      const src = it.previewBaselineCoords || it.baselineCoords
+      let translated
+      if (t === "Polygon") {
+        translated = src.map(ring => ring.map(([x, y]) => [x + dx, y + dy]))
+      } else if (t === "MultiPolygon") {
+        translated = src.map(poly => poly.map(ring => ring.map(([x, y]) => [x + dx, y + dy])))
+      } else {
+        return
+      }
+      geom.setCoordinates(translated)
+    })
+    this._hartaMap?._refreshMultiSelectOverlay?.()
+  }
+
+  _renderMoveMarker(coord, kind) {
+    if (!this._editVertexSource) return
+    const f = new ol.Feature(new ol.geom.Point(coord))
+    f.set("moveMarker", kind)  // "base" sau "dest"
+    this._editVertexSource.addFeature(f)
+  }
+
+  _removeMoveMarkers() {
+    if (!this._editVertexSource) return
+    this._editVertexSource.getFeatures()
+      .filter(f => f.get("moveMarker"))
+      .forEach(f => this._editVertexSource.removeFeature(f))
   }
 
   // Buton dedicat „Salvează mutarea" + „Anulează" în sidebar — injectat la
@@ -579,8 +885,12 @@ export default class extends Controller {
   }
 
   // ── Rotește poligon ───────────────────────────────────────────────────────
-  // Pivot = centroidul poligonului. Mouse-move = preview rotație live; click
-  // primul = anchor (baseline); click al doilea = commit. ESC / A anulează.
+  // Flow:
+  //   1. User dă click pe Rotește → intră edit + așteaptă click pe vertex pivot.
+  //   2. Click 1 = pivot. Cursor-ul devine referință pentru unghiul de pornire.
+  //   3. Pointermove = preview rotație live în jurul pivot-ului.
+  //   4. Click 2 = commit (păstrează geometria rotită). ESC / A = restaurare.
+  // Vertex pivot vizualizat distinct (cerc mare portocaliu).
   _startRotate() {
     if (!this._ensureSelectedForTransform("ROT")) return
     if (this._postDrawTransform) this._cancelTransform()
@@ -592,38 +902,85 @@ export default class extends Controller {
       this._enterEditMode(feature, this._selected.layer)
     }
 
-    const geom  = this._editFeature.getGeometry()
-    const ext   = geom.getExtent()
-    const pivot = [(ext[0] + ext[2]) / 2, (ext[1] + ext[3]) / 2]
-    this._rotateBaseline   = geom.clone()
-    this._rotatePivot      = pivot
-    this._rotateStartAngle = null
-    this._postDrawTransform = "rotate"
+    this._rotateBaseline      = this._editFeature.getGeometry().clone()
+    this._rotateBaselineCoords = this._rotateBaseline.getCoordinates()
+    this._rotatePivot         = null     // se setează la primul click pe vertex
+    this._rotateStartAngle    = null
+    this._postDrawTransform   = "rotate"
 
-    this._rotateMoveKey = this.map.on("pointermove", (e) => {
-      const cur = e.coordinate
-      const a   = Math.atan2(cur[1] - pivot[1], cur[0] - pivot[0])
-      if (this._rotateStartAngle === null) {
-        this._rotateStartAngle = a
+    // Dezactivăm Modify cât timp e activ flow-ul click-click (altfel click pe
+    // vertex pornește drag și singleclick nu mai e tras).
+    if (this._modify) this._modify.setActive(false)
+    this._refreshSnap()
+
+    this._cmdHint("ROT: click pe un vertex pentru a-l alege ca pivot de rotație.", false)
+
+    this._rotateClickKey = this.map.on("singleclick", (evt) => {
+      if (!this._rotatePivot) {
+        // Click 1 — alege pivotul: vertex-ul cel mai apropiat de click
+        // (snap-ul OL ar fi trebuit deja să prindă coordonata pe vertex).
+        const click = evt.coordinate
+        let bestDist = Infinity
+        let bestVert = null
+        for (const v of this._verts || []) {
+          const d = Math.hypot(v.x - click[0], v.y - click[1])
+          if (d < bestDist) { bestDist = d; bestVert = [v.x, v.y] }
+        }
+        if (!bestVert) {
+          this._cmdHint("ROT: niciun vertex disponibil.", true)
+          return
+        }
+        this._rotatePivot = bestVert
+        this._renderRotatePivotMarker(bestVert)
+        this._cmdHint("ROT: mișcă cursor-ul pentru rotație · click confirmă · A anulează.", false)
+
+        // Tracking rotație live — folosim setCoordinates ca să nu spargem listener-ul.
+        this._rotateMoveKey = this.map.on("pointermove", (mEvt) => {
+          const cur = mEvt.coordinate
+          const a   = Math.atan2(cur[1] - bestVert[1], cur[0] - bestVert[0])
+          if (this._rotateStartAngle === null) {
+            this._rotateStartAngle = a
+            return
+          }
+          const delta = a - this._rotateStartAngle
+          const rotated = this._rotateBaseline.clone()
+          rotated.rotate(delta, bestVert)
+          this._editFeature.getGeometry().setCoordinates(rotated.getCoordinates())
+        })
         return
       }
-      const delta = a - this._rotateStartAngle
-      const rotated = this._rotateBaseline.clone()
-      rotated.rotate(delta, pivot)
-      this._editFeature.setGeometry(rotated)  // dispatch change → live area/topology
-    })
-    this._rotateClickKey = this.map.on("singleclick", () => {
-      // Commit la al doilea click (primul stabilește anchor-ul prin pointermove)
+      // Click 2 — commit. (Primul tracking pointermove a stabilit unghiul de start.)
       if (this._rotateStartAngle === null) return
       this._endRotate()
-      this._cmdHint("✓ Rotație aplicată. SV salvează.", false)
+      // Re-extragem verts + re-validăm topologia pe geometria rotită.
+      this._extractVerts(this._editFeature.getGeometry())
+      this._renderEditVertices()
+      this._calcArea()
+      this._verifyTopology()
+      // Re-activăm Modify ca user-ul să poată ajusta vertecși după rotație.
+      if (this._modify) this._modify.setActive(true)
+      this._cmdHint("✓ Rotație aplicată. SV salvează modificările.", false)
     })
-    this._cmdHint("ROT: mișcă mouse-ul pentru rotație · click confirmă · A anulează.", false)
+  }
+
+  _renderRotatePivotMarker(coord) {
+    if (!this._editVertexSource) return
+    const f = new ol.Feature(new ol.geom.Point(coord))
+    f.set("rotatePivot", true)
+    this._editVertexSource.addFeature(f)
+  }
+
+  _removeRotatePivotMarker() {
+    if (!this._editVertexSource) return
+    this._editVertexSource.getFeatures()
+      .filter(f => f.get("rotatePivot"))
+      .forEach(f => this._editVertexSource.removeFeature(f))
   }
 
   _endRotate() {
     if (this._rotateMoveKey)  { ol.Observable.unByKey(this._rotateMoveKey);  this._rotateMoveKey = null }
     if (this._rotateClickKey) { ol.Observable.unByKey(this._rotateClickKey); this._rotateClickKey = null }
+    this._removeRotatePivotMarker()
     this._rotateBaseline   = null
     this._rotatePivot      = null
     this._rotateStartAngle = null
@@ -631,16 +988,47 @@ export default class extends Controller {
   }
 
   // Anulează orice transformare în curs (apelat din _cancelTransform sau
-  // command „A"/cancelEdit). Restaurează geometria originală pentru rotate.
+  // command „A"/cancelEdit). Restaurează geometria originală.
   _cancelTransform() {
-    if (this._postDrawTransform === "move" && this._translate && this.map) {
-      this.map.removeInteraction(this._translate)
-      this._translate = null
+    const restoreBaseline = (it) => {
+      // Folosim setCoordinates ca să păstrăm instanța geometriei (listener change valid).
+      if (it.baselineCoords) {
+        it.feature.getGeometry().setCoordinates(it.baselineCoords)
+      } else if (it.baseline) {
+        it.feature.setGeometry(it.baseline)
+      }
+    }
+    if (this._postDrawTransform === "move") {
+      // Click-click flow: restaurează baseline pe single feature.
+      if (this._moveOp?.items?.length) {
+        this._moveOp.items.forEach(restoreBaseline)
+      }
+      if (this._moveMoveKey)  { ol.Observable.unByKey(this._moveMoveKey);  this._moveMoveKey = null }
+      if (this._moveClickKey) { ol.Observable.unByKey(this._moveClickKey); this._moveClickKey = null }
+      this._removeMoveMarkers()
       this._removeMoveControls()
+      // Re-activăm Modify dacă a fost dezactivat la start move.
+      if (this._modify) this._modify.setActive(true)
+      this._moveOp = null
     }
     if (this._postDrawTransform === "rotate") {
-      if (this._rotateBaseline) this._editFeature?.setGeometry(this._rotateBaseline)
+      if (this._rotateBaseline && this._editFeature) {
+        // Restaurăm cu setCoordinates → păstrăm instanța geometriei (listener change valid).
+        this._editFeature.getGeometry().setCoordinates(this._rotateBaseline.getCoordinates())
+      }
+      if (this._modify) this._modify.setActive(true)
       this._endRotate()
+    }
+    if (this._postDrawTransform === "bulk-move" || this._postDrawTransform === "bulk-rotate") {
+      // bulk-move folosește același _moveOp + _bulkOp; restaurează ambele.
+      if (this._moveOp?.items?.length) {
+        this._moveOp.items.forEach(restoreBaseline)
+      }
+      if (this._moveMoveKey)  { ol.Observable.unByKey(this._moveMoveKey);  this._moveMoveKey = null }
+      if (this._moveClickKey) { ol.Observable.unByKey(this._moveClickKey); this._moveClickKey = null }
+      this._removeMoveMarkers()
+      this._moveOp = null
+      this._cancelBulk()
     }
     this._postDrawTransform = null
   }
@@ -951,9 +1339,14 @@ export default class extends Controller {
       const el = this[`has${target}Target`] ? this[`${target[0].toLowerCase()}${target.slice(1)}Target`] : null
       if (el) el.classList.toggle("map-tb-btn--hidden", !condition)
     }
+    // Edit / Delete = single-feature only (cer un `_selected`).
     hide("BtnEdit",   !!this._selected)
-    hide("BtnMove",   !!this._selected)
     hide("BtnDelete", !!this._selected)
+    // Move / Rotate = single SAU bulk (multi-select cu items).
+    const multiCount  = this._hartaMap?.getMultiSelection?.()?.length || 0
+    const hasTransformSel = !!this._selected || (this._multiSelectActive && multiCount > 0)
+    hide("BtnMove",   hasTransformSel)
+    hide("BtnRotate", hasTransformSel)
     hide("BtnClose",  !!this._draw)
     hide("BtnUndo",   !!this._draw)
     // btnDeleteMulti rămâne controlat prin atribut hidden direct în _onMultiSelectionChanged
@@ -1150,12 +1543,20 @@ export default class extends Controller {
     const out  = []
     const refs = [this._hartaMap.parcelLayer, this._hartaMap.cgxmlLayer, this._hartaMap.cladiriLayer]
     const m    = this._snapModes
+    // Excludem poligoanele AFLATE ÎN MIȘCARE — altfel OL Snap se prinde de
+    // propriul vertex al poligonului mutat (care e suprapus pe destinație
+    // după translație) → niciodată nu ajunge la vertex de destinație.
+    const movingFeatures = new Set()
+    if (this._moveOp?.items) this._moveOp.items.forEach(it => movingFeatures.add(it.feature))
+    // _bulkOp există atât în timpul mutării (post-_moveOp) cât și după commit
+    // când avem editare de vertecși. În al doilea caz (snapIncludeBulkItems=true)
+    // includem items ca să se poată snap-ui vertex-on-vertex între ele.
+    if (this._bulkOp?.items && !this._snapIncludeBulkItems) {
+      this._bulkOp.items.forEach(it => movingFeatures.add(it.feature))
+    }
     refs.forEach(layer => {
       layer.getSource().getFeatures().forEach(f => {
-        // Includem TOATE features-urile (primary + vecini) ca ținte de snap.
-        // Astfel snap-ul funcționează simetric: drag de la primary spre vecin
-        // ȘI invers. Risc de self-snap (V1 spre V2 al aceluiași poligon) e
-        // minor — utilizatorul poate evita prin precizie sau Undo.
+        if (movingFeatures.has(f)) return
         if (m.has("endpoint") || m.has("nearest")) out.push(f)
         if (m.has("midpoint")) this._addMidpoints(f, out)
         if (m.has("centroid")) this._addCentroid(f, out)
@@ -2340,12 +2741,385 @@ export default class extends Controller {
         this.btnMoveTarget.title = "Click pe un poligon de pe hartă pentru a-l selecta"
       }
     }
+    if (this.hasBtnRotateTarget) {
+      this.btnRotateTarget.disabled = !sel
+      if (sel) {
+        const label = sel.feature.get("numar_cadastral") || `#${sel.feature.get("id")}`
+        this.btnRotateTarget.title = `Rotește ${sel.kind} ${label} — click pivot pe un vertex, apoi mișcă cursor-ul`
+      } else {
+        this.btnRotateTarget.title = "Click pe un poligon de pe hartă pentru a-l selecta"
+      }
+    }
   }
 
   // Acțiune publică pentru butonul „Mută" din sidebar — proxy la `_startMove`
-  // ca să poată fi declanșat și prin command line (MUT/MV) și prin click.
+  // (single) sau `_startBulkMove` (multi-select).
   moveSelected() {
+    const multi = this._hartaMap?.getMultiSelection?.() || []
+    if (multi.length >= 1 && this._multiSelectActive) {
+      this._startBulkMove(multi)
+      return
+    }
     this._startMove()
+  }
+
+  // Acțiune publică pentru butonul „Rotește" — single sau bulk în funcție de
+  // selecția multiplă activă.
+  rotateSelected() {
+    const multi = this._hartaMap?.getMultiSelection?.() || []
+    if (multi.length >= 1 && this._multiSelectActive) {
+      this._startBulkRotate(multi)
+      return
+    }
+    this._startRotate()
+  }
+
+  // ── Mutare bloc (multi-select) ────────────────────────────────────────────
+  // Același flow ca single-move (click vertex bază → click destinație), dar
+  // aplicat pe TOATE poligoanele din selecția multiplă (parcele + clădiri).
+  // CHAIN: dacă există deja un _bulkOp (de la o operațiune anterioară), această
+  // mutare se aplică PESTE rezultatul ei (geometria curentă = punct de plecare),
+  // iar `baseline` original se păstrează pentru Cancel global.
+  _startBulkMove(items) {
+    const chain = this._isBulkChainable()
+    if (this._postDrawTransform && !chain) this._cancelTransform()
+    // La chain: dezactivăm Modify-ul de vertex-editing din operațiunea anterioară
+    // (se reactivează după commit-ul mutării curente).
+    if (this._bulkModify && this.map) {
+      this.map.removeInteraction(this._bulkModify)
+      this._bulkModify = null
+    }
+    this._snapIncludeBulkItems = false
+
+    const preparedItems = chain
+      ? this._bulkOp.items.map(it => ({
+          ...it,
+          // baseline + baselineCoords păstrate (= original pre-chain, pentru Cancel)
+        }))
+      : items.map(it => {
+          const baseline = it.feature.getGeometry().clone()
+          return {
+            kind:           it.kind,
+            feature:        it.feature,
+            layer:          it.layer,
+            baseline,
+            baselineCoords: baseline.getCoordinates()
+          }
+        })
+    this._renderBulkVertices(preparedItems)
+    this._cmdHint(`Mutare bloc: ${preparedItems.length} poligoane${chain ? " (chain)" : ""}.`, false)
+    this._beginMoveByPoints(preparedItems, "bulk-move")
+  }
+
+  // Returnează true dacă există un _bulkOp post-commit (cu items) peste care
+  // poate fi înlănțuită o operațiune nouă (Mută sau Rotește). Operațiunile
+  // active (preview neîncheiat) nu se înlănțuiesc — utilizatorul ar trebui să
+  // commit-uie sau anuleze prima.
+  _isBulkChainable() {
+    if (!this._bulkOp?.items?.length) return false
+    // _moveOp / _rotateMoveKey active = operațiune în PREVIEW → nu chain
+    if (this._moveOp) return false
+    if (this._rotateMoveKey || this._rotateClickKey) return false
+    return true
+  }
+
+  // Render TOȚI vertecșii featurilor din selecție bulk în `_editVertexSource`.
+  // OL Snap include automat acești vertecși ca ținte → primul click prinde
+  // exact pe vertex. Curățarea se face la _endBulkOp / _cancelTransform.
+  //
+  // În plus, randăm vertecșii TUTUROR poligoanelor din viewport ca ținte
+  // VIZUALE de destinație (cu stilul neighborVertex — cerculețe portocalii).
+  // Astfel utilizatorul vede CLAR unde poate snap-ui la click 2.
+  _renderBulkVertices(items) {
+    if (!this._editVertexSource) return
+    const selectedSet = new Set(items.map(it => it.feature))
+    items.forEach(it => {
+      this._addAllVertexesAsPoints(it.feature, this._editVertexSource, false)
+    })
+    this._renderDestinationVertices(selectedSet)
+    // Refresh snap features ca să includă noua sursă de vertecși.
+    this._refreshSnap()
+  }
+
+  // Randează vertecșii TUTUROR poligoanelor din viewport (parcele + clădiri +
+  // cgxml), exceptând cele din `excludeSet` (selecția curentă de mutat/rotit).
+  // Cerculețele portocalii = ținte de snap vizibile la destinație.
+  _renderDestinationVertices(excludeSet) {
+    if (!this._editVertexSource || !this._hartaMap) return
+    const view = this.map.getView()
+    const extent = view.calculateExtent(this.map.getSize())
+    const layers = [
+      this._hartaMap.parcelLayer,
+      this._hartaMap.cladiriLayer,
+      this._hartaMap.cgxmlLayer
+    ].filter(Boolean)
+    layers.forEach(layer => {
+      const src = layer.getSource()
+      if (!src) return
+      src.forEachFeatureInExtent(extent, (f) => {
+        if (excludeSet?.has(f)) return
+        this._addAllVertexesAsPoints(f, this._editVertexSource, true)
+      })
+    })
+  }
+
+  // ── Rotație bloc (multi-select) ───────────────────────────────────────────
+  // Pivot la un click pe hartă (snap pe cel mai apropiat vertex al oricărui
+  // poligon selectat). Mouse-move = preview rotație live pe toate poligoanele
+  // din selecție. Click 2 = commit; A = restaurare.
+  _startBulkRotate(items) {
+    const chain = this._isBulkChainable()
+    if (this._postDrawTransform && !chain) this._cancelTransform()
+    // Dezactivăm Modify de vertex-editing din operațiunea anterioară.
+    if (this._bulkModify && this.map) {
+      this.map.removeInteraction(this._bulkModify)
+      this._bulkModify = null
+    }
+    this._snapIncludeBulkItems = false
+
+    const bulkItems = chain
+      ? this._bulkOp.items.map(it => ({
+          ...it,
+          // Snapshot la START rotație — preview-ul rotește din această stare.
+          // ORIGINAL baseline + baselineCoords păstrate pentru Cancel.
+          previewBaseline: it.feature.getGeometry().clone()
+        }))
+      : items.map(it => {
+          const baseline = it.feature.getGeometry().clone()
+          return {
+            kind:            it.kind,
+            feature:         it.feature,
+            layer:           it.layer,
+            baseline:        baseline,
+            baselineCoords:  baseline.getCoordinates(),
+            previewBaseline: baseline.clone()
+          }
+        })
+
+    this._bulkOp = {
+      type:       "rotate",
+      items:      bulkItems,
+      pivot:      null,
+      startAngle: null
+    }
+    this._postDrawTransform = "bulk-rotate"
+    // Randăm vertecșii bulk + refresh snap pentru pivot-snap.
+    this._renderBulkVertices(this._bulkOp.items)
+    this._cmdHint(`Rotație bloc: ${bulkItems.length} poligoane${chain ? " (chain)" : ""}. Click pe orice vertex pentru pivot.`, false)
+    this._rotateClickKey = this.map.on("singleclick", (evt) => {
+      if (!this._bulkOp.pivot) {
+        // Click 1: snap pe cel mai apropiat vertex al oricărui feature selectat.
+        // Folosim previewBaseline (snapshot la start rotație) — la chain, baseline
+        // e ORIGINAL pre-chain și nu reflectă poziția curentă.
+        const click = evt.coordinate
+        let bestDist = Infinity
+        let bestVert = null
+        this._bulkOp.items.forEach(it => {
+          const geom = it.previewBaseline || it.baseline
+          const t = geom.getType()
+          const rings = t === "Polygon" ? geom.getCoordinates()
+                      : t === "MultiPolygon" ? geom.getCoordinates().flat()
+                      : []
+          rings.forEach(ring => {
+            const verts = ring.length > 1 ? ring.slice(0, -1) : ring
+            verts.forEach(c => {
+              const d = Math.hypot(c[0] - click[0], c[1] - click[1])
+              if (d < bestDist) { bestDist = d; bestVert = [c[0], c[1]] }
+            })
+          })
+        })
+        if (!bestVert) {
+          this._cmdHint("Niciun vertex disponibil.", true)
+          return
+        }
+        this._bulkOp.pivot = bestVert
+        this._renderRotatePivotMarker(bestVert)
+        this._cmdHint("Mișcă cursor-ul pentru rotație · click confirmă.", false)
+        this._rotateMoveKey = this.map.on("pointermove", (mEvt) => {
+          const cur = mEvt.coordinate
+          const a = Math.atan2(cur[1] - bestVert[1], cur[0] - bestVert[0])
+          if (this._bulkOp.startAngle === null) { this._bulkOp.startAngle = a; return }
+          const delta = a - this._bulkOp.startAngle
+          this._bulkOp.items.forEach(it => {
+            // Rotim din previewBaseline = snapshot la start-ul ACESTEI rotații
+            // (NU din baseline care e ORIGINAL pre-chain).
+            const src = it.previewBaseline || it.baseline
+            const rotated = src.clone()
+            rotated.rotate(delta, bestVert)
+            // setCoordinates → păstrăm instanța (consistent cu single-rotate).
+            it.feature.getGeometry().setCoordinates(rotated.getCoordinates())
+          })
+          this._hartaMap?._refreshMultiSelectOverlay?.()
+        })
+        return
+      }
+      // Click 2: commit
+      if (this._bulkOp.startAngle === null) return
+      if (this._rotateMoveKey)  { ol.Observable.unByKey(this._rotateMoveKey);  this._rotateMoveKey = null }
+      if (this._rotateClickKey) { ol.Observable.unByKey(this._rotateClickKey); this._rotateClickKey = null }
+      this._removeRotatePivotMarker()
+      // Activăm editarea de vertecși pe items după commit (același flow ca move).
+      this._enableBulkVertexEditing(this._bulkOp.items)
+      this._injectBulkControls("Rotație bloc", this._bulkOp.items.length, [
+        `Rotație aplicată pe ${this._bulkOp.items.length} poligoane.`,
+        "<b>Drag pe orice vertex</b> pentru ajustare topologie.",
+        "Save validează topologia înainte de persistare."
+      ])
+      this._cmdHint("✓ Rotație aplicată. Drag vertex pentru ajustări sau Save.", false)
+    })
+  }
+
+  // ── Save / Cancel bloc ────────────────────────────────────────────────────
+  saveBulk()   { this._saveBulk() }
+  cancelBulk() { this._cancelBulk() }
+
+  async _saveBulk() {
+    if (!this._bulkOp || this._bulkOp.items.length === 0) return
+    const items = this._bulkOp.items
+
+    // 1) Validare topologică PRE-SAVE pe fiecare feature din bloc.
+    //    Exclude_neighbor_ids = restul featurilor din bloc → nu se penalizează
+    //    intersecțiile relative dintre ele (se mișcă împreună, deci nu pot
+    //    genera overlap-uri reciproce nesoluționabile).
+    if (!await this._validateBulkBeforeSave(items)) return
+
+    const buildPayload = (it) => ({
+      kind: it.kind,
+      id:   String(it.feature.get("id")),
+      geom_wkt: this._buildWktFromGeom(it.feature.getGeometry()),
+      suprafata_mp: null
+    })
+    const primary   = buildPayload(items[0])
+    const neighbors = items.slice(1).map(buildPayload)
+    this._setStatus(`Salvare bloc: ${items.length} poligoane…`, "info")
+    try {
+      const res  = await fetch(this.saveBatchUrlValue, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": this._csrf(), "Accept": "application/json" },
+        body:    JSON.stringify({ primary, neighbors })
+      })
+      const data = await res.json()
+      if (data.ok) {
+        this._setStatus(`✓ ${items.length} poligoane salvate.`, "ok")
+        this._endBulkOp(false)
+        this._hartaMap?._loadParcele?.()
+        this._hartaMap?._loadCladiri?.()
+        this._hartaMap?._loadCgxml?.()
+      } else {
+        this._setStatus("Erori: " + (data.errors || []).join(" | "), "warn")
+      }
+    } catch (e) {
+      this._setStatus(`Eroare rețea: ${e.message}`, "warn")
+    }
+  }
+
+  // Validare topologică pentru fiecare feature din selecția bulk.
+  // Returnează false dacă există conflicte hard (> 1 mp / non-fixable).
+  // Pentru conflicte ≤ 1 mp afișează status warn dar nu blochează.
+  async _validateBulkBeforeSave(items) {
+    if (!this.hasVerificaUrlValue) return true
+    const excludeAllIds = items.map(it => String(it.feature.get("id")))
+    this._setStatus(`Verificare topologică: ${items.length} poligoane…`, "info")
+    const allErrors = []
+    for (const it of items) {
+      const itemId = String(it.feature.get("id"))
+      const coords = this._coordsFromGeom(it.feature.getGeometry())
+      if (!coords || coords.length < 3) continue
+      const params = {
+        coords,
+        entity_type: it.kind,
+        exclude_id:  itemId,
+        exclude_neighbor_ids: excludeAllIds.filter(id => id !== itemId)
+      }
+      try {
+        const res  = await fetch(this.verificaUrlValue, {
+          method:  "POST",
+          headers: { "Content-Type": "application/json", "X-CSRF-Token": this._csrf() },
+          body:    JSON.stringify(params)
+        })
+        const data = await res.json()
+        if (data.has_errors) {
+          const errs = (data.issues || []).filter(i => i.severity === "error")
+          const hard = errs.filter(i => !i.fixable)
+          if (hard.length > 0) {
+            allErrors.push({ id: itemId, kind: it.kind, errors: hard })
+          }
+        }
+      } catch (e) {
+        console.warn("Bulk topology check error for", itemId, e)
+      }
+    }
+    if (allErrors.length > 0) {
+      const summary = allErrors.map(e => `${e.kind}#${e.id} (${e.errors.length} conflict[e])`).join(", ")
+      this._setStatus(`⛔ Topologie eronată — nu se salvează: ${summary}. Anulează și ajustează manual.`, "warn")
+      return false
+    }
+    return true
+  }
+
+  // Extrage [[x, y], …] din inelul exterior al unui Polygon OL.
+  _coordsFromGeom(geom) {
+    if (!geom || geom.getType() !== "Polygon") return null
+    const ring = geom.getCoordinates()?.[0]
+    if (!ring || ring.length < 4) return null
+    return ring.slice(0, -1).map(([x, y]) => [x, y])
+  }
+
+  _cancelBulk() {
+    if (!this._bulkOp) return
+    this._bulkOp.items.forEach(it => {
+      if (it.baselineCoords) {
+        it.feature.getGeometry().setCoordinates(it.baselineCoords)
+      } else if (it.baseline) {
+        it.feature.setGeometry(it.baseline)
+      }
+    })
+    this._endBulkOp(true)
+  }
+
+  _endBulkOp(restored) {
+    if (this._translate && this.map) { this.map.removeInteraction(this._translate); this._translate = null }
+    if (this._rotateMoveKey)  { ol.Observable.unByKey(this._rotateMoveKey);  this._rotateMoveKey = null }
+    if (this._rotateClickKey) { ol.Observable.unByKey(this._rotateClickKey); this._rotateClickKey = null }
+    this._removeRotatePivotMarker()
+    this._removeBulkControls()
+    if (this._bulkModify && this.map) {
+      this.map.removeInteraction(this._bulkModify)
+      this._bulkModify = null
+    }
+    this._snapIncludeBulkItems = false
+    this._removeSnapHover()
+    // Curățăm vertecșii bulk randați la _renderBulkVertices (păstrăm visualNeighbor).
+    if (this._editVertexSource) {
+      const keep = this._editVertexSource.getFeatures().filter(f => f.get("visualNeighbor"))
+      this._editVertexSource.clear()
+      keep.forEach(f => this._editVertexSource.addFeature(f))
+    }
+    this._bulkOp = null
+    this._postDrawTransform = null
+    this._hartaMap?._refreshMultiSelectOverlay?.()
+    if (restored) this._setStatus("Operațiune bloc anulată.", "info")
+  }
+
+  _injectBulkControls(title, count, hints) {
+    if (!this.hasPanelBodyTarget) return
+    this.element.querySelector(".digi-bulk-controls")?.remove()
+    const div = document.createElement("section")
+    div.className = "digi-section digi-edit-panel digi-bulk-controls"
+    const hintHtml = hints.map(h => `<li>${h}</li>`).join("")
+    div.innerHTML = `
+      <div class="digi-edit-header">${title} — ${count} poligoane</div>
+      <ul class="digi-parcela-hint" style="margin:6px 0;padding-left:18px;line-height:1.6">${hintHtml}</ul>
+      <button type="button" class="btn btn-primary btn-sm digi-ctx-btn"
+              data-action="click->digitizare#saveBulk">${this._iconSave()} Salvează ${count} poligoane</button>
+      <button type="button" class="btn btn-secondary btn-sm digi-ctx-btn"
+              data-action="click->digitizare#cancelBulk">${this._iconCancel()} Anulează bloc</button>
+    `
+    this.panelBodyTarget.insertBefore(div, this.panelBodyTarget.firstChild)
+  }
+
+  _removeBulkControls() {
+    this.element.querySelector(".digi-bulk-controls")?.remove()
   }
 
   async deleteSelected() {
@@ -2432,10 +3206,7 @@ export default class extends Controller {
       this.btnMultiSelectTarget.setAttribute("aria-pressed", String(this._multiSelectActive))
     }
     this._renderMultiSelectInfo(0)
-    if (!this._multiSelectActive && this.hasBtnDeleteMultiTarget) {
-      this.btnDeleteMultiTarget.disabled = true
-      this.btnDeleteMultiTarget.hidden = true
-    }
+    this._updateCancelBtnTooltip()
     if (this._multiSelectActive) {
       this._setStatus("Mod selecție multiplă: click pe poligoane (toggle) sau Shift+drag pentru zonă.", "info")
     }
@@ -2444,12 +3215,63 @@ export default class extends Controller {
   _onMultiSelectionChanged(detail) {
     const count = detail?.count || 0
     this._renderMultiSelectInfo(count)
-    if (this.hasBtnDeleteMultiTarget) {
-      this.btnDeleteMultiTarget.disabled = count === 0
-      this.btnDeleteMultiTarget.hidden   = !this._multiSelectActive
-      this.btnDeleteMultiTarget.textContent = count > 0
-        ? `🗑 Șterge selecția (${count})`
-        : "🗑 Șterge selecția"
+    // Badge cu count pe butonul UNIC de cancel — vizibil când multi-select activ + count>0
+    if (this.hasMultiCountBadgeTarget) {
+      if (count > 0) {
+        this.multiCountBadgeTarget.textContent = String(count)
+        this.multiCountBadgeTarget.hidden = false
+      } else {
+        this.multiCountBadgeTarget.hidden = true
+      }
+    }
+    this._updateCancelBtnTooltip()
+    // Reactualizează vizibilitatea contextuală — Move/Rotate trebuie să apară
+    // când multi-select are items, chiar fără un single-selected feature.
+    this._updateToolbarVisibility?.()
+    // Tooltip-uri butoane bulk
+    if (this.hasBtnMoveTarget && count > 0 && this._multiSelectActive) {
+      this.btnMoveTarget.title = `Mută bloc ${count} poligoane — drag pe orice, OSnap activ`
+      this.btnMoveTarget.disabled = false
+    }
+    if (this.hasBtnRotateTarget && count > 0 && this._multiSelectActive) {
+      this.btnRotateTarget.title = `Rotește bloc ${count} poligoane — click pivot pe un vertex`
+      this.btnRotateTarget.disabled = false
+    }
+  }
+
+  // Buton UNIC „Anulează" — context-aware:
+  //  - dacă există desenare activă (draw/edit/post-draw modify) → curăță desenarea
+  //  - altfel, dacă există selecție multiplă activă → o DEZACTIVEAZĂ COMPLET
+  //    (curăță items + iese din modul multi-select) → revine la single-select
+  //  - fallback: clearAll (reset general)
+  cancelOperation() {
+    if (this._draw || this._postDrawModify || this._editing) {
+      this.clearAll()
+      this._setStatus("Operațiune anulată.", "info")
+      return
+    }
+    if (this._multiSelectActive) {
+      const selCount = this._hartaMap?.getMultiSelection?.()?.length || 0
+      // disableMultiSelect curăță selecția + iese din mod → următorul click pe
+      // poligon redevine single-select cu butoanele Modifică/Mută/Șterge active.
+      this._hartaMap?.disableMultiSelect?.()
+      this._setStatus(selCount > 0
+        ? `Selecție anulată (${selCount} poligoane). Click pe un poligon = single-select.`
+        : "Mod multi-select dezactivat.", "info")
+      return
+    }
+    this.clearAll()
+  }
+
+  _updateCancelBtnTooltip() {
+    if (!this.hasBtnCancelAllTarget) return
+    const selCount = this._hartaMap?.getMultiSelection?.()?.length || 0
+    if (this._draw || this._postDrawModify) {
+      this.btnCancelAllTarget.title = "Anulează digitizarea curentă"
+    } else if (this._multiSelectActive && selCount > 0) {
+      this.btnCancelAllTarget.title = `Anulează selecția — ${selCount} poligon(e) selectate`
+    } else {
+      this.btnCancelAllTarget.title = "Anulează operațiunea curentă"
     }
   }
 
@@ -2598,7 +3420,6 @@ export default class extends Controller {
     if (nClad) parts.push(`${nClad} clădire${nClad === 1 ? "" : " (i)"}`)
     if (!confirm(`Ștergi ${parts.join(" + ")}?\n\nAceastă acțiune e ireversibilă.`)) return
 
-    this.btnDeleteMultiTarget && (this.btnDeleteMultiTarget.disabled = true)
     this._setStatus(`Se șterg ${items.length} geometrii…`, "info")
 
     const csrf = this._csrf()

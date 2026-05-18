@@ -337,9 +337,11 @@
           <%= svg.('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5v0A5.5 5.5 0 0 0 9.5 20H13"/>') %>
         </button>
         <button type="button" class="map-tb-btn"
-                data-action="click->digitizare#clearAll"
-                title="Șterge tot (anulează desenare)">
+                data-digitizare-target="btnCancelAll"
+                data-action="click->digitizare#cancelOperation"
+                title="Anulează operațiunea curentă (digitizare sau selecție multiplă)">
           <%= svg.('<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>') %>
+          <span class="map-tb-badge" data-digitizare-target="multiCountBadge" hidden>0</span>
         </button>
       </div>
       <span class="map-toolbar-sep"></span>
@@ -358,6 +360,13 @@
                 disabled
                 title="Mută poligonul selectat (comandă: MUT)">
           <%= svg.('<path d="M5 9 2 12l3 3"/><path d="m9 5 3-3 3 3"/><path d="m15 19-3 3-3-3"/><path d="m19 9 3 3-3 3"/><path d="M2 12h20"/><path d="M12 2v20"/>') %>
+        </button>
+        <button type="button" class="map-tb-btn"
+                data-digitizare-target="btnRotate"
+                data-action="click->digitizare#rotateSelected"
+                disabled
+                title="Rotește poligonul selectat — click pe un vertex pivot, apoi mișcă cursor-ul (comandă: ROT)">
+          <%= svg.('<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>') %>
         </button>
         <button type="button" class="map-tb-btn"
                 data-digitizare-target="btnDelete"
@@ -384,14 +393,6 @@
                 aria-pressed="false"
                 title="Lasso poligon: desenează poligon neregulat (intersecția selectează inclusiv drumuri lungi)">
           <%= svg.('<path d="M7 22a5 5 0 0 1-2-4"/><path d="M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1"/><path d="M10.4 19.9c-.7.7-1.7 1.1-2.8 1.1-2.2 0-4-1.8-4-4 0-1.1.4-2.1 1.1-2.8"/>') %>
-        </button>
-        <button type="button" class="map-tb-btn"
-                data-digitizare-target="btnDeleteMulti"
-                data-action="click->digitizare#deleteMultiSelected"
-                hidden
-                disabled
-                title="Șterge toate geometriile din selecția multiplă">
-          <%= svg.('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/><circle cx="19" cy="6" r="3" fill="currentColor"/>') %>
         </button>
       </div>
     </div>

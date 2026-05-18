@@ -1759,6 +1759,7 @@ nav.pagination a:hover  { background: #f3f4f6; }
   box-shadow: 0 1px 3px rgba(0,0,0,0.3);
   pointer-events: none;
 }
+.map-tb-badge[hidden] { display: none; }
 
 /* Vizibilitate contextuală — class adăugată/scoasă din JS */
 .map-tb-btn--hidden { display: none !important; }

@@ -954,20 +954,58 @@ export default class extends Controller {
   // Calculează poziția optimă pentru etichetă astfel încât să rămână în
   // viewport chiar și când poligonul se extinde dincolo de zona vizibilă
   // (la zoom-in puternic).
+  // Calculează poziția etichetei pentru un poligon: centrul porțiunii vizibile
+  // în viewport. Algoritm:
+  //   1. Dacă poligonul nu intersectează viewport-ul → null (label invizibil)
+  //   2. Dacă poligonul e integral în viewport → interior point clasic
+  //   3. Altfel (parțial vizibil) → intersecția REALĂ poligon ∩ viewport via
+  //      JSTS și interior point al intersecției → label apare în centrul
+  //      vizual al porțiunii din poligon care e efectiv vizibilă pe ecran.
+  //   4. Fallback fără JSTS: bbox-intersection center + clamp pe boundary.
   _computeLabelPosition(geom) {
     if (!this.map) return this._geomInteriorPoint(geom)
     const viewExt = this.map.getView().calculateExtent(this.map.getSize())
     const polyExt = geom.getExtent()
     if (!ol.extent.intersects(polyExt, viewExt)) return null
 
-    const interior = this._geomInteriorPoint(geom)
-    if (ol.extent.containsCoordinate(viewExt, interior)) return interior
+    // Poligonul e integral în viewport → centrul real al poligonului.
+    if (ol.extent.containsExtent(viewExt, polyExt)) {
+      return this._geomInteriorPoint(geom)
+    }
 
-    // Centrul intersecției bbox-urilor — în general în viewport
-    const inter = ol.extent.getIntersection(polyExt, viewExt)
-    if (ol.extent.isEmpty(inter)) return null
-    const c = ol.extent.getCenter(inter)
-    // Dacă centrul nu e în poligon, aproximăm cu cel mai apropiat punct de pe boundary
+    // Poligonul depășește viewport-ul → label-ul merge în centrul porțiunii vizibile.
+    const parser = this._getJstsParser?.()
+    if (parser) {
+      try {
+        const jstsGeom = parser.read(geom)
+        const [minx, miny, maxx, maxy] = viewExt
+        const factory = new jsts.geom.GeometryFactory()
+        const coords  = [
+          new jsts.geom.Coordinate(minx, miny),
+          new jsts.geom.Coordinate(maxx, miny),
+          new jsts.geom.Coordinate(maxx, maxy),
+          new jsts.geom.Coordinate(minx, maxy),
+          new jsts.geom.Coordinate(minx, miny)
+        ]
+        const ring     = factory.createLinearRing(coords)
+        const viewJsts = factory.createPolygon(ring, [])
+        const inter    = jstsGeom.intersection(viewJsts)
+        if (inter && !inter.isEmpty()) {
+          const interOl = parser.write(inter)
+          const t = interOl.getType()
+          // intersection poate fi Polygon sau MultiPolygon (poligon cu mai multe
+          // bucăți vizibile). Folosim interior point al rezultatului.
+          if (t === "Polygon" || t === "MultiPolygon") {
+            return this._geomInteriorPoint(interOl)
+          }
+        }
+      } catch (_) { /* fallback la bbox-intersection */ }
+    }
+
+    // Fallback: centrul bbox-ului de intersecție, clamp pe poligon.
+    const interExt = ol.extent.getIntersection(polyExt, viewExt)
+    if (ol.extent.isEmpty(interExt)) return null
+    const c = ol.extent.getCenter(interExt)
     if (geom.intersectsCoordinate(c)) return c
     return geom.getClosestPoint(c)
   }
