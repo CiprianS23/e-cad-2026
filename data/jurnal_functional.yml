@@ -11,6 +11,32 @@
 #
 - date: 2026-05-18
   commit: HEAD
+  title: "Suprafață la click, fără auto-zoom, popup vecini suprimat până la save"
+  functii:
+    - nume: "Suprafața apare în bara de status la click pe poligon"
+      detalii: |
+        Câmpul „Suprafață" din bara de jos arată acum valoarea poligonului
+        pe care ai dat click (din measuredarea pentru CGXML, sau calculat
+        din geometrie pentru parcele locale). În timpul digitizării/editării
+        e actualizată live cu suprafața calculată din vertecșii curenți.
+
+    - nume: "Fără auto-zoom în timpul digitizării"
+      detalii: |
+        Eliminat auto-fit-ul care reașeza viewport-ul la fiecare vertex
+        adăugat. Zoom-ul rămâne controlat manual de utilizator pe parcursul
+        întregii digitizări. Mișcarea cursor-ului nu cauzează niciun
+        pan/zoom automat.
+
+    - nume: "Popup vecini suprimat până la save"
+      detalii: |
+        Hover-ul pe imobile vecine NU mai deschide popup-ul nici după
+        închiderea poligonului (când e în mod post-draw modify, dar
+        operațiunea încă nu e salvată). Popup-ul revine doar după
+        Save sau Anulează. Asigură focus exclusiv pe operațiunea în
+        curs, fără distragerea cu info de la alte imobile.
+
+- date: 2026-05-18
+  commit: e973141
   title: "Toolbar floating peste hartă, SVG icons unitar, persistență pe cache utilizator"
   functii:
     - nume: "Bara de acțiuni mutată în viewport (stil AutoCAD/QGIS)"

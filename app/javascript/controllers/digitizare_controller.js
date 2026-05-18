@@ -1282,7 +1282,6 @@ export default class extends Controller {
     // Extragem vertecșii inițiali — OL a creat deja geometria înainte de drawstart,
     // deci listener-ul de „change" nu vede primul vertex (ar pierde populația _verts)
     this._extractVerts(this._currentFeature.getGeometry())
-    this._lastVertexCount = this._verts.length
     this._geomChangeKey = this._currentFeature.getGeometry().on("change", (e) => {
       this._extractVerts(e.target)
       if (this._verts.length >= 3) {
@@ -1294,40 +1293,9 @@ export default class extends Controller {
       // Update vecinii vizuali pe măsură ce poligonul crește (bbox-ul se extinde)
       clearTimeout(this._neighborDebounce)
       this._neighborDebounce = setTimeout(() => this._refreshDrawVisualNeighbors(), 250)
-      // Detectăm adăugare reală de vertex (vs simplă mișcare cursor) și
-      // refacem zoom-ul ca poligonul COMPLET să rămână în viewport.
-      if (this._verts.length > this._lastVertexCount) {
-        this._lastVertexCount = this._verts.length
-        this._fitPolygonInViewport()
-      } else if (this._verts.length < this._lastVertexCount) {
-        this._lastVertexCount = this._verts.length
-      }
     })
     // Inițial — fără vecini (bbox prea mic), dar pregătim source-ul.
     this._refreshDrawVisualNeighbors()
-  }
-
-  // Asigură că poligonul curent (cu toți vertecșii confirmați + spațiu pentru
-  // cursor) e vizibil în viewport. Apelat după fiecare vertex adăugat sau
-  // eliminat. Folosește bbox-ul cu un buffer = 30% din latura cea mai mare,
-  // ca să rămână loc de „lookahead" pentru următorul vertex.
-  _fitPolygonInViewport() {
-    if (!this._currentFeature || !this.map) return
-    const geom = this._currentFeature.getGeometry?.()
-    if (!geom) return
-    let ext
-    try { ext = geom.getExtent() } catch (_) { return }
-    if (!ext || !isFinite(ext[0]) || ext[0] === Infinity) return
-    const w = ext[2] - ext[0]
-    const h = ext[3] - ext[1]
-    const maxDim = Math.max(w, h, 1)
-    const pad = maxDim * 0.30  // 30% lookahead pentru următorul vertex
-    const padded = [ext[0] - pad, ext[1] - pad, ext[2] + pad, ext[3] + pad]
-    const view = this.map.getView()
-    const viewExt = view.calculateExtent(this.map.getSize())
-    // Dacă poligonul + lookahead e deja fully în view, nu refacem.
-    if (ol.extent.containsExtent(viewExt, padded)) return
-    view.fit(padded, { padding: [60, 60, 60, 60], maxZoom: 22, duration: 300 })
   }
 
   // Re-randează vertecșii vecinilor (cerculețe gri-bleu) în jurul poligonului
@@ -1396,9 +1364,9 @@ export default class extends Controller {
     // Vecini vizuali finali (după închidere)
     this._refreshDrawVisualNeighbors()
 
-    // Setăm flag-ul digitizing OFF (popup-urile pot reapărea pe hover), dar
-    // păstrăm `_currentFeature` ca să-l identificăm la save.
-    this._hartaMap?.setDigitizing(false)
+    // Păstrăm digitizing=true cât timp poligonul nu e salvat — astfel hover
+    // pe vecini nu deschide popup (interferează cu post-draw modify).
+    // setDigitizing(false) se face la Save (clearAll după AJAX) sau Cancel.
     this._setStatus(`Poligon închis — ${this._verts.length} vertecși. Poți încă ajusta vertecșii înainte de save.`, "ok")
     this._calcArea()
     this._verifyTopology()
@@ -2315,9 +2283,10 @@ export default class extends Controller {
   _populateAreaFromSelection(sel) {
     if (!sel) {
       this._areaCalc = 0
-      if (this.hasAreaCalcTarget) this.areaCalcTarget.textContent = "—"
-      if (this.hasAreaActTarget)  this.areaActTarget.value = ""
-      if (this.hasAreaDiffTarget) { this.areaDiffTarget.textContent = "—"; this.areaDiffTarget.className = "digi-area-diff" }
+      if (this.hasAreaCalcTarget)   this.areaCalcTarget.textContent = "—"
+      if (this.hasAreaActTarget)    this.areaActTarget.value = ""
+      if (this.hasAreaDiffTarget)   { this.areaDiffTarget.textContent = "—"; this.areaDiffTarget.className = "digi-area-diff" }
+      if (this.hasStatusAreaTarget) this.statusAreaTarget.textContent = "—"
       return
     }
     const f = sel.feature
@@ -2329,6 +2298,12 @@ export default class extends Controller {
     this._areaCalc = Number.isFinite(calc) && calc > 0 ? calc : 0
     if (this.hasAreaCalcTarget) {
       this.areaCalcTarget.textContent = this._areaCalc > 0 ? `${FMT2(this._areaCalc)} mp` : "—"
+    }
+    // Bara de status de jos arată ACUM suprafața feature-ului selectat
+    // (chiar dacă nu suntem în mod draw/edit). În draw/edit, `_updateLiveArea`
+    // o suprascrie cu valoarea calculată din _verts.
+    if (this.hasStatusAreaTarget) {
+      this.statusAreaTarget.textContent = this._areaCalc > 0 ? `${FMT2(this._areaCalc)} mp` : "—"
     }
     const act = Number(f.get("parcellegalarea"))
     if (this.hasAreaActTarget) this.areaActTarget.value = act > 0 ? act.toFixed(2) : ""
