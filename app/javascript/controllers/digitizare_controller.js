@@ -17,7 +17,8 @@ export default class extends Controller {
     saveBatchUrl:  String,
     cleanupUrl:    String,
     bufferDrumUrl: String,
-    saveDrumUrl:   String
+    saveDrumUrl:   String,
+    snapLinearUrl: String
   }
 
   static targets = [
@@ -28,6 +29,7 @@ export default class extends Controller {
     "btnStart", "btnEdit", "btnDelete", "btnMove", "btnRotate", "btnClose", "btnUndo", "btnRedo", "btnAudit", "auditList",
     "btnLineDigitize",
     "cleanupSlider", "cleanupVal", "btnCleanup", "btnCleanupViewport", "cleanupResult",
+    "snapLinearSlider", "snapLinearVal", "btnSnapLinear", "snapLinearResult",
     "btnMultiSelect", "btnPolygonSelect", "btnCancelAll", "multiCountBadge", "multiSelectInfo",
     "dxfFileInput", "dxfMapping",
     "btnExportZone", "btnExportZonePoly", "btnExportZoneSubmit", "exportFormat",
@@ -1876,6 +1878,8 @@ export default class extends Controller {
     hide("BtnRotate", hasTransformSel)
     hide("BtnClose",  !!this._draw)
     hide("BtnUndo",   !!this._draw)
+    // Activează butonul Alipește la detalii liniare doar când e polygon selectat.
+    if (this.hasBtnSnapLinearTarget) this.btnSnapLinearTarget.disabled = !this._selected
     // btnDeleteMulti rămâne controlat prin atribut hidden direct în _onMultiSelectionChanged
   }
 
@@ -3830,6 +3834,59 @@ export default class extends Controller {
     if (!this.hasCleanupSliderTarget) return
     const v = parseFloat(this.cleanupSliderTarget.value)
     if (this.hasCleanupValTarget) this.cleanupValTarget.textContent = v.toFixed(2)
+  }
+
+  onSnapLinearThresholdChange() {
+    if (!this.hasSnapLinearSliderTarget) return
+    const v = parseFloat(this.snapLinearSliderTarget.value)
+    if (this.hasSnapLinearValTarget) this.snapLinearValTarget.textContent = v.toFixed(2)
+  }
+
+  // Alipire automată a polygonului selectat la detaliile liniare vecine
+  // (DR, CC, CN, A). Folosește vertex-snap conservativ; aria cadastrală păstrată.
+  async snapSelectedToLinear() {
+    if (!this._selected) {
+      this._setSnapLinearResult("Niciun imobil selectat. Click pe un imobil pe hartă.", "warn")
+      return
+    }
+    const kind = this._selected.kind
+    const id   = this._selected.feature.get("id")
+    const threshold = parseFloat(this.snapLinearSliderTarget?.value) || 0.5
+    this._setSnapLinearResult(`Procesare cu prag ${threshold.toFixed(2)} m…`, "info")
+    try {
+      const res = await fetch(this.snapLinearUrlValue || "/digitizare/snap_to_linear", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": this._csrf(), "Accept": "application/json" },
+        body:    JSON.stringify({ kind, id, threshold_m: threshold })
+      })
+      const data = await res.json()
+      if (!data.ok) {
+        this._setSnapLinearResult(data.error || "Eroare necunoscută", "warn")
+        return
+      }
+      if (!data.modified) {
+        this._setSnapLinearResult(data.message || "Polygon deja aliniat — nicio modificare.", "info")
+        return
+      }
+      const sign = data.delta_mp >= 0 ? "+" : ""
+      this._setSnapLinearResult(
+        `✓ Alipit la detalii liniare. Δarie: ${sign}${data.delta_mp.toFixed(2)} mp (${data.old_area.toFixed(2)} → ${data.new_area.toFixed(2)} mp).`,
+        "ok"
+      )
+      // Reload layers
+      this._hartaMap?._loadParcele?.()
+      this._hartaMap?._loadCladiri?.()
+      this._hartaMap?._loadCgxml?.()
+    } catch (e) {
+      this._setSnapLinearResult(`Eroare rețea: ${e.message}`, "warn")
+    }
+  }
+
+  _setSnapLinearResult(html, kind = "info") {
+    if (!this.hasSnapLinearResultTarget) return
+    const color = kind === "warn" ? "#dc2626" : kind === "ok" ? "#16a34a" : "#374151"
+    this.snapLinearResultTarget.innerHTML = html
+    this.snapLinearResultTarget.style.color = color
   }
 
   // Curățare topologică pe zona din multi-selecție (click toggle sau lasso).

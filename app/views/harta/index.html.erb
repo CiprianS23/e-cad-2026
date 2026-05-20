@@ -15,7 +15,8 @@
      data-digitizare-save-batch-url-value="<%= digitizare_save_batch_path %>"
      data-digitizare-cleanup-url-value="<%= digitizare_cleanup_topology_path %>"
      data-digitizare-buffer-drum-url-value="<%= digitizare_buffer_drum_path %>"
-     data-digitizare-save-drum-url-value="<%= digitizare_save_drum_path %>">
+     data-digitizare-save-drum-url-value="<%= digitizare_save_drum_path %>"
+     data-digitizare-snap-linear-url-value="<%= digitizare_snap_to_linear_path %>">
   <!-- ── Sidebar stânga: filtre + layer manager + base layers (colapsibil) ── -->
   <aside class="harta-sidebar" data-controller="sidebar-toggle">
 
@@ -403,6 +404,35 @@
           <%= svg.('<path d="M7 22a5 5 0 0 1-2-4"/><path d="M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1"/><path d="M10.4 19.9c-.7.7-1.7 1.1-2.8 1.1-2.2 0-4-1.8-4-4 0-1.1.4-2.1 1.1-2.8"/>') %>
         </button>
       </div>
+
+      <span class="map-toolbar-sep"></span>
+
+      <!-- Grup 4: Măsurare (distanță / arie) -->
+      <div class="map-toolbar-group" role="group" aria-label="Măsurare"
+           data-controller="measure"
+           data-measure-harta-map-outlet="#harta-map">
+        <button type="button" class="map-tb-btn"
+                data-measure-target="btnDistance"
+                data-action="click->measure#startDistance"
+                aria-pressed="false"
+                title="Măsurare distanță — click vertecși, dublu-click finalizează. Backspace / Ctrl+Z: șterge ultimul vertex. ESC: anulează schița.">
+          <%= svg.('<path d="M21.3 8.7L8.7 21.3a1 1 0 0 1-1.4 0L2.7 16.7a1 1 0 0 1 0-1.4L15.3 2.7a1 1 0 0 1 1.4 0l4.6 4.6a1 1 0 0 1 0 1.4z"/><path d="M7.5 12.5l2 2"/><path d="M10.5 9.5l2 2"/><path d="M13.5 6.5l2 2"/>') %>
+        </button>
+        <button type="button" class="map-tb-btn"
+                data-measure-target="btnArea"
+                data-action="click->measure#startArea"
+                aria-pressed="false"
+                title="Măsurare arie — click vertecși, dublu-click închide poligonul. Backspace / Ctrl+Z: șterge ultimul vertex. ESC: anulează schița.">
+          <%= svg.('<path d="M3 6l9-4 9 4v12l-9 4-9-4V6z"/><path d="M3 6l9 4 9-4"/><path d="M12 10v12"/>') %>
+        </button>
+        <button type="button" class="map-tb-btn"
+                data-measure-target="btnClear"
+                data-action="click->measure#clearAll"
+                title="Șterge toate măsurătorile">
+          <%= svg.('<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>') %>
+        </button>
+        <span class="measure-result" data-measure-target="result" aria-live="polite"></span>
+      </div>
     </div>
     </div><!-- /#harta-map -->
 
@@ -559,6 +589,30 @@
             </button>
           </div>
           <div data-digitizare-target="cleanupResult" style="margin-top:6px;font-size:11px"></div>
+
+          <hr style="margin:12px 0;border:none;border-top:1px solid #e2e8f0">
+          <p class="digi-parcela-hint" style="font-size:11px;line-height:1.5;margin:0 0 6px 0">
+            <strong>Alipire la detalii liniare:</strong> selectează un imobil pe hartă,
+            apoi click pentru a alinia automat vertecșii la marginile drumurilor / căilor
+            ferate / canalelor / apelor vecine (categ. <strong>DR, CC, CN, A</strong>).
+            Aria cadastrală (FLOOR mp) se păstrează.
+          </p>
+          <label style="display:block;margin-bottom:6px;font-size:12px">
+            Prag alipire (m):
+            <input type="range" min="0.05" max="5.0" step="0.05" value="0.5"
+                   data-digitizare-target="snapLinearSlider"
+                   data-action="input->digitizare#onSnapLinearThresholdChange"
+                   style="width:100%">
+            <span data-digitizare-target="snapLinearVal">0.50</span> m
+          </label>
+          <button type="button" class="btn btn-primary btn-sm"
+                  data-action="click->digitizare#snapSelectedToLinear"
+                  data-digitizare-target="btnSnapLinear"
+                  style="width:100%" disabled
+                  title="Selectează un imobil pe hartă, apoi click pentru alipire automată la detaliile liniare vecine">
+            <%= icon "broom" %> Alipește la detalii liniare
+          </button>
+          <div data-digitizare-target="snapLinearResult" style="margin-top:6px;font-size:11px"></div>
         </div>
       </section>
 

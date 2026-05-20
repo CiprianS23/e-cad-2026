@@ -701,6 +701,152 @@ class DigitizareController < ApplicationController
   # Input:
   #   items: [{ kind: 'parcela'|'cladire', id }]  — selecția curentă
   #   threshold: float, raza de snap în metri (default 0.50, max 5.0)
+  # POST /digitizare/snap_to_linear
+  # Alipirea automată a unui polygon la detaliile liniare vecine (drumuri, căi
+  # ferate, canale, ape). Detecție prin `parcels.usecategory IN ('DR','CC','CN','A')`.
+  # Vertex-level snap conservativ — păstrează aria cadastrală (FLOOR mp).
+  # Input: { kind: 'parcela'|'cladire', id: int, threshold_m: float }
+  def snap_to_linear
+    kind        = (params[:kind] || "parcela").to_s
+    eid         = params[:id].to_i
+    threshold_m = params[:threshold_m].to_f
+    threshold_m = 0.50 if threshold_m <= 0
+    threshold_m = [[threshold_m, 0.05].max, 5.0].min
+    linear_categories = %w[DR CC CN A]
+
+    return render json: { ok: false, error: "ID polygon invalid" }, status: :bad_request if eid <= 0
+    join_sql = (kind == "cladire") ? cladiri_geom_join : parcele_geom_join
+    fk       = (kind == "cladire") ? "building_id"     : "land_id"
+    model    = (kind == "cladire") ? GisBuildingGeometry : GisLandGeometry
+
+    sql = ApplicationRecord.sanitize_sql_array([<<~SQL, eid, threshold_m, threshold_m])
+      WITH selected AS (
+        -- ST_Multi forțează MultiPolygon → ST_DumpPoints returnează path
+        -- consistent cu 3 elemente [poly_idx, ring_idx, pt_idx].
+        SELECT t.entity_id, t.label AS lbl, ST_Multi(ST_MakeValid(t.geom)) AS old_geom
+        FROM   (#{join_sql}) t
+        WHERE  t.entity_id = ? AND ST_IsValid(t.geom)
+      ),
+      linear_features AS (
+        -- Polygons cu usecategory ∈ ('DR','CC','CN','A') în limita pragului
+        SELECT ST_Union(ST_MakeValid(g.geom)) AS boundary
+        FROM   gis_land_geometries g
+        JOIN   parcels p ON p.land_id = g.land_id
+        WHERE  p.usecategory IN ('DR','CC','CN','A')
+          AND  ST_DWithin(g.geom, (SELECT old_geom FROM selected), ?)
+          AND  g.land_id != (SELECT entity_id FROM selected WHERE 'parcela' = '#{kind}')
+      ),
+      linear_boundary AS (
+        SELECT COALESCE(ST_Boundary(boundary), ST_GeomFromText('POINT EMPTY', 3844)) AS b
+        FROM   linear_features
+      ),
+      poly_vertices AS (
+        SELECT s.entity_id, s.lbl, s.old_geom,
+               (ST_DumpPoints(s.old_geom)).path AS path,
+               (ST_DumpPoints(s.old_geom)).geom AS pt
+        FROM   selected s
+      ),
+      vertex_resolved AS (
+        -- Pentru fiecare vertex: dacă există punct pe boundary-ul liniarelor
+        -- în raza threshold → snap. Altfel rămâne.
+        SELECT pv.entity_id, pv.lbl, pv.old_geom, pv.path,
+               CASE
+                 WHEN ST_IsEmpty((SELECT b FROM linear_boundary)) THEN pv.pt
+                 WHEN ST_Distance(pv.pt, ST_ClosestPoint((SELECT b FROM linear_boundary), pv.pt)) <= ?
+                 THEN ST_ClosestPoint((SELECT b FROM linear_boundary), pv.pt)
+                 ELSE pv.pt
+               END AS new_pt
+        FROM   poly_vertices pv
+      ),
+      rings_built AS (
+        SELECT entity_id, lbl, old_geom,
+               path[1] AS poly_idx, path[2] AS ring_idx,
+               ST_MakeLine(new_pt ORDER BY path[3]) AS ring_line
+        FROM   vertex_resolved
+        GROUP  BY entity_id, lbl, old_geom, path[1], path[2]
+      ),
+      new_polys AS (
+        SELECT entity_id, lbl, old_geom,
+               ST_Multi(ST_MakeValid(ST_BuildArea(ST_Collect(ring_line)))) AS raw_geom
+        FROM   rings_built
+        GROUP  BY entity_id, lbl, old_geom
+      ),
+      area_corrected AS (
+        -- Scalare uniformă din centroid → aria EXACTĂ = old_area.
+        -- Deplasare vertecși proporțională cu scale (mic dacă diferența mp este mică).
+        -- Trade-off: vertecșii snap-uiți pe drum se pot mișca cu ~0.1-1m (în
+        -- funcție de magnitudinea schimbării de arie).
+        SELECT entity_id, lbl, old_geom,
+               CASE
+                 WHEN NOT ST_IsValid(raw_geom) OR ST_IsEmpty(raw_geom) THEN raw_geom
+                 WHEN ST_Area(raw_geom) < 0.01 THEN raw_geom
+                 WHEN ABS(ST_Area(raw_geom) - ST_Area(old_geom)) < 0.5 THEN raw_geom
+                 ELSE ST_Multi(ST_MakeValid(ST_Affine(raw_geom,
+                   sqrt(ST_Area(old_geom) / NULLIF(ST_Area(raw_geom), 0)),
+                   0, 0,
+                   sqrt(ST_Area(old_geom) / NULLIF(ST_Area(raw_geom), 0)),
+                   (1 - sqrt(ST_Area(old_geom) / NULLIF(ST_Area(raw_geom), 0))) * ST_X(ST_Centroid(raw_geom)),
+                   (1 - sqrt(ST_Area(old_geom) / NULLIF(ST_Area(raw_geom), 0))) * ST_Y(ST_Centroid(raw_geom))
+                 )))
+               END AS new_geom
+        FROM   new_polys
+      )
+      SELECT entity_id, lbl,
+             ROUND(ST_Area(old_geom)::numeric, 4)  AS old_area,
+             ROUND(ST_Area(new_geom)::numeric, 4)  AS new_area,
+             FLOOR(ST_Area(old_geom))::int         AS old_area_cad,
+             FLOOR(ST_Area(new_geom))::int         AS new_area_cad,
+             ST_IsValid(new_geom)                  AS valid_new,
+             NOT ST_IsEmpty(new_geom)              AS nonempty,
+             ST_AsText(new_geom)                   AS new_wkt
+      FROM   area_corrected
+    SQL
+
+    row = ActiveRecord::Base.connection.select_one(sql)
+    return render json: { ok: false, error: "Polygon negăsit sau invalid" }, status: :unprocessable_entity if row.nil?
+    return render json: { ok: false, error: "Geometrie rezultată invalidă" }, status: :unprocessable_entity unless row["valid_new"] && row["nonempty"]
+
+    old_cad = row["old_area_cad"].to_i
+    new_cad = row["new_area_cad"].to_i
+    delta   = (row["new_area"].to_f - row["old_area"].to_f).round(4)
+
+    if old_cad != new_cad
+      return render json: {
+        ok: false,
+        error: "Aria cadastrală s-ar schimba (#{old_cad} → #{new_cad} mp)",
+        delta_mp: delta
+      }, status: :unprocessable_entity
+    end
+
+    if delta.abs < 0.0001
+      return render json: {
+        ok: true, modified: false,
+        message: "Niciun vertex în limita pragului — polygon deja aliniat."
+      }
+    end
+
+    g = model.find_or_initialize_by(fk => eid)
+    g.status   = "active" if g.new_record? && g.status.blank?
+    g.geom_wkt = row["new_wkt"]
+    Thread.current[:topology_skip_overlap_check] = true
+    saved = g.save(validate: false)
+    Thread.current[:topology_skip_overlap_check] = nil
+
+    if saved
+      render json: {
+        ok: true, modified: true,
+        label: row["lbl"], delta_mp: delta,
+        old_area: row["old_area"].to_f, new_area: row["new_area"].to_f
+      }
+    else
+      render json: { ok: false, error: "Salvare eșuată: #{g.errors.full_messages.join(", ")}" },
+             status: :unprocessable_entity
+    end
+  rescue => e
+    Rails.logger.error("snap_to_linear error: #{e.message}\n#{e.backtrace.first(5).join("\n")}")
+    render json: { ok: false, error: "Eroare server: #{e.message}" }, status: :internal_server_error
+  end
+
   def cleanup_topology
     items     = params[:items] || []
     threshold = params[:threshold].presence&.to_f || 0.50

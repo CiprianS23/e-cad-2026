@@ -1883,6 +1883,45 @@ nav.pagination a:hover  { background: #f3f4f6; }
 /* Vizibilitate contextuală — class adăugată/scoasă din JS */
 .map-tb-btn--hidden { display: none !important; }
 
+/* ── Unealtă măsurare distanță/arie — tooltip live + rezultat în toolbar ── */
+.measure-tooltip {
+  position: relative;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  padding: 4px 8px;
+  font: 600 12px/1.2 system-ui, sans-serif;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+.measure-tooltip::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 6px solid transparent;
+  border-right-color: rgba(15, 23, 42, 0.92);
+}
+.measure-result {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 8px;
+  margin-left: 4px;
+  font: 600 11px/1.2 system-ui, sans-serif;
+  color: #7f1d1d;
+  background: rgba(254, 226, 226, 0.6);
+  border: 1px solid #fecaca;
+  border-radius: 5px;
+  white-space: nowrap;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.measure-result:empty { display: none; }
+
 /* ── Pagina /jurnal_modificari — jurnal funcțional ──────────────────── */
 .jurnal-fn { max-width: 880px; margin: 24px auto; padding: 0 16px 64px; }
 .jurnal-fn-card {

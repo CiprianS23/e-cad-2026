@@ -35,6 +35,10 @@ yarn-error.log
 
 # Python venvs (OCR sidecar — recreate cu pip install -r requirements.txt)
 /script/python/venv/
+/script/python/__pycache__/
+
+# Kit ANCPI Generare CG — installer-e binare Windows, ~52MB (download upstream)
+/Kit_1.0.0.7_GenerareCG/
 
 # macOS
 .DS_Store

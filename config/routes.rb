@@ -63,12 +63,21 @@ Rails.application.routes.draw do
     post "/cleanup_topology", to: "digitizare#cleanup_topology",   as: :digitizare_cleanup_topology
     post "/buffer_drum",      to: "digitizare#buffer_drum",        as: :digitizare_buffer_drum
     post "/save_drum",        to: "digitizare#save_drum",          as: :digitizare_save_drum
+    post "/snap_to_linear",   to: "digitizare#snap_to_linear",     as: :digitizare_snap_to_linear
   end
   get "/siruta/autocomplete", to: "siruta#autocomplete", as: :siruta_autocomplete
 
   get "/harta", to: "harta#index", as: :harta
   get "/jurnal_modificari", to: "jurnal_modificari#show", as: :jurnal_modificari
   get "/uat_boundaries/geojson", to: "uat_boundaries#geojson", as: :uat_boundaries_geojson
+
+  # Vector tiles (MVT) pentru layere de geometrii — parcele, cladiri, cgxml, uat.
+  # Tile grid identic cu raster basemap (stereoGrid în EPSG:3844). Vezi
+  # TilesController + TileGrid.
+  get "/tiles/:layer/:z/:x/:y.mvt",
+      to: "tiles#show",
+      as: :vector_tile,
+      constraints: { layer: /parcele|cladiri|cgxml|uat/, z: /\d+/, x: /\d+/, y: /\d+/ }
 
   # Modul GIS — preferințe Layer Manager + georeferențiere planuri vechi
   namespace :gis do
