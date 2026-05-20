@@ -23,7 +23,9 @@ class GisBuildingGeometry < ApplicationRecord
 
   before_validation :atribuie_geom_din_wkt,      if: -> { @geom_wkt.present? }
   before_validation :atribuie_land_din_geom,     if: -> { geom.present? && building&.land_id.blank? }
-  before_save       :atribuie_geom_din_wkt,      if: -> { @geom_wkt.present? && geom.blank? }
+  # before_save fără geom.blank? — pentru save(validate: false) pe UPDATE,
+  # geom există DAR trebuie REÎNLOCUIT cu @geom_wkt nou.
+  before_save       :atribuie_geom_din_wkt,      if: -> { @geom_wkt.present? }
   before_save       :compute_derived,            if: -> { geom_changed? || new_record? }
 
   scope :draft,  -> { where(status: "draft") }
@@ -143,11 +145,12 @@ class GisBuildingGeometry < ApplicationRecord
   end
 
   def compute_derived
+    wkt = geom.as_text
     res = self.class.connection.select_one(
       self.class.sanitize_sql_array([
-        "SELECT ST_PointOnSurface(?::geometry) AS centroid,
-                ROUND(ST_Area(?::geometry)::numeric, 4) AS area",
-        geom_before_type_cast, geom_before_type_cast
+        "SELECT ST_PointOnSurface(ST_GeomFromText(?, 3844)) AS centroid,
+                ROUND(ST_Area(ST_GeomFromText(?, 3844))::numeric, 4) AS area",
+        wkt, wkt
       ])
     )
     self.centroid     = res["centroid"]

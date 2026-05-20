@@ -1705,6 +1705,125 @@ nav.pagination a:hover  { background: #f3f4f6; }
 }
 .map-tb-btn .tb-icon { color: inherit; }
 
+/* Input lățime drum în toolbar (alături de butonul Detaliu liniar) */
+.map-tb-width-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  height: 36px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+.map-tb-width-input {
+  width: 42px;
+  padding: 2px 4px;
+  border: none;
+  font-size: 13px;
+  text-align: right;
+  background: transparent;
+  outline: none;
+  color: #1e293b;
+  -moz-appearance: textfield;
+}
+.map-tb-width-input::-webkit-outer-spin-button,
+.map-tb-width-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.map-tb-width-unit {
+  font-size: 11px;
+  color: #64748b;
+  padding-right: 2px;
+}
+
+/* Popup parametri drum (live-update după desenare ax). Plasat în colțul
+   dreapta-sus al hărții, distinct de toolbar-ul de acțiuni. */
+.digi-drum-params-popup {
+  position: absolute;
+  top: 60px;
+  right: 16px;
+  z-index: 1500;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  padding: 12px 14px;
+  min-width: 220px;
+  font-size: 13px;
+}
+.digi-drum-params-header {
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.digi-drum-params-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #334155;
+}
+.digi-drum-params-row span:first-child { flex: 1; }
+.digi-drum-params-row input {
+  width: 64px;
+  padding: 3px 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  text-align: right;
+  font-size: 13px;
+}
+.digi-drum-params-row span:last-child { color: #64748b; font-size: 12px; }
+.digi-drum-params-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #f1f5f9;
+}
+.digi-drum-params-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s ease;
+}
+.digi-drum-params-save {
+  background: #16a34a;
+  color: #fff;
+  border-color: #15803d;
+}
+.digi-drum-params-save:hover:not(:disabled) { background: #15803d; }
+.digi-drum-params-save:disabled {
+  background: #d1d5db;
+  color: #6b7280;
+  border-color: #d1d5db;
+  cursor: not-allowed;
+}
+.digi-drum-params-cancel {
+  background: #fff;
+  color: #475569;
+  border-color: #cbd5e1;
+}
+.digi-drum-params-cancel:hover { background: #f1f5f9; color: #1e293b; }
+.digi-drum-params-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+  font-style: italic;
+}
+.digi-drum-params-save svg, .digi-drum-params-cancel svg {
+  width: 14px;
+  height: 14px;
+}
+
 /* Iconuri inline pentru butoane non-toolbar (sidebar, formulare).
    Auto-alignare cu text: inline-flex pe butonul părinte adaugă gap.
    Aplicat global: orice .btn cu icon child va alinia corect. */

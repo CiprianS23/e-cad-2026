@@ -61,6 +61,8 @@ Rails.application.routes.draw do
     post "/locate_uat",       to: "digitizare#locate_uat",         as: :digitizare_locate_uat
     post "/locate_parcela",   to: "digitizare#locate_parcela",     as: :digitizare_locate_parcela
     post "/cleanup_topology", to: "digitizare#cleanup_topology",   as: :digitizare_cleanup_topology
+    post "/buffer_drum",      to: "digitizare#buffer_drum",        as: :digitizare_buffer_drum
+    post "/save_drum",        to: "digitizare#save_drum",          as: :digitizare_save_drum
   end
   get "/siruta/autocomplete", to: "siruta#autocomplete", as: :siruta_autocomplete
 

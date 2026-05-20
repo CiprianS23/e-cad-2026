@@ -23,7 +23,9 @@ class GisLandGeometry < ApplicationRecord
   validate  :geom_nu_e_duplicat,                if: -> { geom.present? }
 
   before_validation :atribuie_geom_din_wkt, if: -> { @geom_wkt.present? }
-  before_save       :atribuie_geom_din_wkt,  if: -> { @geom_wkt.present? && geom.blank? }
+  # before_save fără condiția geom.blank? — pentru save(validate: false) pe
+  # UPDATE-uri, geom există DEJA dar trebuie REÎNLOCUIT cu @geom_wkt nou.
+  before_save       :atribuie_geom_din_wkt,  if: -> { @geom_wkt.present? }
   before_save       :compute_derived,        if: -> { geom_changed? || new_record? }
 
   scope :draft,     -> { where(status: "draft") }
@@ -105,11 +107,16 @@ class GisLandGeometry < ApplicationRecord
   end
 
   def compute_derived
+    # IMPORTANT: folosim geom.as_text (WKT) în loc de geom_before_type_cast.
+    # Pentru MultiPolygon cu mai multe părți, geom_before_type_cast poate
+    # serializa virgule între EWKB-uri → SQL primește 2 args la ST_PointOnSurface
+    # → eroare "function st_pointonsurface(unknown, geometry) does not exist".
+    wkt = geom.as_text
     res = self.class.connection.select_one(
       self.class.sanitize_sql_array([
-        "SELECT ST_PointOnSurface(?::geometry) AS centroid,
-                ROUND(ST_Area(?::geometry)::numeric, 4) AS area",
-        geom_before_type_cast, geom_before_type_cast
+        "SELECT ST_PointOnSurface(ST_GeomFromText(?, 3844)) AS centroid,
+                ROUND(ST_Area(ST_GeomFromText(?, 3844))::numeric, 4) AS area",
+        wkt, wkt
       ])
     )
     self.centroid     = res["centroid"]

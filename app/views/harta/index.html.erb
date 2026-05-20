@@ -13,7 +13,9 @@
      data-digitizare-edit-kind-value="<%= params[:edit_kind] %>"
      data-digitizare-edit-id-value="<%= params[:edit_id] %>"
      data-digitizare-save-batch-url-value="<%= digitizare_save_batch_path %>"
-     data-digitizare-cleanup-url-value="<%= digitizare_cleanup_topology_path %>">
+     data-digitizare-cleanup-url-value="<%= digitizare_cleanup_topology_path %>"
+     data-digitizare-buffer-drum-url-value="<%= digitizare_buffer_drum_path %>"
+     data-digitizare-save-drum-url-value="<%= digitizare_save_drum_path %>">
   <!-- ── Sidebar stânga: filtre + layer manager + base layers (colapsibil) ── -->
   <aside class="harta-sidebar" data-controller="sidebar-toggle">
 
@@ -335,6 +337,12 @@
                 disabled
                 title="Redo — refă ultima acțiune anulată (comandă: R)">
           <%= svg.('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5v0A5.5 5.5 0 0 0 9.5 20H13"/>') %>
+        </button>
+        <button type="button" class="map-tb-btn"
+                data-digitizare-target="btnLineDigitize"
+                data-action="click->digitizare#startLineDigitize"
+                title="Detaliu liniar (drum) — desenează axul; parametrii (lățime + prag alipire) apar în popup">
+          <%= svg.('<path d="M4 19 L20 5"/><path d="M2 17 L18 3"/><path d="M6 21 L22 7"/><circle cx="4" cy="19" r="1.5" fill="currentColor"/><circle cx="20" cy="5" r="1.5" fill="currentColor"/>') %>
         </button>
         <button type="button" class="map-tb-btn"
                 data-digitizare-target="btnCancelAll"

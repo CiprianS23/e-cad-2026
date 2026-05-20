@@ -15,7 +15,9 @@ export default class extends Controller {
     editKind:      String,
     editId:        String,
     saveBatchUrl:  String,
-    cleanupUrl:    String
+    cleanupUrl:    String,
+    bufferDrumUrl: String,
+    saveDrumUrl:   String
   }
 
   static targets = [
@@ -24,6 +26,7 @@ export default class extends Controller {
     "metricSnapToggle", "metricSnapSlider", "metricSnapVal",
     "mapToolbar", "multiSelectBadge",
     "btnStart", "btnEdit", "btnDelete", "btnMove", "btnRotate", "btnClose", "btnUndo", "btnRedo", "btnAudit", "auditList",
+    "btnLineDigitize",
     "cleanupSlider", "cleanupVal", "btnCleanup", "btnCleanupViewport", "cleanupResult",
     "btnMultiSelect", "btnPolygonSelect", "btnCancelAll", "multiCountBadge", "multiSelectInfo",
     "dxfFileInput", "dxfMapping",
@@ -83,6 +86,38 @@ export default class extends Controller {
       source: this._drawSource,
       style:  this._drawStyle.bind(this),
       properties: { name: "digitizare" }
+    })
+
+    // Layer dedicat pentru AXA drumului (centerline). Vertecșii ei sunt editabili
+    // → la modificare regenerează banda drumului. Banda în sine (în _drawSource) e
+    // doar pentru afișare, nu se editează direct.
+    this._axisSource = new ol.source.Vector()
+    this._axisLayer  = new ol.layer.Vector({
+      source: this._axisSource,
+      style: () => new ol.style.Style({
+        stroke: new ol.style.Stroke({ color: "#ea580c", width: 2.5, lineDash: [8, 4] }),
+        image: new ol.style.Circle({
+          radius: 5,
+          fill:   new ol.style.Fill({ color: "#ea580c" }),
+          stroke: new ol.style.Stroke({ color: "#fff", width: 1.5 })
+        })
+      }),
+      properties: { name: "drum-axis" },
+      zIndex: 1300
+    })
+
+    // Zonă de prag alipire — inel între limita drumului și (limita + snap_dist).
+    // Vizual semi-transparent ca utilizatorul să vadă zona unde vecinii vor fi
+    // alipiți. Sub axis în z-index ca să nu acopere axa editabilă.
+    this._snapZoneSource = new ol.source.Vector()
+    this._snapZoneLayer  = new ol.layer.Vector({
+      source: this._snapZoneSource,
+      style: () => new ol.style.Style({
+        fill:   new ol.style.Fill({ color: "rgba(234, 88, 12, 0.15)" }),
+        stroke: new ol.style.Stroke({ color: "#ea580c", width: 1.5, lineDash: [4, 3] })
+      }),
+      properties: { name: "drum-snap-zone" },
+      zIndex: 1250
     })
 
     // Layer separat pentru evidențierea conflictelor topologice (overlap, sliver, vertex-off)
@@ -264,6 +299,8 @@ export default class extends Controller {
     this.map = this._hartaMap?.map
     if (!this.map) return
     this.map.addLayer(this._drawLayer)
+    this.map.addLayer(this._snapZoneLayer)
+    this.map.addLayer(this._axisLayer)
     this.map.addLayer(this._topoLayer)
     this.map.addLayer(this._editVertexLayer)  // cerculețele roșii la vertecși — pentru ambele moduri
     this.map.addLayer(this._editEdgeLabelsLayer)  // distanțele între vertecși, în interiorul poligonului
@@ -415,6 +452,7 @@ export default class extends Controller {
       // Pornire desenare
       P: "PARCELA", PAR: "PARCELA", PARCELA: "PARCELA",
       CL: "CLADIRE", CLA: "CLADIRE", CLADIRE: "CLADIRE",
+      D: "DRUM", DR: "DRUM", DRUM: "DRUM", LINIE: "DRUM",
       // Control geometrie
       I: "CLOSE", IN: "CLOSE", INCHIDE: "CLOSE",
       A: "CANCEL", ESC: "CANCEL", ANULEAZA: "CANCEL",
@@ -440,6 +478,10 @@ export default class extends Controller {
       case "CLADIRE":
         this.switchToBuilding?.(); this.startDrawing()
         this._cmdHint("▶ Digitizare clădire pornită.", false)
+        break
+      case "DRUM":
+        this.startLineDigitize()
+        this._cmdHint("▶ Digitizare detaliu liniar (drum) pornită — setează lățimea în toolbar.", false)
         break
       case "CLOSE":
         if (this._draw && this._verts.length >= 3) {
@@ -485,7 +527,7 @@ export default class extends Controller {
         else this._cmdHint("Selectează un poligon înainte de ZOOM.", true)
         break
       case "HELP":
-        this._cmdHint("Comenzi: PAR | CL | I (închide) | A (anulează) | U (undo) | R (redo) | M (modifică) | S (șterge) | SV (save) | Z (zoom)", false)
+        this._cmdHint("Comenzi: PAR | CL | DR (drum) | I (închide) | A (anulează) | U/R (undo/redo) | M | S | MV (mut) | RO (rot) | SV | Z", false)
         break
     }
     return true
@@ -1080,6 +1122,473 @@ export default class extends Controller {
     this._setStatus(hint)
   }
 
+  // ── Digitizare detaliu liniar (drum) — ax + lățime → poligon ──────────
+  // User-ul desenează LineString-ul axei. La drawend, serverul calculează
+  // ST_Buffer (lățime/2 stânga + dreapta, capete flat) și clip la vecinii
+  // care intersectează. Rezultatul: un Polygon care intră în flow-ul normal
+  // de post-draw (Modify + form parcelă + save_batch).
+  startLineDigitize() {
+    if (!this.map) return
+    this.clearAll()
+    this._hartaMap?._endPolygonSelect?.()
+    this._hartaMap?.disableMultiSelect?.()
+    if (this._exportDraw && this.map) { this.map.removeInteraction(this._exportDraw); this._exportDraw = null }
+    this._hartaMap?.setDigitizing(true)
+    this.switchToParcel?.()
+
+    // Default params (suprascriși via popup); persistăm valorile între digitizări.
+    if (!this._drumLastParams) this._drumLastParams = { widthM: 6, snapDist: 5 }
+    // Afișează popup-ul ÎNAINTE de desenare ca utilizatorul să poată seta
+    // lățimea și pragul de alipire înainte să dea click pe hartă.
+    this._showDrumParamsPopup()
+
+    this._lineDraw = new ol.interaction.Draw({
+      source: this._drawSource,
+      type:   "LineString",
+      style:  this._drawStyle.bind(this)
+    })
+    this.map.addInteraction(this._lineDraw)
+    this._refreshSnap()
+
+    this._lineDraw.on("drawstart", (evt) => {
+      this._currentFeature = evt.feature
+    })
+    this._lineDraw.on("drawend", (evt) => this._onLineDrawEnd(evt))
+
+    if (this.hasBtnLineDigitizeTarget) this.btnLineDigitizeTarget.classList.add("btn-active")
+    if (this.hasBtnCloseTarget) this.btnCloseTarget.disabled = false
+    this._updateToolbarVisibility?.()
+    this._setStatus(`Detaliu liniar (drum) ${this._drumLastParams.widthM} m: click pe hartă pentru axa. Parametri în popup.`)
+  }
+
+  async _onLineDrawEnd(evt) {
+    if (this._lineDraw && this.map) {
+      this.map.removeInteraction(this._lineDraw)
+      this._lineDraw = null
+    }
+    if (this.hasBtnLineDigitizeTarget) this.btnLineDigitizeTarget.classList.remove("btn-active")
+
+    const feature = evt.feature
+    const lineGeom = feature.getGeometry()
+    const coords = lineGeom.getCoordinates() || []
+    if (coords.length < 2) {
+      this._setStatus("Linie cu mai puțini de 2 vertecși — anulat.", "warn")
+      try { this._drawSource.removeFeature(feature) } catch (e) {}
+      this._hartaMap?.setDigitizing(false)
+      return
+    }
+    // Parametrii vin din popup (state-ul `_drumLastParams`, sau default 6/5).
+    const widthM   = this._drumLastParams?.widthM   ?? 6
+    const snapDist = this._drumLastParams?.snapDist ?? 5
+    if (widthM <= 0 || widthM > 50) {
+      this._setStatus(`Lățime invalidă (${widthM}) — folosește 0.5–50 m.`, "warn")
+      try { this._drawSource.removeFeature(feature) } catch (e) {}
+      this._hartaMap?.setDigitizing(false)
+      return
+    }
+    const lineWkt = "LINESTRING(" + coords.map(([x, y]) => `${x.toFixed(6)} ${y.toFixed(6)}`).join(", ") + ")"
+
+    // Mută axa în _axisSource (separat de _drawSource ca să o putem edita).
+    try { this._drawSource.removeFeature(feature) } catch (e) {}
+    this._axisSource.clear()
+    this._axisFeature = feature
+    this._axisSource.addFeature(feature)
+
+    // Modify pe AXĂ — utilizatorul editează vertecșii axei, NU marginile benzii.
+    // La modifyend, debounced re-recompute drum din axa actualizată.
+    if (this._axisModify) this.map.removeInteraction(this._axisModify)
+    this._axisModify = new ol.interaction.Modify({
+      features: new ol.Collection([feature]),
+      pixelTolerance: 12
+    })
+    this.map.addInteraction(this._axisModify)
+    this._axisModify.on("modifyend", () => {
+      clearTimeout(this._axisDebounce)
+      this._axisDebounce = setTimeout(() => this._regenFromAxis(), 300)
+    })
+
+    this._drumOriginalLineWkt = lineWkt
+    this._setStatus(`Calculare buffer ${widthM}m + alipire vecini (${snapDist}m)…`)
+    try {
+      const res = await fetch(this.bufferDrumUrlValue, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": this._csrf(), "Accept": "application/json" },
+        body:    JSON.stringify({ line_wkt: lineWkt, width_m: widthM, snap_dist_m: snapDist })
+      })
+      const data = await res.json()
+      if (!data.ok) {
+        this._setStatus(`Eroare buffer: ${data.error || "necunoscută"}.`, "warn")
+        this._hartaMap?.setDigitizing(false)
+        return
+      }
+      console.log("[buffer_drum]", {
+        affected: data.affected_neighbors?.length || 0,
+        diagnostic: data.diagnostic
+      })
+      const fmt = new ol.format.GeoJSON()
+      this._drumCachedNeighbors = data.affected_neighbors || []
+      this._drumAffectedNeighbors = null
+      this._drumNeighborsApplied = false
+
+      // Afișează zona de prag alipire (inel în jurul drumului).
+      this._renderSnapZone(data.snap_zone_geojson)
+
+      // Banda drumului → display-only în _drawSource (NU Modify pe ea!).
+      // Vertecșii editabili sunt pe AXĂ (în _axisSource). La modificare axă
+      // → re-calcul automat al benzii prin _regenFromAxis.
+      this._drawSource.getFeatures()
+        .filter(f => f !== this._axisFeature)
+        .forEach(f => this._drawSource.removeFeature(f))
+      const polyFeat = fmt.readFeature(data.geojson, {
+        dataProjection: "EPSG:3844", featureProjection: "EPSG:3844"
+      })
+      this._drawSource.addFeature(polyFeat)
+      this._currentFeature = polyFeat
+      this._drumMode = true
+      this._extractVerts(polyFeat.getGeometry())
+      // În mod drum, vertecșii editabili sunt pe AXĂ (în _axisLayer).
+      // Curățăm cerculețele pe banda drumului — utilizatorul NU le poate edita.
+      if (this._editVertexSource) this._editVertexSource.clear()
+      this._calcArea?.()
+
+      const nCount = this._drumCachedNeighbors.length
+      this._setStatus(`Drum: ${data.area_mp.toFixed(2)} m² · ${nCount} vecini detectați. Editează vertecșii AXEI (linia portocalie) sau aplică pe vecini.`, "ok")
+      this._showDrumParamsPopup()
+    } catch (e) {
+      this._setStatus(`Eroare rețea: ${e.message}`, "warn")
+      this._hartaMap?.setDigitizing(false)
+    }
+  }
+
+  // Popup de parametri drum (lățime + prag alipire) cu live-update.
+  // Apare după buffer_drum cu succes; utilizatorul poate modifica parametrii
+  // → buffer_drum se re-rulează automat (debounced) și vecinii se re-aplică.
+  _showDrumParamsPopup() {
+    if (this._drumPopup) { try { this._drumPopup.remove() } catch (e) {} }
+    const panel = document.createElement("div")
+    panel.className = "digi-drum-params-popup"
+    const drawn   = !!this._drumOriginalLineWkt
+    const applied = !!this._drumNeighborsApplied
+    const nCached = this._drumCachedNeighbors?.length || 0
+    const nApplied = this._drumAffectedNeighbors?.length || 0
+
+    // Etape:
+    //   1) drawn=false       → așteaptă desenare axă (doar Anulează)
+    //   2) drawn=true, applied=false → drum vizibil, Aplică pe N vecini disponibil
+    //   3) applied=true      → vecinii aplicați, Salvează disponibil
+    let actions = ""
+    let hint = ""
+    if (!drawn) {
+      hint = "Desenează axul pe hartă (click pe fiecare vertex, dublu-click la final)."
+      actions = `
+        <button type="button" class="digi-drum-params-cancel">${this._iconCancel()} Anulează</button>
+      `
+    } else if (!applied) {
+      hint = `Drum trasat (${nCached} vecini detectați). Editează vertecșii drumului dacă e cazul, apoi <b>Aplică pe vecini</b>.`
+      actions = `
+        <button type="button" class="digi-drum-params-apply" ${nCached === 0 ? "disabled" : ""}>
+          ✓ Aplică pe ${nCached} vecin(i)
+        </button>
+        <button type="button" class="digi-drum-params-cancel">${this._iconCancel()} Anulează</button>
+      `
+    } else {
+      hint = `Vecini aplicați (${nApplied}). Ajustează vertecși partajati dacă vrei, apoi <b>Salvează</b>.`
+      actions = `
+        <button type="button" class="digi-drum-params-save">
+          ${this._iconSave()} Salvează drum + ${nApplied} vecin(i)
+        </button>
+        <button type="button" class="digi-drum-params-cancel">${this._iconCancel()} Anulează</button>
+      `
+    }
+
+    panel.innerHTML = `
+      <div class="digi-drum-params-header">⚙ Drum — parametri</div>
+      <label class="digi-drum-params-row">
+        <span>Lățime</span>
+        <input type="number" class="digi-drum-params-width"
+               value="${this._drumLastParams.widthM}" min="0.5" max="50" step="0.5">
+        <span>m</span>
+      </label>
+      <label class="digi-drum-params-row">
+        <span>Prag alipire</span>
+        <input type="number" class="digi-drum-params-snap"
+               value="${this._drumLastParams.snapDist}" min="0.5" max="20" step="0.5">
+        <span>m</span>
+      </label>
+      <div class="digi-drum-params-actions">${actions}</div>
+      <div class="digi-drum-params-hint">${hint}</div>
+    `
+    this.element.appendChild(panel)
+    this._drumPopup = panel
+    const widthInput = panel.querySelector(".digi-drum-params-width")
+    const snapInput  = panel.querySelector(".digi-drum-params-snap")
+    const onChange = () => {
+      const w  = Math.max(0.5, Math.min(50,  parseFloat(widthInput.value) || 6))
+      const s  = Math.max(0.5, Math.min(20,  parseFloat(snapInput.value)  || 5))
+      this._drumLastParams = { widthM: w, snapDist: s }
+      if (!this._drumOriginalLineWkt) return
+      clearTimeout(this._drumParamsDebounce)
+      this._drumParamsDebounce = setTimeout(() => this._recomputeDrum(), 350)
+    }
+    widthInput.addEventListener("input", onChange)
+    snapInput.addEventListener("input", onChange)
+    const applyBtn = panel.querySelector(".digi-drum-params-apply")
+    if (applyBtn) applyBtn.addEventListener("click", () => this._applyDrumNeighbors())
+    const saveBtn = panel.querySelector(".digi-drum-params-save")
+    if (saveBtn) saveBtn.addEventListener("click", () => { this._closeDrumPopup(); this._saveDrum() })
+    panel.querySelector(".digi-drum-params-cancel").addEventListener("click", () => {
+      this._closeDrumPopup()
+      this.clearAll()
+      this._setStatus("Digitizare drum anulată.", "info")
+    })
+  }
+
+  // Aplică pe vecini cache-uitele transformări (snap/translate calculate de server).
+  // Apelat când utilizatorul confirmă traseul drumului via popup.
+  _applyDrumNeighbors() {
+    if (!this._drumCachedNeighbors?.length) {
+      this._setStatus("Niciun vecin de aplicat.", "warn")
+      return
+    }
+    const fmt = new ol.format.GeoJSON()
+    const findFeature = (kind, id) => {
+      const wantedId = Number(id)
+      const candidateLayers = kind === "cladire"
+        ? [this._hartaMap?.cladiriLayer, this._hartaMap?.cgxmlLayer]
+        : [this._hartaMap?.parcelLayer,  this._hartaMap?.cgxmlLayer]
+      for (const layer of candidateLayers) {
+        const src = layer?.getSource()
+        if (!src) continue
+        const feat = src.getFeatures().find(f => {
+          if (Number(f.get("id")) !== wantedId) return false
+          const etype = f.get("entity_type")
+          if (etype === "land"     && kind === "parcela") return true
+          if (etype === "building" && kind === "cladire") return true
+          if (!etype) return true
+          return false
+        })
+        if (feat) return { feat, src }
+      }
+      return null
+    }
+    this._drumAffectedNeighbors = []
+    this._drumCachedNeighbors.forEach(n => {
+      const found = findFeature(n.kind, n.id)
+      if (!found) return
+      const { feat, src } = found
+      const originalCoords = feat.getGeometry().getCoordinates()
+      const originalType   = feat.getGeometry().getType()
+      if (n.delete) {
+        try { src.removeFeature(feat) } catch (e) {}
+        this._drumAffectedNeighbors.push({
+          kind: n.kind, id: n.id, feature: feat, sourceLayer: src,
+          originalCoords, originalType, deleteFlag: true
+        })
+        return
+      }
+      const newGeom = fmt.readGeometry(n.new_geojson, {
+        dataProjection: "EPSG:3844", featureProjection: "EPSG:3844"
+      })
+      feat.setGeometry(newGeom)
+      this._drumAffectedNeighbors.push({
+        kind: n.kind, id: n.id, feature: feat, sourceLayer: src,
+        originalCoords, originalType, deleteFlag: false
+      })
+    })
+
+    // Extinde _postDrawModify ca user-ul să poată ajusta vertecșii partajati.
+    const modifiable = this._drumAffectedNeighbors.filter(n => !n.deleteFlag)
+    if (modifiable.length > 0 && this._postDrawModify && this.map && this._currentFeature) {
+      this.map.removeInteraction(this._postDrawModify)
+      const allFeatures = [this._currentFeature, ...modifiable.map(n => n.feature)]
+      this._postDrawModify = new ol.interaction.Modify({
+        features:       new ol.Collection(allFeatures),
+        pixelTolerance: 12,
+        deleteCondition: (e) => {
+          const oe = e.originalEvent
+          return e.type === "singleclick" && (oe?.shiftKey || oe?.altKey)
+        }
+      })
+      this.map.addInteraction(this._postDrawModify)
+      this._refreshSnap()
+    }
+
+    this._drumNeighborsApplied = true
+    this._setStatus(`✓ ${this._drumAffectedNeighbors.length} vecini ajustați. Salvează când e gata.`, "ok")
+    // Re-randează popup-ul în starea „applied" (afișează Salvează).
+    this._showDrumParamsPopup()
+  }
+
+  _closeDrumPopup() {
+    if (this._drumPopup) { try { this._drumPopup.remove() } catch (e) {} this._drumPopup = null }
+  }
+
+  // Re-rulează buffer_drum cu parametrii curenți. Restaurează vecinii la
+  // poziția originală (înainte de orice modificare client-side), apoi aplică
+  // rezultatul nou.
+  async _recomputeDrum() {
+    if (!this._drumOriginalLineWkt || !this._drumLastParams) return
+    // Cleanup banda drumului anterioară DIN _drawSource (păstrând _axisFeature
+    // dacă e acolo accidental). Modify pe axă rămâne intact.
+    this._drawSource.getFeatures()
+      .filter(f => f !== this._axisFeature)
+      .forEach(f => this._drawSource.removeFeature(f))
+    if (this._editVertexSource) this._editVertexSource.clear()
+    this._currentFeature = null
+    // Restore vecini la geometriile ORIGINALE (pre-orice modificare)
+    this._restoreDrumNeighbors()
+    this._drumMode = true
+    // 3) Re-POST cu noile params
+    const { widthM, snapDist } = this._drumLastParams
+    this._setStatus(`Recalculare drum: lățime ${widthM}m · alipire ${snapDist}m…`)
+    try {
+      const res = await fetch(this.bufferDrumUrlValue, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": this._csrf(), "Accept": "application/json" },
+        body:    JSON.stringify({ line_wkt: this._drumOriginalLineWkt, width_m: widthM, snap_dist_m: snapDist })
+      })
+      const data = await res.json()
+      if (!data.ok) {
+        this._setStatus(`Eroare recalcul: ${data.error || "necunoscută"}.`, "warn")
+        return
+      }
+      const fmt = new ol.format.GeoJSON()
+      this._drumCachedNeighbors = data.affected_neighbors || []
+      this._drumAffectedNeighbors = null
+      this._drumNeighborsApplied = false
+      this._renderSnapZone(data.snap_zone_geojson)
+      const polyFeat = fmt.readFeature(data.geojson, {
+        dataProjection: "EPSG:3844", featureProjection: "EPSG:3844"
+      })
+      this._drawSource.addFeature(polyFeat)
+      this._currentFeature = polyFeat
+      this._extractVerts(polyFeat.getGeometry())
+      // Curățăm cerculețele pe banda drumului — editare doar pe axă.
+      if (this._editVertexSource) this._editVertexSource.clear()
+      this._calcArea?.()
+      this._showDrumParamsPopup()
+      const nCached = this._drumCachedNeighbors.length
+      this._setStatus(`✓ Drum recalculat: ${data.area_mp.toFixed(2)} m² · ${nCached} vecini detectați.`, "ok")
+    } catch (e) {
+      this._setStatus(`Eroare rețea: ${e.message}`, "warn")
+    }
+  }
+
+  // Randează zona de prag alipire (inelul din jurul drumului) din GeoJSON.
+  _renderSnapZone(geojson) {
+    if (!this._snapZoneSource) return
+    this._snapZoneSource.clear()
+    if (!geojson) return
+    try {
+      const fmt = new ol.format.GeoJSON()
+      const feat = fmt.readFeature(geojson, {
+        dataProjection: "EPSG:3844", featureProjection: "EPSG:3844"
+      })
+      this._snapZoneSource.addFeature(feat)
+    } catch (e) { console.warn("snap zone render failed:", e) }
+  }
+
+  // Re-generează banda drumului din axa modificată. Apelat când utilizatorul
+  // trage un vertex al axei (modifyend event pe _axisModify).
+  _regenFromAxis() {
+    if (!this._axisFeature || !this._drumLastParams) return
+    const geom = this._axisFeature.getGeometry()
+    if (!geom || geom.getType() !== "LineString") return
+    const coords = geom.getCoordinates() || []
+    if (coords.length < 2) return
+    this._drumOriginalLineWkt = "LINESTRING(" + coords.map(([x, y]) => `${x.toFixed(6)} ${y.toFixed(6)}`).join(", ") + ")"
+    this._recomputeDrum()
+  }
+
+  // Restaurare vecini afectați (la cancel sau la clearAll în drum mode).
+  _restoreDrumNeighbors() {
+    if (!this._drumAffectedNeighbors) return
+    this._drumAffectedNeighbors.forEach(n => {
+      try {
+        // Restaurăm geometria originală păstrând tipul (Polygon / MultiPolygon).
+        const Cls = n.originalType === "MultiPolygon" ? ol.geom.MultiPolygon : ol.geom.Polygon
+        n.feature.setGeometry(new Cls(n.originalCoords))
+        if (n.deleteFlag && n.sourceLayer) {
+          const src = n.sourceLayer
+          if (!src.getFeatures().includes(n.feature)) {
+            src.addFeature(n.feature)
+          }
+        }
+      } catch (e) { console.warn("Restore failed for", n.kind, n.id, e) }
+    })
+    this._drumAffectedNeighbors = null
+    this._drumMode = false
+  }
+
+  // Save dedicate pentru flow drum: creează drum nou + actualizează vecini
+  // afectați ATOMIC. Înlocuiește submit-ul standard de formular parcelă.
+  async _saveDrum() {
+    if (!this._currentFeature) {
+      this._setStatus("Niciun drum de salvat.", "warn")
+      return
+    }
+    if (!this._drumOriginalLineWkt || !this._drumLastParams) {
+      this._setStatus("Lipsesc parametrii drumului (axă/lățime). Reia desenul.", "warn")
+      return
+    }
+    if (!await this._validateBeforeSave()) return
+
+    // SECURITATE: NU mai trimitem geometria drumului sau a vecinilor — serverul
+    // recalculează totul din axă + parametri (vezi save_drum + compute_drum_geometry).
+    // Trimitem DOAR axa (line WKT), width, snap_dist și metadatele formularului.
+    const form = this.saveFormTarget
+    const fd = new FormData(form)
+    const road = {
+      cadgenno:            fd.get("land[numar_cadastral]") || "",
+      suprafata_mp:        this._areaCalc > 0 ? this._areaCalc.toFixed(4) : "",
+      categoria_folosinta: fd.get("land[categoria_folosinta]") || "DR"
+    }
+    const { widthM, snapDist } = this._drumLastParams
+    const neighborCount = (this._drumAffectedNeighbors || []).length
+
+    this._setStatus(`Salvare drum + ${neighborCount} vecin(i)…`)
+    try {
+      const res = await fetch(this.saveDrumUrlValue || "/digitizare/save_drum", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": this._csrf(), "Accept": "application/json" },
+        body:    JSON.stringify({
+          axis_wkt:    this._drumOriginalLineWkt,
+          width_m:     widthM,
+          snap_dist_m: snapDist,
+          road
+        })
+      })
+      const data = await res.json()
+      if (data.ok) {
+        const affected = data.affected_count ?? neighborCount
+        this._setStatus(`✓ Drum salvat + ${affected} vecin(i) actualizați.`, "ok")
+        this._drumMode = false
+        this._drumAffectedNeighbors = null
+        this.clearAll()
+        // Reload TOATE layerele care pot conține vecini afectați:
+        //   - parcelLayer: drafturi Lands cu gis_land_geometries cache
+        //   - cladiriLayer: Buildings cache
+        //   - cgxmlLayer: CGXML lands (cache + reconstruite din points)
+        // CGXML lands afectate de drum acum au gis_land_geometries actualizat
+        // → cgxmlLayer trebuie REÎNCĂRCAT pentru a vedea noile geometrii.
+        this._hartaMap?._loadParcele?.()
+        this._hartaMap?._loadCladiri?.()
+        this._hartaMap?._loadCgxml?.()
+        if (data.redirect && this._hartaMap) {
+          const m2 = data.redirect.match(/\/lands\/(\d+)/)
+          if (m2) {
+            const mockSel = { kind: "parcela", feature: { get: (k) => k === "id" ? m2[1] : null } }
+            this._hartaMap._updateFocusUrlParams?.(mockSel)
+          }
+        }
+      } else {
+        this._setStatus("Erori salvare: " + (data.errors || []).join(" | "), "warn")
+      }
+    } catch (e) {
+      this._setStatus(`Eroare rețea: ${e.message}`, "warn")
+    }
+  }
+
   // Colectează toți vertecșii (ca puncte [x,y]) din feature-urile vecine
   // (parcele + cladiri + cgxml) — folosiți de _applyMetricSnapping pentru a
   // muta vertecșii desenați spre cei mai apropiați din raza metric configurată.
@@ -1178,6 +1687,22 @@ export default class extends Controller {
   }
 
   clearAll() {
+    // Restaurăm vecini afectați de drum dacă există (anulare digitizare drum)
+    // + închidem popup-ul + curățăm axa drumului.
+    if (this._drumAffectedNeighbors) this._restoreDrumNeighbors()
+    this._closeDrumPopup?.()
+    if (this._axisModify && this.map) {
+      this.map.removeInteraction(this._axisModify)
+      this._axisModify = null
+    }
+    if (this._axisSource) this._axisSource.clear()
+    if (this._snapZoneSource) this._snapZoneSource.clear()
+    this._axisFeature = null
+    this._drumOriginalLineWkt = null
+    this._drumLastParams = null
+    this._drumCachedNeighbors = null
+    this._drumNeighborsApplied = false
+    this._drumMode = false
     this._verts    = []
     this._areaCalc = 0
     this._polygonValid = false
@@ -1185,6 +1710,8 @@ export default class extends Controller {
     this._topologyIssues = []
     this._topologyHasErrors = false
     if (this._draw && this.map) { this.map.removeInteraction(this._draw); this._draw = null }
+    if (this._lineDraw && this.map) { this.map.removeInteraction(this._lineDraw); this._lineDraw = null }
+    if (this.hasBtnLineDigitizeTarget) this.btnLineDigitizeTarget.classList.remove("btn-active")
     if (this._postDrawModify && this.map) { this.map.removeInteraction(this._postDrawModify); this._postDrawModify = null }
     if (this._geomChangeKey) { ol.Observable.unByKey(this._geomChangeKey); this._geomChangeKey = null }
     if (this._snap && this.map) { this.map.removeInteraction(this._snap); this._snap = null }
@@ -1387,6 +1914,9 @@ export default class extends Controller {
   }
 
   async saveParcel() {
+    // Mod drum (digitizare detaliu liniar) → flow dedicat care actualizează
+    // și vecinii afectați în aceeași tranzacție.
+    if (this._drumMode) return this._saveDrum()
     if (!await this._validateBeforeSave()) return
     const m = this._applyMetricSnapping()
     if (m) this._setStatus(`METRIC: ${m} vertex(i) potriviți pe vecini.`, "ok")
@@ -4010,14 +4540,21 @@ export default class extends Controller {
       entity_type: this._editing ? this.editKindValue : this._entityType
     }
     if (this._editing) params.exclude_id = this.editIdValue
+    const excludeIds = []
     if (this._editing && this._modifiedFeatures) {
-      const ids = []
       this._modifiedFeatures.forEach(f => {
         if (f === this._editFeature) return
-        ids.push(String(f.get("id")))
+        excludeIds.push(String(f.get("id")))
       })
-      if (ids.length) params.exclude_neighbor_ids = ids
     }
+    // Mod drum: vecinii afectați (parcele/clădiri) vor fi actualizați ATOMIC
+    // în save_drum cu geometriile lor noi (subtrase). Pentru topology check
+    // pre-save NU îi includem în DB-side neighbors (ar produce fals-pozitive
+    // de overlap cu geometriile lor VECHI, neactualizate încă în baza de date).
+    if (this._drumMode && this._drumAffectedNeighbors) {
+      this._drumAffectedNeighbors.forEach(n => excludeIds.push(String(n.id)))
+    }
+    if (excludeIds.length) params.exclude_neighbor_ids = excludeIds
     return params
   }
 

@@ -1057,6 +1057,8 @@ export default class extends Controller {
     const idLabel = feature.get("cadgenno") || feature.get("e2identifier") || `#${feature.get("id")}`
     const geom    = feature.getGeometry()
     if (!geom) return null
+    // getArea() există doar pe Polygon/MultiPolygon — pentru tipuri neașteptate skip.
+    if (typeof geom.getArea !== "function") return null
     const area    = Math.round(geom.getArea())
     const label   = `${idLabel}\n${area} mp`
     const labelPos = this._computeLabelPosition(geom)
@@ -1417,15 +1419,26 @@ export default class extends Controller {
     this.map.on("moveend", () => {
       if (this._restoringView) return
       try {
-        const raw = localStorage.getItem("harta:lastEntity")
-        if (!raw) return
-        const data = JSON.parse(raw)
-        if (!data?.id) return
         const view = this.map.getView()
-        data.center = view.getCenter()
-        data.zoom   = view.getZoom()
-        data.ts     = Date.now()
-        localStorage.setItem("harta:lastEntity", JSON.stringify(data))
+        const center = view.getCenter()
+        const zoom   = view.getZoom()
+        // Salvăm întotdeauna VIEWPORT-ul curent (orice operațiune: pan, zoom,
+        // edit, save) — la refresh utilizatorul revine în zona unde lucra.
+        localStorage.setItem("harta:lastViewport", JSON.stringify({
+          center, zoom, ts: Date.now()
+        }))
+        // În plus, dacă există entitate focalizată, updateăm și acel cache
+        // (păstrează asocierea entitate ↔ viewport).
+        const raw = localStorage.getItem("harta:lastEntity")
+        if (raw) {
+          const data = JSON.parse(raw)
+          if (data?.id) {
+            data.center = center
+            data.zoom   = zoom
+            data.ts     = Date.now()
+            localStorage.setItem("harta:lastEntity", JSON.stringify(data))
+          }
+        }
       } catch (_) { /* no-op */ }
     })
   }
@@ -1445,7 +1458,7 @@ export default class extends Controller {
     if (landId) target = { kind: "parcela", id: String(landId), savedZoom: parseFloat(url.searchParams.get("z")) }
     else if (bldId) target = { kind: "cladire", id: String(bldId), savedZoom: parseFloat(url.searchParams.get("z")) }
 
-    // 2) Fallback: cache utilizator (last entity edited / selected)
+    // 2) Fallback A: ultima entitate focalizată (selectată/editată)
     if (!target) {
       try {
         const raw = localStorage.getItem("harta:lastEntity")
@@ -1453,6 +1466,25 @@ export default class extends Controller {
           const data = JSON.parse(raw)
           if (data?.id) {
             target = { kind: data.kind, id: String(data.id), savedZoom: data.zoom, savedCenter: data.center }
+          }
+        }
+      } catch (_) { /* no-op */ }
+    }
+    // 3) Fallback B: ultimul viewport (orice operațiune — pan, zoom, digitizare,
+    //    save) — chiar dacă nu există entitate focalizată, ne întoarcem în zona
+    //    unde lucra utilizatorul.
+    if (!target) {
+      try {
+        const raw = localStorage.getItem("harta:lastViewport")
+        if (raw) {
+          const data = JSON.parse(raw)
+          if (Array.isArray(data?.center) && Number.isFinite(data?.zoom)) {
+            this._zoomedFromUrl = true
+            this._restoringView = true
+            this.map.getView().setCenter(data.center)
+            this.map.getView().setZoom(data.zoom)
+            setTimeout(() => { this._restoringView = false }, 350)
+            return
           }
         }
       } catch (_) { /* no-op */ }

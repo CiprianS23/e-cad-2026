@@ -517,9 +517,12 @@ class DigitizareController < ApplicationController
         records_with_payloads << [record, payload]
       end
 
-      # Faza 1: save fără overlap-check (geometriile simultan)
-      Thread.current[:topology_skip_overlap_check] = true
+      # Faza 1: save fără overlap-check (geometriile simultan).
+      # Flag-ul Thread.current se setează ÎN INTERIORUL begin pentru ca eventuale
+      # exceptii ridicate înainte de assignment (improbabil, dar posibil la
+      # context-switch) să nu lase flag-ul lipit de thread-ul Puma → pollution.
       begin
+        Thread.current[:topology_skip_overlap_check] = true
         records_with_payloads.each do |record, payload|
           phase1_save_record(record, payload, errors)
         end
@@ -529,8 +532,8 @@ class DigitizareController < ApplicationController
       raise ActiveRecord::Rollback if errors.any?
 
       # Faza 2: alte validări (topologic_valid, traverseaza_parcele)
-      Thread.current[:topology_skip_overlap_check] = true
       begin
+        Thread.current[:topology_skip_overlap_check] = true
         records_with_payloads.each do |record, _|
           record.reload
           g = record.gis_geometry
@@ -739,41 +742,26 @@ class DigitizareController < ApplicationController
                        reason: "delta suprafață > 1 mp (#{delta.round(2)} mp)" }
           next
         end
-        # Persistă: UPDATE dacă există cache, altfel INSERT (CGXML lands/buildings
-        # fără gis_*_geometries primesc cache nou cu geometria snap-uită).
-        g = model.find_by(fk => eid)
+        # Persistă prin model (NU raw SQL) pentru a păstra compute_derived +
+        # consistență cu restul aplicației. find_or_initialize_by acoperă atât
+        # UPDATE cache existent cât și INSERT cache nou pentru CGXML lands/
+        # buildings fără gis_*_geometries. Sărim overlap-check ca să nu se
+        # respingă reciproc poligoanele snap-uite (curățarea topologică
+        # ELIMINĂ overlap-urile mici existente — temporar pot exista).
+        g = model.find_or_initialize_by(fk => eid)
+        g.status   = "active" if g.new_record? && g.status.blank?
+        g.geom_wkt = r["new_wkt"]
         begin
-          if g
-            ActiveRecord::Base.connection.execute(
-              ApplicationRecord.sanitize_sql_array([<<~SQL, r["new_wkt"], r["new_wkt"], r["new_wkt"], g.id])
-                UPDATE #{model.table_name}
-                SET    geom         = ST_Multi(ST_GeomFromText(?, 3844)),
-                       centroid     = ST_PointOnSurface(ST_GeomFromText(?, 3844)),
-                       suprafata_mp = ROUND(ST_Area(ST_GeomFromText(?, 3844))::numeric, 4),
-                       updated_at   = NOW()
-                WHERE  id = ?
-              SQL
-            )
+          Thread.current[:topology_skip_overlap_check] = true
+          if g.save(validate: false)
+            modified << { entity_id: eid, label: r["lbl"], old_area: old_a, new_area: new_a, delta: delta.round(3) }
           else
-            # INSERT cache nou pentru lands/buildings CGXML
-            ActiveRecord::Base.connection.execute(
-              ApplicationRecord.sanitize_sql_array([<<~SQL, eid, r["new_wkt"], r["new_wkt"], r["new_wkt"]])
-                INSERT INTO #{model.table_name}
-                  (#{fk}, geom, centroid, suprafata_mp, status, created_at, updated_at)
-                VALUES (
-                  ?,
-                  ST_Multi(ST_GeomFromText(?, 3844)),
-                  ST_PointOnSurface(ST_GeomFromText(?, 3844)),
-                  ROUND(ST_Area(ST_GeomFromText(?, 3844))::numeric, 4),
-                  'active',
-                  NOW(), NOW()
-                )
-              SQL
-            )
+            errors << { entity_id: eid, label: r["lbl"], message: g.errors.full_messages.join(", ").presence || "save returned false" }
           end
-          modified << { entity_id: eid, label: r["lbl"], old_area: old_a, new_area: new_a, delta: delta.round(3) }
         rescue => e
           errors << { entity_id: eid, label: r["lbl"], message: e.message }
+        ensure
+          Thread.current[:topology_skip_overlap_check] = nil
         end
       end
     end
@@ -790,7 +778,614 @@ class DigitizareController < ApplicationController
     render json: { ok: false, error: "Eroare server: #{e.message}" }, status: :internal_server_error
   end
 
+  # ── Buffer ax linie + listare vecini afectați (drumuri, detalii liniare) ──
+  # POST /digitizare/buffer_drum
+  # Input:
+  #   line_wkt — LINESTRING WKT în EPSG:3844 (axul detaliului liniar)
+  #   width_m  — lățime totală (float > 0); offset = width/2 stânga + dreapta
+  # Output:
+  #   geojson — Polygon BANDA UNIFORMĂ (NEclipată); drumul are lățime continuă
+  #   affected_neighbors — array [{ kind, id, new_geojson, area_delta_mp }]
+  #     poligoanele vecine (parcele + clădiri) care intersectează banda, cu
+  #     geometriile NOI calculate prin ST_Difference (vecin - drum). User-ul
+  #     poate ajusta manual aceste geometrii înainte de save.
+  def buffer_drum
+    line_wkt    = params[:line_wkt].to_s.strip
+    width_m     = params[:width_m].to_f
+    snap_dist_m = sanitize_snap_dist(params[:snap_dist_m])
+    return render json: { ok: false, error: "Linie absentă" },          status: :bad_request if line_wkt.blank?
+    return render json: { ok: false, error: "Lățime invalidă (0..50)" }, status: :bad_request if width_m <= 0 || width_m > 50
+
+    # Calculează banda drumului + vecinii afectați (vezi compute_drum_geometry).
+    # AMBELE buffer_drum (preview) și save_drum (persistare) folosesc același
+    # helper → garanție că ce vezi e ce se salvează.
+    result = compute_drum_geometry(line_wkt, width_m, snap_dist_m)
+    return render json: { ok: false, error: "Buffer linie eșuat" }, status: :unprocessable_entity if result.nil?
+    band = result[:band]
+    ui_neighbors = result[:neighbors].map do |n|
+      {
+        kind:          n[:kind],
+        id:            n[:entity_id],
+        new_geojson:   n[:new_geojson],
+        delete:        n[:delete],
+        old_area_mp:   n[:old_area],
+        new_area_mp:   n[:new_area],
+        area_delta_mp: n[:area_delta],
+        reason:        n[:reason]
+      }
+    end
+
+    # Zonă vizuală de prag — inel între limita drumului și limita+snap_dist,
+    # arată utilizatorului zona în care vecinii vor fi alipiți la drum.
+    zone_sql = ApplicationRecord.sanitize_sql_array([<<~SQL, band[:wkt], snap_dist_m])
+      WITH band AS (SELECT ST_GeomFromText(?, 3844) AS geom),
+           buffered AS (SELECT ST_Buffer((SELECT geom FROM band), ?) AS geom)
+      SELECT ST_AsGeoJSON(ST_Difference((SELECT geom FROM buffered), (SELECT geom FROM band)), 6) AS geojson
+    SQL
+    zone_row = ActiveRecord::Base.connection.select_one(zone_sql) || {}
+
+    # Diagnostic: număr candidați găsiți (parcele + clădiri) în limita pragului.
+    diag_sql = ApplicationRecord.sanitize_sql_array([<<~SQL, band[:wkt], snap_dist_m, band[:wkt], snap_dist_m])
+      SELECT
+        (SELECT COUNT(*) FROM (#{parcele_geom_join}) t
+         WHERE t.entity_id IS NOT NULL AND ST_DWithin(t.geom, ST_GeomFromText(?, 3844), ?)) AS parcele_in_range,
+        (SELECT COUNT(*) FROM (#{cladiri_geom_join}) t
+         WHERE t.entity_id IS NOT NULL AND ST_DWithin(t.geom, ST_GeomFromText(?, 3844), ?)) AS cladiri_in_range
+    SQL
+    diag = ActiveRecord::Base.connection.select_one(diag_sql) || {}
+
+    render json: {
+      ok:                 true,
+      geojson:            band[:geojson],
+      area_mp:            band[:area_mp],
+      nverts:             band[:nverts],
+      snap_zone_geojson:  zone_row["geojson"] ? JSON.parse(zone_row["geojson"]) : nil,
+      affected_neighbors: ui_neighbors,
+      diagnostic: {
+        parcele_in_range:  diag["parcele_in_range"].to_i,
+        cladiri_in_range:  diag["cladiri_in_range"].to_i,
+        affected_returned: ui_neighbors.length
+      }
+    }
+  rescue => e
+    Rails.logger.error("buffer_drum error: #{e.message}\n#{e.backtrace.first(5).join("\n")}")
+    render json: { ok: false, error: "Eroare server: #{e.message}" }, status: :internal_server_error
+  end
+
+  # ── Save drum + actualizare atomică vecini afectați ───────────────────────
+  # POST /digitizare/save_drum
+  # Creează un nou Land (drumul) + actualizează geometriile parcelelor/clădirilor
+  # afectate ÎN ACEEAȘI TRANZACȚIE → garantează că la sfârșit nu există overlap-uri
+  # (drumul ocupă spațiul subtras din vecini).
+  #
+  # SECURITATE: clientul NU mai trimite geometrii (nici drumul, nici vecinii).
+  # Trimite DOAR axa + parametri (axis_wkt, width_m, snap_dist_m); serverul
+  # recalculează banda drumului + geometriile vecinilor prin compute_drum_geometry
+  # (același cod ca buffer_drum). Previne injectarea de poligoane arbitrare
+  # care ar putea suprapune mii de parcele.
+  #
+  # Input:
+  #   axis_wkt    — LINESTRING WKT al axei (EPSG:3844), trasat de utilizator
+  #   width_m     — lățime totală drum (float > 0, <= 50)
+  #   snap_dist_m — prag alipire vecini (clamp [0.5..20], default 5)
+  #   road: { cadgenno, suprafata_mp, categoria_folosinta }  — metadate
+  def save_drum
+    axis_wkt    = params[:axis_wkt].to_s.strip
+    width_m     = params[:width_m].to_f
+    snap_dist_m = sanitize_snap_dist(params[:snap_dist_m])
+    road        = params.require(:road).permit(:cadgenno, :suprafata_mp, :categoria_folosinta)
+
+    return render json: { ok: false, errors: ["Axa drumului lipsește"] },     status: :unprocessable_entity if axis_wkt.blank?
+    return render json: { ok: false, errors: ["Lățime invalidă (0..50)"] },   status: :unprocessable_entity if width_m <= 0 || width_m > 50
+
+    # Recalculează geometria server-side — DEFENSIVE: clientul nu controlează
+    # poligonul drumului sau al vecinilor. Garantează că ce se salvează =
+    # exact ce a fost previzualizat prin buffer_drum (același helper).
+    result = compute_drum_geometry(axis_wkt, width_m, snap_dist_m)
+    return render json: { ok: false, errors: ["Calcul band drum eșuat"] }, status: :unprocessable_entity if result.nil?
+
+    band               = result[:band]
+    computed_neighbors = result[:neighbors]
+
+    errors      = []
+    new_land_id = nil
+
+    ActiveRecord::Base.transaction do
+      # 1. Creare drum (nou Land + gis_land_geometry draft).
+      # measuredarea fallback la aria calculată dacă clientul n-a trimis-o —
+      # nu blocăm save-ul pentru un câmp metadata.
+      land = Land.new(
+        cadgenno:     road[:cadgenno].presence,
+        measuredarea: road[:suprafata_mp].presence&.to_f || band[:area_mp],
+        isnew:        true,
+        notes:        "Drum / detaliu liniar (digitizat #{Date.current})"
+      )
+      unless land.save(validate: false)
+        errors.concat(land.errors.full_messages.map { |m| "Drum land: #{m}" })
+        raise ActiveRecord::Rollback
+      end
+      new_land_id = land.id
+      g = land.build_gis_geometry(status: "draft", geom_wkt: band[:wkt])
+      # save(validate: false) — geometria garantat validă (PostGIS ST_MakeValid
+      # în compute_drum_geometry). Sărim overlap-check pentru că drumul va fi
+      # alipit la vecini → temporar suprapunere până la save-ul vecinilor.
+      unless g.save(validate: false)
+        errors << "Drum: salvare geom eșuată (#{g.errors.full_messages.join(', ')})"
+        raise ActiveRecord::Rollback
+      end
+      if road[:categoria_folosinta].present?
+        Parcel.create!(land_id: land.id, usecategory: road[:categoria_folosinta], number: 1)
+      end
+
+      # 2. Aplică modificările pe vecini (geometriile RECALCULATE de server).
+      begin
+        Thread.current[:topology_skip_overlap_check] = true
+        computed_neighbors.each do |n|
+          eid = n[:entity_id].to_i
+          next if eid <= 0
+          kind = n[:kind]
+          rec = kind == "cladire" ? Building.find_by(id: eid) : Land.find_by(id: eid)
+          unless rec
+            errors << "Vecin #{kind}##{eid} inexistent"
+            next
+          end
+          # delete=true → drumul absoarbe integral vecinul.
+          if n[:delete]
+            unless rec.destroy
+              errors << "Vecin #{kind}##{eid}: ștergere eșuată (#{rec.errors.full_messages.first})"
+            end
+            next
+          end
+          next if n[:new_wkt].blank?
+          gn = rec.gis_geometry || rec.send(:build_gis_geometry, status: "draft")
+          gn.geom_wkt = n[:new_wkt]
+          begin
+            unless gn.save(validate: false)
+              msg = gn.errors.full_messages.join(", ").presence || "save returned false"
+              errors << "Vecin #{kind}##{eid}: #{msg}"
+              Rails.logger.error("save_drum vecin #{eid} failed: #{msg}")
+            end
+          rescue => save_err
+            errors << "Vecin #{kind}##{eid}: #{save_err.message}"
+            Rails.logger.error("save_drum vecin #{eid} exception: #{save_err.class}: #{save_err.message}")
+          end
+        end
+      ensure
+        Thread.current[:topology_skip_overlap_check] = nil
+      end
+      raise ActiveRecord::Rollback if errors.any?
+    end
+
+    if errors.any?
+      render json: { ok: false, errors: errors }, status: :unprocessable_entity
+    else
+      render json: {
+        ok:             true,
+        redirect:       "/lands/#{new_land_id}",
+        land_id:        new_land_id,
+        affected_count: computed_neighbors.length
+      }
+    end
+  rescue => e
+    Rails.logger.error("save_drum exception: #{e.class}: #{e.message}\n#{e.backtrace.first(10).join("\n")}")
+    render json: { ok: false, errors: ["Eroare server: #{e.message}"] }, status: :unprocessable_entity
+  end
+
   private
+
+  # Normalizează snap_dist (default 5m, clamp [0.5..20] m).
+  def sanitize_snap_dist(raw)
+    v = raw.to_f
+    v = 5.0 if v <= 0
+    [[v, 0.5].max, 20.0].min
+  end
+
+  # Calculează banda drumului + lista vecinilor afectați (parcele + clădiri).
+  # Apelat de buffer_drum (preview UI) ȘI save_drum (persistare) — clientul NU
+  # trimite niciodată geometrie de drum, o calculăm pe server din axă +
+  # parametri. Garantează că geometria salvată corespunde EXACT celei
+  # previzualizate, prevenind injectarea de poligoane arbitrare în request.
+  # Returns: { band: {wkt, geojson, area_mp, nverts}, neighbors: [...] } sau
+  # nil dacă banda nu poate fi construită (axă invalidă, buffer eșuat).
+  def compute_drum_geometry(line_wkt, width_m, snap_dist_m)
+    # 1) Banda uniformă (nefraționată) — buffer-ul axei cu lățimea/2.
+    band_sql = ApplicationRecord.sanitize_sql_array([<<~SQL, line_wkt, width_m / 2.0])
+      WITH axis AS (SELECT ST_GeomFromText(?, 3844) AS geom),
+           buf  AS (SELECT ST_Buffer((SELECT geom FROM axis), ?, 'endcap=flat join=mitre quad_segs=4') AS geom)
+      SELECT ST_AsText(geom)                AS wkt,
+             ST_AsGeoJSON(geom, 6)          AS geojson,
+             ROUND(ST_Area(geom)::numeric, 4) AS area_mp,
+             ST_NPoints(geom)               AS nverts
+      FROM   buf
+    SQL
+    band_row = ActiveRecord::Base.connection.select_one(band_sql)
+    return nil if band_row.nil? || band_row["wkt"].blank?
+
+    band = {
+      wkt:     band_row["wkt"],
+      geojson: JSON.parse(band_row["geojson"]),
+      area_mp: band_row["area_mp"].to_f,
+      nverts:  band_row["nverts"].to_i
+    }
+
+    # 2) Vecinii afectați — algoritm 2-faze (translatare la contact + snap pe
+    # muchia drumului) + similarity transform pentru păstrarea suprafeței.
+    # Vezi documentația inline a SQL pentru detalii algoritm.
+    detect_tolerance = snap_dist_m
+    neighbors = []
+    [
+      ["parcela", parcele_geom_join],
+      ["cladire", cladiri_geom_join]
+    ].each do |kind, join_sql|
+      n_sql = ApplicationRecord.sanitize_sql_array([
+        <<~SQL,
+          WITH axis AS (SELECT ST_GeomFromText(?, 3844) AS geom),
+               band AS (SELECT ST_MakeValid(ST_GeomFromText(?, 3844)) AS geom),
+               band_dense AS (
+                 SELECT ST_MakeValid(ST_Segmentize((SELECT geom FROM band), 1.0)) AS geom
+               ),
+               band_segmented AS (
+                 SELECT ST_MakeValid(ST_Segmentize((SELECT geom FROM band), ?)) AS geom
+               ),
+               axis_pts AS (
+                 SELECT ST_X(ST_StartPoint((SELECT geom FROM axis))) AS x1,
+                        ST_Y(ST_StartPoint((SELECT geom FROM axis))) AS y1,
+                        ST_X(ST_EndPoint((SELECT geom FROM axis)))   AS x2,
+                        ST_Y(ST_EndPoint((SELECT geom FROM axis)))   AS y2
+               ),
+               existing_roads AS (
+                 -- Drumuri existente (Lands cu parcels.usecategory='DR').
+                 SELECT g.geom
+                 FROM   gis_land_geometries g
+                 JOIN   parcels p ON p.land_id = g.land_id
+                 WHERE  p.usecategory = 'DR' AND ST_IsValid(g.geom)
+               ),
+               candidates AS (
+                 SELECT t.entity_id, ST_MakeValid(t.geom) AS old_geom,
+                        ST_Intersects(t.geom, (SELECT geom FROM band)) AS overlapping,
+                        -- has_anchor = polygonul atinge un drum EXISTENT (creat anterior)
+                        COALESCE((
+                          SELECT TRUE FROM existing_roads er
+                          WHERE  ST_Touches(t.geom, er.geom)
+                          LIMIT  1
+                        ), FALSE) AS has_anchor
+                 FROM   (#{join_sql}) t
+                 WHERE  t.entity_id IS NOT NULL
+                   AND  ST_DWithin(t.geom, (SELECT geom FROM band), ?)
+                   AND  NOT EXISTS (
+                          SELECT 1 FROM parcels p
+                          WHERE  p.land_id = t.entity_id AND p.usecategory = 'DR'
+                        )
+               ),
+               non_affected_union AS (
+                 SELECT ST_Union(ST_MakeValid(t.geom)) AS geom
+                 FROM   (#{join_sql}) t
+                 WHERE  t.entity_id IS NOT NULL
+                   AND  ST_DWithin(t.geom, (SELECT geom FROM band), 50.0)
+                   AND  NOT EXISTS (
+                          SELECT 1 FROM candidates c WHERE c.entity_id = t.entity_id
+                        )
+               ),
+               sided AS (
+                 SELECT c.entity_id, c.old_geom, c.overlapping,
+                        CASE
+                          WHEN ((ap.x2 - ap.x1) * (ST_Y(ST_Centroid(c.old_geom)) - ap.y1)
+                              - (ap.y2 - ap.y1) * (ST_X(ST_Centroid(c.old_geom)) - ap.x1)) > 0
+                          THEN 'L' ELSE 'R'
+                        END AS side
+                 FROM   candidates c
+                 CROSS  JOIN axis_pts ap
+               ),
+               clustered AS (
+                 SELECT entity_id, old_geom, overlapping, side,
+                        ST_ClusterDBSCAN(old_geom, eps := 0.5, minpoints := 1)
+                          OVER (PARTITION BY side) AS cluster_id
+                 FROM   sided
+               ),
+               cluster_metrics AS (
+                 SELECT side, cluster_id,
+                        ST_Union(old_geom)                                          AS combined,
+                        BOOL_OR(overlapping)                                        AS has_overlap,
+                        ST_Centroid(ST_Union(old_geom))                             AS cpt,
+                        ST_ClosestPoint((SELECT geom FROM axis), ST_Centroid(ST_Union(old_geom))) AS apt,
+                        COUNT(*)                                                    AS member_count
+                 FROM   clustered
+                 GROUP  BY side, cluster_id
+               ),
+               cluster_translation AS (
+                 SELECT side, cluster_id, member_count, has_overlap,
+                        ST_X(ST_EndPoint(ST_ShortestLine(combined, (SELECT geom FROM band))))
+                        - ST_X(ST_StartPoint(ST_ShortestLine(combined, (SELECT geom FROM band)))) AS dx_raw,
+                        ST_Y(ST_EndPoint(ST_ShortestLine(combined, (SELECT geom FROM band))))
+                        - ST_Y(ST_StartPoint(ST_ShortestLine(combined, (SELECT geom FROM band)))) AS dy_raw,
+                        sqrt(POWER(ST_X(cpt) - ST_X(apt), 2) + POWER(ST_Y(cpt) - ST_Y(apt), 2)) AS d_axis,
+                        ? AS halfw
+                 FROM   cluster_metrics
+               ),
+               translated AS (
+                 -- has_anchor: polygon e deja alipit de drum existent → NU translatare.
+                 -- Doar overlap aplică Difference (taie partea din drum nou).
+                 SELECT c.entity_id, c.old_geom, ct.member_count, c.overlapping,
+                        CASE
+                          WHEN c.overlapping THEN
+                            ST_Multi(ST_MakeValid(ST_Difference(c.old_geom, (SELECT geom FROM band))))
+                          WHEN ca.has_anchor THEN
+                            c.old_geom  -- nu translata polygon anchored la drum existent
+                          WHEN ct.has_overlap THEN
+                            ST_MakeValid(ST_Translate(c.old_geom,
+                              ST_X(ST_EndPoint(ST_ShortestLine(c.old_geom, (SELECT geom FROM band))))
+                              - ST_X(ST_StartPoint(ST_ShortestLine(c.old_geom, (SELECT geom FROM band)))),
+                              ST_Y(ST_EndPoint(ST_ShortestLine(c.old_geom, (SELECT geom FROM band))))
+                              - ST_Y(ST_StartPoint(ST_ShortestLine(c.old_geom, (SELECT geom FROM band))))
+                            ))
+                          WHEN ct.d_axis < 0.01 THEN c.old_geom
+                          ELSE
+                            ST_MakeValid(ST_Translate(c.old_geom, ct.dx_raw, ct.dy_raw))
+                        END AS t_geom
+                 FROM   clustered c
+                 JOIN   cluster_translation ct ON ct.side = c.side AND ct.cluster_id = c.cluster_id
+                 JOIN   candidates ca ON ca.entity_id = c.entity_id
+               ),
+               polygon_points_ordered AS (
+                 SELECT t.entity_id, t.old_geom, t.member_count, t.overlapping, t.t_geom,
+                        (dp.path)[1] AS poly_idx,
+                        (dp.path)[2] AS ring_idx,
+                        (dp.path)[3] AS pt_idx,
+                        dp.geom AS orig_pt
+                 FROM   translated t,
+                        LATERAL ST_DumpPoints(t.t_geom) AS dp
+               ),
+               segments_with_dist AS (
+                 SELECT a.entity_id, a.poly_idx, a.ring_idx,
+                        a.pt_idx AS pt1_idx, b.pt_idx AS pt2_idx,
+                        ST_Distance(ST_MakeLine(a.orig_pt, b.orig_pt), (SELECT geom FROM band)) AS seg_dist
+                 FROM   polygon_points_ordered a
+                 JOIN   polygon_points_ordered b
+                   ON   a.entity_id = b.entity_id
+                  AND   a.poly_idx = b.poly_idx
+                  AND   a.ring_idx = b.ring_idx
+                  AND   b.pt_idx = a.pt_idx + 1
+                 WHERE  NOT a.overlapping
+               ),
+               closest_segment AS (
+                 SELECT entity_id, poly_idx, ring_idx, pt1_idx, pt2_idx,
+                        ROW_NUMBER() OVER (PARTITION BY entity_id ORDER BY seg_dist ASC) AS rank
+                 FROM   segments_with_dist
+               ),
+               project_targets AS (
+                 SELECT entity_id, poly_idx, ring_idx, pt1_idx AS pt_idx
+                 FROM   closest_segment WHERE rank = 1
+                 UNION  ALL
+                 SELECT entity_id, poly_idx, ring_idx, pt2_idx AS pt_idx
+                 FROM   closest_segment WHERE rank = 1
+               ),
+               gap_endpoints AS (
+                 SELECT cs.entity_id,
+                        a.orig_pt AS old_A, b.orig_pt AS old_B,
+                        ST_ClosestPoint(ST_Boundary((SELECT geom FROM band)), a.orig_pt) AS new_A,
+                        ST_ClosestPoint(ST_Boundary((SELECT geom FROM band)), b.orig_pt) AS new_B
+                 FROM   closest_segment cs
+                 JOIN   polygon_points_ordered a
+                   ON   cs.entity_id = a.entity_id AND cs.poly_idx = a.poly_idx
+                  AND   cs.ring_idx = a.ring_idx AND cs.pt1_idx = a.pt_idx
+                 JOIN   polygon_points_ordered b
+                   ON   cs.entity_id = b.entity_id AND cs.poly_idx = b.poly_idx
+                  AND   cs.ring_idx = b.ring_idx AND cs.pt2_idx = b.pt_idx
+                 WHERE  cs.rank = 1
+               ),
+               gap_similarity_matrix AS (
+                 SELECT ge.entity_id, ge.old_A, ge.old_B, ge.new_A, ge.new_B,
+                        ((ST_X(ge.old_B) - ST_X(ge.old_A)) * (ST_X(ge.new_B) - ST_X(ge.new_A)) +
+                         (ST_Y(ge.old_B) - ST_Y(ge.old_A)) * (ST_Y(ge.new_B) - ST_Y(ge.new_A))) /
+                        NULLIF(POWER(ST_X(ge.old_B) - ST_X(ge.old_A), 2) +
+                               POWER(ST_Y(ge.old_B) - ST_Y(ge.old_A), 2), 0) AS cc,
+                        ((ST_X(ge.old_B) - ST_X(ge.old_A)) * (ST_Y(ge.new_B) - ST_Y(ge.new_A)) -
+                         (ST_Y(ge.old_B) - ST_Y(ge.old_A)) * (ST_X(ge.new_B) - ST_X(ge.new_A))) /
+                        NULLIF(POWER(ST_X(ge.old_B) - ST_X(ge.old_A), 2) +
+                               POWER(ST_Y(ge.old_B) - ST_Y(ge.old_A), 2), 0) AS ss,
+                        sqrt(POWER(ST_X(ge.old_B) - ST_X(ge.old_A), 2) +
+                             POWER(ST_Y(ge.old_B) - ST_Y(ge.old_A), 2)) AS old_len,
+                        sqrt(POWER(ST_X(ge.new_B) - ST_X(ge.new_A), 2) +
+                             POWER(ST_Y(ge.new_B) - ST_Y(ge.new_A), 2)) AS new_len
+                 FROM   gap_endpoints ge
+               ),
+               gap_full_matrix AS (
+                 -- Skip polygons cu has_anchor (deja alipite de drum existent).
+                 SELECT m.entity_id,
+                        m.old_A, m.new_A, m.cc, m.ss,
+                        (ST_X(m.new_B) - ST_X(m.new_A)) / NULLIF(m.new_len, 0) AS ux,
+                        (ST_Y(m.new_B) - ST_Y(m.new_A)) / NULLIF(m.new_len, 0) AS uy,
+                        m.new_len / NULLIF(m.old_len, 0) AS k
+                 FROM   gap_similarity_matrix m
+                 JOIN   candidates c ON c.entity_id = m.entity_id
+                 WHERE  m.old_len > 0.01 AND m.new_len > 0.01
+                   AND  m.new_len / m.old_len BETWEEN 0.7 AND 1.5
+                   AND  NOT c.has_anchor
+               ),
+               polygon_points_similarity AS (
+                 SELECT p.entity_id, p.old_geom, p.member_count, p.overlapping, p.t_geom,
+                        p.poly_idx, p.ring_idx, p.pt_idx, p.orig_pt,
+                        m.new_A, m.ux, m.uy, m.k,
+                        CASE
+                          WHEN NOT p.overlapping AND m.entity_id IS NOT NULL THEN
+                            ST_MakePoint(
+                              m.cc * ST_X(p.orig_pt) - m.ss * ST_Y(p.orig_pt)
+                                + ST_X(m.new_A) - m.cc * ST_X(m.old_A) + m.ss * ST_Y(m.old_A),
+                              m.ss * ST_X(p.orig_pt) + m.cc * ST_Y(p.orig_pt)
+                                + ST_Y(m.new_A) - m.ss * ST_X(m.old_A) - m.cc * ST_Y(m.old_A)
+                            )
+                          ELSE p.orig_pt
+                        END AS pt_similarity
+                 FROM   polygon_points_ordered p
+                 LEFT   JOIN gap_full_matrix m ON m.entity_id = p.entity_id
+               ),
+               polygon_rings AS (
+                 -- 3 cazuri:
+                 --   1. Non-anchor + similarity matrix valid: perp scale (suprafață exactă)
+                 --   2. Anchor + endpoint pe closest segment: per-edge projection
+                 --      (vertecșii anchored la drum vechi NU se mișcă; doar
+                 --      endpoint-urile muchiei spre drumul nou se proiectează)
+                 --   3. Restul: orig_pt (no change)
+                 SELECT ps.entity_id, ps.old_geom, ps.member_count, ps.overlapping, ps.t_geom,
+                        ARRAY[ps.poly_idx, ps.ring_idx, ps.pt_idx] AS path,
+                        CASE
+                          WHEN NOT ps.overlapping AND ps.new_A IS NOT NULL THEN
+                            -- Caz 1: similarity + perp scaling (non-anchor, k în range)
+                            ST_SetSRID(ST_MakePoint(
+                              (ps.ux*ps.ux + ps.uy*ps.uy/(ps.k*ps.k)) * (ST_X(ps.pt_similarity) - ST_X(ps.new_A))
+                              + (ps.ux*ps.uy*(1 - 1/(ps.k*ps.k))) * (ST_Y(ps.pt_similarity) - ST_Y(ps.new_A))
+                              + ST_X(ps.new_A),
+                              (ps.ux*ps.uy*(1 - 1/(ps.k*ps.k))) * (ST_X(ps.pt_similarity) - ST_X(ps.new_A))
+                              + (ps.uy*ps.uy + ps.ux*ps.ux/(ps.k*ps.k)) * (ST_Y(ps.pt_similarity) - ST_Y(ps.new_A))
+                              + ST_Y(ps.new_A)
+                            ), 3844)
+                          WHEN NOT ps.overlapping AND pt.entity_id IS NOT NULL THEN
+                            -- Caz 2: per-edge projection — pentru anchored polygons
+                            -- ȘI pentru polygons unde similarity nu s-a aplicat
+                            -- (k out of range, lipsă matrix, etc.) → forțează glue.
+                            ST_ClosestPoint(ST_Boundary((SELECT geom FROM band)), ps.orig_pt)
+                          ELSE ps.pt_similarity
+                        END AS pt
+                 FROM   polygon_points_similarity ps
+                 LEFT   JOIN candidates ca ON ca.entity_id = ps.entity_id
+                 LEFT   JOIN project_targets pt
+                   ON   pt.entity_id = ps.entity_id
+                  AND   pt.poly_idx = ps.poly_idx
+                  AND   pt.ring_idx = ps.ring_idx
+                  AND   pt.pt_idx = ps.pt_idx
+               ),
+               rings_built AS (
+                 SELECT entity_id, old_geom, member_count, overlapping, t_geom,
+                        path[1] AS poly_idx, path[2] AS ring_idx,
+                        ST_MakeLine(pt ORDER BY path[3]) AS ring_line
+                 FROM   polygon_rings
+                 GROUP  BY entity_id, old_geom, member_count, overlapping, t_geom, path[1], path[2]
+               ),
+               base_geom_raw AS (
+                 SELECT entity_id, old_geom, member_count, overlapping,
+                        CASE
+                          WHEN overlapping THEN ST_Union(t_geom)
+                          ELSE ST_MakeValid(ST_Multi(ST_BuildArea(ST_Collect(ring_line))))
+                        END AS b_geom,
+                        ST_Union(t_geom) AS t_geom_fallback
+                 FROM   rings_built
+                 GROUP  BY entity_id, old_geom, member_count, overlapping
+               ),
+               base_geom AS (
+                 SELECT entity_id, old_geom, member_count, overlapping,
+                        ST_Multi(ST_MakeValid(ST_Difference(
+                          ST_Difference(
+                            CASE
+                              WHEN b_geom IS NOT NULL AND ST_IsValid(b_geom) AND NOT ST_IsEmpty(b_geom)
+                              THEN b_geom
+                              ELSE t_geom_fallback
+                            END,
+                            (SELECT geom FROM band)
+                          ),
+                          COALESCE((SELECT geom FROM non_affected_union),
+                                   ST_GeomFromText('POLYGON EMPTY', 3844))
+                        ))) AS b_geom
+                 FROM   base_geom_raw
+               ),
+               cluster_overlap_others AS (
+                 SELECT c.entity_id, ct.side, ct.cluster_id,
+                        ST_Union(b.b_geom) AS others_geom
+                 FROM   clustered c
+                 JOIN   cluster_translation ct ON ct.side = c.side AND ct.cluster_id = c.cluster_id
+                 JOIN   base_geom b ON b.entity_id != c.entity_id
+                                   AND EXISTS (
+                                     SELECT 1 FROM clustered c2
+                                     WHERE c2.entity_id = b.entity_id
+                                       AND c2.side = c.side
+                                       AND c2.cluster_id = c.cluster_id
+                                       AND c2.overlapping
+                                   )
+                 GROUP BY c.entity_id, ct.side, ct.cluster_id
+               ),
+               overlap_pieces AS (
+                 SELECT b.entity_id, b.old_geom, b.member_count,
+                        (dp).geom AS piece,
+                        ROW_NUMBER() OVER (PARTITION BY b.entity_id ORDER BY ST_Area((dp).geom) DESC) AS rank,
+                        SUM(ST_Area((dp).geom)) OVER (PARTITION BY b.entity_id) AS total_diff_area
+                 FROM   base_geom b,
+                        LATERAL ST_Dump(b.b_geom) AS dp
+                 WHERE  b.overlapping
+                   AND  ST_IsValid(b.b_geom)
+                   AND  NOT ST_IsEmpty(b.b_geom)
+               ),
+               overlap_expanded AS (
+                 SELECT op.entity_id, op.old_geom, op.member_count,
+                        ST_MakeValid(ST_Difference(
+                          ST_Buffer(op.piece,
+                            LEAST(
+                              (ST_Area(op.old_geom) - ST_Area(op.piece)) / NULLIF(ST_Perimeter(op.piece), 0),
+                              GREATEST(ct.halfw - 0.5, 0.1)
+                            ),
+                            'join=mitre mitre_limit=5.0 quad_segs=2'),
+                          (SELECT geom FROM band)
+                        )) AS new_piece
+                 FROM   overlap_pieces op
+                 JOIN   clustered c ON c.entity_id = op.entity_id
+                 JOIN   cluster_translation ct ON ct.side = c.side AND ct.cluster_id = c.cluster_id
+                 WHERE  op.rank = 1
+                   AND  ST_Area(op.piece) > 0.01
+                   AND  ST_Perimeter(op.piece) > 0.5
+                   AND  ST_Area(op.old_geom) > ST_Area(op.piece) + 0.05
+               ),
+               overlap_unified AS (
+                 SELECT entity_id, old_geom, member_count,
+                        ST_Multi(ST_MakeValid(ST_Union(new_piece))) AS new_geom,
+                        TRUE AS overlapping
+                 FROM   overlap_expanded
+                 GROUP  BY entity_id, old_geom, member_count
+               ),
+               final_geom AS (
+                 SELECT b.entity_id, b.old_geom, b.member_count,
+                        COALESCE(ou.new_geom, b.b_geom) AS new_geom
+                 FROM   base_geom b
+                 LEFT   JOIN overlap_unified ou ON ou.entity_id = b.entity_id
+               )
+          SELECT entity_id,
+                 ST_AsText(ST_Multi(new_geom))                 AS new_wkt,
+                 ST_AsGeoJSON(ST_Multi(new_geom), 6)           AS new_geojson,
+                 ROUND(ST_Area(old_geom)::numeric, 4)          AS old_area,
+                 ROUND(ST_Area(new_geom)::numeric, 4)          AS new_area,
+                 ROUND((ST_Area(new_geom) - ST_Area(old_geom))::numeric, 4) AS area_delta,
+                 ST_IsValid(new_geom)                          AS valid_new,
+                 ST_IsEmpty(new_geom)                          AS empty_new,
+                 CASE WHEN member_count > 1 THEN 'grup translatat' ELSE 'translatat' END AS reason
+          FROM   final_geom
+          WHERE  ST_IsValid(new_geom) AND NOT ST_IsEmpty(new_geom)
+        SQL
+        line_wkt, band[:wkt], detect_tolerance, detect_tolerance, width_m / 2.0
+      ])
+      ActiveRecord::Base.connection.select_all(n_sql).to_a.each do |r|
+        eid = r["entity_id"].to_i
+        next if eid <= 0
+        if r["empty_new"] || !r["valid_new"]
+          neighbors << {
+            kind: kind, entity_id: eid, new_wkt: nil, new_geojson: nil, delete: true,
+            old_area: r["old_area"].to_f, new_area: 0.0,
+            area_delta: -r["old_area"].to_f, reason: "acoperit integral"
+          }
+          next
+        end
+        neighbors << {
+          kind:        kind,
+          entity_id:   eid,
+          new_wkt:     r["new_wkt"],
+          new_geojson: JSON.parse(r["new_geojson"]),
+          delete:      false,
+          old_area:    r["old_area"].to_f,
+          new_area:    r["new_area"].to_f,
+          area_delta:  r["area_delta"].to_f,
+          reason:      "alipit la drum, suprafață compensată"
+        }
+      end
+    end
+
+    { band: band, neighbors: neighbors }
+  end
 
   # ── Subqueries reutilizabile pentru parcele/clădiri drafturi (Lands/Buildings) ──
   # Returnează (gis_id, land_id|building_id, label, geom). Filtrul status='draft'
