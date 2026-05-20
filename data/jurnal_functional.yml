@@ -9,6 +9,77 @@
 #   - title:   titlu scurt al sesiunii (vizibil în card)
 #   - functii: listă cu nume + detalii funcționale (NU file paths, NU cod)
 #
+- date: 2026-05-20
+  commit: 1c10627
+  title: "Digitizare detaliu liniar (drum) — alipire poligoane vecine"
+  functii:
+    - nume: "Digitizare drum cu ax + lățime"
+      detalii: |
+        Comandă DR sau buton „Detaliu liniar" în toolbar. Desenezi axul (click
+        pe vertecși, dublu-click la final), apoi în popup setezi Lățimea (m)
+        și Pragul de alipire (m). Drumul se generează automat ca poligon
+        prin buffer perpendicular pe ax (capete drepte).
+
+    - nume: "Pop-up parametri live după desenare"
+      detalii: |
+        Pop-up flotant cu Lățime + Prag alipire + butoane Aplică pe vecini /
+        Salvează / Anulează. Modificarea oricărui parametru recalculează
+        drumul + vecinii live (debounce 350ms).
+
+    - nume: "Vertecșii AXEI editabili (nu ai drumului)"
+      detalii: |
+        După desenare, axa apare ca linie punctată portocalie cu cerculețe la
+        vertecși. Drag pe orice vertex al axei → regenerează automat banda
+        drumului cu noua traseu (debounce 300ms). Banda în sine NU are
+        vertecși editabili (e display-only).
+
+    - nume: "Zona prag alipire vizibilă"
+      detalii: |
+        Inel semi-transparent portocaliu în jurul drumului indică zona unde
+        polygons vecine vor fi modificate. Lățimea inelului = pragul setat.
+
+    - nume: "Alipire vecini cu păstrare formă + suprafață"
+      detalii: |
+        Algoritm complex în 3 faze pentru fiecare polygon vecin în limita
+        pragului:
+        (1) translatare la contact unic cu drumul,
+        (2) per-vertex projection: vertecșii apropiați de drum se aliniază
+            la limita drumului (proiecție perpendiculară),
+        (3) compensare arie: suprafața finală = identică cu cea inițială.
+        Pentru polygons care TRAVERSEAZĂ drumul: ST_Difference taie polygonul
+        în 2 piese; piesa minoritară (cea mai mică) e eliminată; piesa
+        majoritară primește toată compensarea ariei pierdute → polygon final
+        cu aria identică, alipit integral de drum.
+
+    - nume: "Axis augmentation"
+      detalii: |
+        Înainte de buffer, axa primește vertecși suplimentari la proiecțiile
+        perpendiculare ale vertecșilor poligoanelor vecine → bufferul rezultat
+        are vertecși corespondenți pe limita drumului → polygons se aliniază
+        natural, fără gap-uri.
+
+    - nume: "Anchor preservation"
+      detalii: |
+        Polygons deja alipite de un drum existent (creat anterior) NU se
+        translatează ca un întreg la adăugarea unui drum nou pe altă latură.
+        Doar muchia spre drumul nou se proiectează; restul polygonului
+        rămâne pe loc, lipit de drumul vechi. Permite digitizarea succesivă
+        de drumuri pe aceleași polygons fără pierderea anchor-ului inițial.
+
+    - nume: "No overlap garantat"
+      detalii: |
+        Polygonurile modificate nu se pot suprapune cu:
+        - drumul însuși (clip cu ST_Difference)
+        - alți vecini neafectați (clip cu union)
+        Garantează topologie validă la salvare.
+
+    - nume: "Save atomic drum + vecini"
+      detalii: |
+        Click „Salvează drum + N vecini" → tranzacție atomică server-side:
+        creează drumul ca nou Land + actualizează geometriile tuturor
+        vecinilor afectați. Cancel restaurează vecinii la geometriile
+        originale (din DB). Reload automat layere parcele/clădiri/cgxml.
+
 - date: 2026-05-18
   commit: HEAD
   title: "Suprafață la click, fără auto-zoom, popup vecini suprimat până la save"
