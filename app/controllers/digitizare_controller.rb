@@ -682,6 +682,25 @@ class DigitizareController < ApplicationController
   #   2. Verifică ABS(area_new - area_old) ≤ 1.0 mp → dacă DA, persistă;
   #      altfel, sare (nu modifică), păstrând invarianta de suprafață.
   #   3. Returnează rezumat: modificate / sărite / erori.
+  # ── Curățare topologică conservativă pe selecție ──────────────────────────
+  # POST /digitizare/cleanup_topology
+  # Aliniază muchiile dintre poligoanele SELECTATE (rezolvă slivere/gap-uri
+  # mici) păstrând:
+  #   - LOCKED: muchiile adiacente poligoanelor NESELECTATE NU se mișcă
+  #     (nu modificăm limita cu vecini din afara selecției)
+  #   - SHARED: vertecșii apropiați de alte poligoane selectate se snap-uiesc
+  #     pe acestea (canonicalizare muchii comune)
+  #   - FREE: vertecșii departe de orice poligon (facing empty space)
+  #     rămân nemișcați (nu mutăm muchii care „pluteau" în gol)
+  #
+  # CONSERVARE ARIE: aria cadastrală (FLOOR mp) trebuie să rămână NESCHIMBATĂ.
+  # Aceasta admite delta sub-metru (1000.01 → 1000.49 mp este OK, ambele
+  # FLOOR la 1000 mp). Dacă FLOOR(old) ≠ FLOOR(new) → poligonul este SĂRIT
+  # cu motiv explicit.
+  #
+  # Input:
+  #   items: [{ kind: 'parcela'|'cladire', id }]  — selecția curentă
+  #   threshold: float, raza de snap în metri (default 0.50, max 5.0)
   def cleanup_topology
     items     = params[:items] || []
     threshold = params[:threshold].presence&.to_f || 0.50
@@ -696,83 +715,180 @@ class DigitizareController < ApplicationController
     errors   = []
 
     # Tratează fiecare tip separat (lands ↔ lands, buildings ↔ buildings).
-    [["lands", land_ids, parcele_geom_join, "land_id", GisLandGeometry],
-     ["buildings", building_ids, cladiri_geom_join, "building_id", GisBuildingGeometry]
-    ].each do |label, ids, join_sql, fk, model|
+    [["parcela", land_ids,     parcele_geom_join, "land_id",     GisLandGeometry],
+     ["cladire", building_ids, cladiri_geom_join, "building_id", GisBuildingGeometry]
+    ].each do |kind, ids, join_sql, fk, model|
       next if ids.empty?
 
-      sql = ApplicationRecord.sanitize_sql_array([<<~SQL, ids, threshold])
+      # SQL: vertex-level snap conservativ.
+      # 1) selected      = poligoanele din selecție
+      # 2) non_selected  = poligoane vecine NESELECTATE în raza (threshold*2)
+      # 3) lock_zone     = buffer(non_selected, threshold) — vertecșii aici NU se mută
+      # 4) other_boundary[A] = ST_Boundary(union of selected EXCEPT A) — ținta snap
+      # 5) Pentru fiecare vertex v al poligonului A:
+      #      - dacă v ∈ lock_zone → rămâne în loc (LOCKED)
+      #      - altfel dacă există punct pe other_boundary[A] în raza threshold
+      #        → snap pe acel punct (SHARED — canonicalizare muchii comune)
+      #      - altfel → rămâne în loc (FREE — facing empty space)
+      # 6) Reconstrucție poligon din new_pt-uri, păstrând ordinea path-urilor
+      # 7) Skip dacă FLOOR(old_area) ≠ FLOOR(new_area) (aria cadastrală schimbată)
+      sql = ApplicationRecord.sanitize_sql_array([<<~SQL, ids, ids, threshold * 2, threshold, threshold])
         WITH selected AS (
-          SELECT t.entity_id, t.label AS lbl, t.geom AS old_geom
+          SELECT t.entity_id, t.label AS lbl, ST_MakeValid(t.geom) AS old_geom
           FROM   (#{join_sql}) t
-          WHERE  t.entity_id IN (?)
+          WHERE  t.entity_id IS NOT NULL AND t.entity_id IN (?) AND ST_IsValid(t.geom)
         ),
-        union_all AS (
+        selected_union AS (
           SELECT ST_UnaryUnion(ST_Collect(old_geom)) AS u FROM selected
-          WHERE  ST_IsValid(old_geom)
         ),
-        snapped AS (
+        non_selected AS (
+          -- Poligoane NESELECTATE din vecinătate (definesc lock_zone)
+          SELECT ST_Union(ST_MakeValid(t.geom)) AS u
+          FROM   (#{join_sql}) t
+          WHERE  t.entity_id IS NOT NULL AND t.entity_id NOT IN (?)
+            AND  ST_DWithin(t.geom, (SELECT u FROM selected_union), ?)
+        ),
+        lock_zone AS (
+          -- LOCK = buffer(threshold) în jurul poligoanelor neselectate
+          SELECT COALESCE(
+            ST_Buffer((SELECT u FROM non_selected), ?),
+            ST_GeomFromText('POLYGON EMPTY', 3844)
+          ) AS g
+        ),
+        poly_vertices AS (
+          -- Toți vertecșii fiecărui poligon cu path = [poly_idx, ring_idx, pt_idx]
           SELECT s.entity_id, s.lbl, s.old_geom,
-                 ST_Snap(s.old_geom, (SELECT u FROM union_all), ?) AS new_geom
+                 (ST_DumpPoints(s.old_geom)).path AS path,
+                 (ST_DumpPoints(s.old_geom)).geom AS pt
           FROM   selected s
-          WHERE  ST_IsValid(s.old_geom)
+        ),
+        other_boundary AS (
+          -- Pentru fiecare poligon A: boundary-ul UNIUNII poligoanelor selectate
+          -- EXCEPT A — ținta de snap pentru vertecșii SHARED.
+          SELECT s1.entity_id,
+                 ST_Boundary(ST_UnaryUnion(ST_Collect(s2.old_geom))) AS b
+          FROM   selected s1
+          JOIN   selected s2 ON s2.entity_id != s1.entity_id
+          GROUP  BY s1.entity_id
+        ),
+        vertex_resolved AS (
+          SELECT pv.entity_id, pv.lbl, pv.old_geom, pv.path, pv.pt,
+                 CASE
+                   -- LOCKED: vertex în lock_zone → NU se mută
+                   WHEN ST_Intersects(pv.pt, (SELECT g FROM lock_zone)) THEN pv.pt
+                   -- SHARED: vertex aproape de alt poligon selectat → snap pe el
+                   ELSE COALESCE(
+                     (SELECT
+                       CASE WHEN ST_Distance(pv.pt, ST_ClosestPoint(ob.b, pv.pt)) <= ?
+                         THEN ST_ClosestPoint(ob.b, pv.pt)
+                         ELSE pv.pt
+                       END
+                      FROM other_boundary ob
+                      WHERE ob.entity_id = pv.entity_id),
+                     pv.pt  -- FREE sau singur poligon: rămâne în loc
+                   )
+                 END AS new_pt
+          FROM   poly_vertices pv
+        ),
+        rings_built AS (
+          SELECT entity_id, lbl, old_geom,
+                 path[1] AS poly_idx, path[2] AS ring_idx,
+                 ST_MakeLine(new_pt ORDER BY path[3]) AS ring_line
+          FROM   vertex_resolved
+          GROUP  BY entity_id, lbl, old_geom, path[1], path[2]
+        ),
+        new_polys AS (
+          SELECT entity_id, lbl, old_geom,
+                 ST_Multi(ST_MakeValid(ST_BuildArea(ST_Collect(ring_line)))) AS new_geom
+          FROM   rings_built
+          GROUP  BY entity_id, lbl, old_geom
         )
         SELECT entity_id, lbl,
-               ROUND(ST_Area(old_geom)::numeric, 4) AS old_area,
-               ROUND(ST_Area(new_geom)::numeric, 4) AS new_area,
-               ABS(ST_Area(new_geom) - ST_Area(old_geom)) AS delta,
-               ST_IsValid(new_geom) AS valid_new,
-               ST_AsText(ST_Multi(new_geom)) AS new_wkt
-        FROM   snapped
+               ROUND(ST_Area(old_geom)::numeric, 4)  AS old_area,
+               ROUND(ST_Area(new_geom)::numeric, 4)  AS new_area,
+               FLOOR(ST_Area(old_geom))::int         AS old_area_cad,
+               FLOOR(ST_Area(new_geom))::int         AS new_area_cad,
+               ST_IsValid(new_geom)                  AS valid_new,
+               NOT ST_IsEmpty(new_geom)              AS nonempty,
+               ST_AsText(new_geom)                   AS new_wkt
+        FROM   new_polys
       SQL
 
       rows = ActiveRecord::Base.connection.select_all(sql).to_a
       rows.each do |r|
-        eid     = r["entity_id"].to_i
+        eid = r["entity_id"].to_i
         next if eid <= 0   # rânduri orfane (entity_id NULL în date legacy) — skip silent
-        delta   = r["delta"].to_f
+
+        unless r["valid_new"] && r["nonempty"]
+          skipped << { kind: kind, entity_id: eid, label: r["lbl"], reason: "geometrie rezultată invalidă/goală" }
+          next
+        end
+
         old_a   = r["old_area"].to_f
         new_a   = r["new_area"].to_f
-        unless r["valid_new"]
-          skipped << { entity_id: eid, label: r["lbl"], reason: "geometrie nouă invalidă" }
+        old_cad = r["old_area_cad"].to_i
+        new_cad = r["new_area_cad"].to_i
+        delta   = (new_a - old_a).round(4)
+
+        # CONSERVARE ARIE: aria cadastrală (FLOOR mp) trebuie să rămână aceeași.
+        if old_cad != new_cad
+          skipped << {
+            kind: kind, entity_id: eid, label: r["lbl"],
+            delta: delta, old_cad: old_cad, new_cad: new_cad,
+            reason: "aria cadastrală s-ar schimba (#{old_cad} → #{new_cad} mp, delta geom #{delta} mp)"
+          }
           next
         end
-        if delta > 1.00
-          skipped << { entity_id: eid, label: r["lbl"], delta: delta.round(3),
-                       reason: "delta suprafață > 1 mp (#{delta.round(2)} mp)" }
+
+        # Dacă delta e zero (vertecșii reali n-au avut țintă utilă) → skip
+        # raportat (pentru transparență — user vede de ce un poligon selectat
+        # n-a fost modificat).
+        if delta.abs < 0.0001
+          skipped << {
+            kind: kind, entity_id: eid, label: r["lbl"],
+            delta: delta, reason: "niciun vertex util — toate LOCKED sau FREE (fără țintă de snap)"
+          }
           next
         end
-        # Persistă prin model (NU raw SQL) pentru a păstra compute_derived +
-        # consistență cu restul aplicației. find_or_initialize_by acoperă atât
-        # UPDATE cache existent cât și INSERT cache nou pentru CGXML lands/
-        # buildings fără gis_*_geometries. Sărim overlap-check ca să nu se
-        # respingă reciproc poligoanele snap-uite (curățarea topologică
-        # ELIMINĂ overlap-urile mici existente — temporar pot exista).
+
+        # Persistă prin model (NU raw SQL) — păstrează compute_derived +
+        # consistență cu restul aplicației.
         g = model.find_or_initialize_by(fk => eid)
         g.status   = "active" if g.new_record? && g.status.blank?
         g.geom_wkt = r["new_wkt"]
         begin
           Thread.current[:topology_skip_overlap_check] = true
           if g.save(validate: false)
-            modified << { entity_id: eid, label: r["lbl"], old_area: old_a, new_area: new_a, delta: delta.round(3) }
+            modified << {
+              kind: kind, entity_id: eid, label: r["lbl"],
+              old_area: old_a, new_area: new_a, delta: delta,
+              area_cad: old_cad
+            }
           else
-            errors << { entity_id: eid, label: r["lbl"], message: g.errors.full_messages.join(", ").presence || "save returned false" }
+            errors << { kind: kind, entity_id: eid, label: r["lbl"], message: g.errors.full_messages.join(", ").presence || "save returned false" }
           end
         rescue => e
-          errors << { entity_id: eid, label: r["lbl"], message: e.message }
+          errors << { kind: kind, entity_id: eid, label: r["lbl"], message: e.message }
         ensure
           Thread.current[:topology_skip_overlap_check] = nil
         end
       end
     end
 
+    # Audit independent — recitește din BD ce s-a salvat și confirmă invariantul
+    # FLOOR(saved_area) == FLOOR(original_area). Plasă de siguranță împotriva
+    # drift-ului între ce promite algoritmul SQL și ce ajunge în BD prin
+    # compute_derived. Audit failures → ok=false în răspuns (anomalie serioasă).
+    audit_report = audit_cleanup_areas(modified)
+
     render json: {
-      ok:        true,
+      ok:        errors.empty? && audit_report[:failed] == 0,
       threshold: threshold,
       modified:  modified,
       skipped:   skipped,
       errors:    errors,
-      summary:   "Modificate #{modified.length}, sărite #{skipped.length}, erori #{errors.length}"
+      audit:     audit_report,
+      summary:   "Modificate #{modified.length}, sărite #{skipped.length}, erori #{errors.length}, audit fail #{audit_report[:failed]}"
     }
   rescue => e
     render json: { ok: false, error: "Eroare server: #{e.message}" }, status: :internal_server_error
@@ -980,6 +1096,87 @@ class DigitizareController < ApplicationController
     [[v, 0.5].max, 20.0].min
   end
 
+  # Audit post-cleanup: recitește din BD aria salvată pentru fiecare poligon
+  # modificat și verifică invariantul FLOOR(saved) == FLOOR(original).
+  #
+  # Rolul: detectează drift între ce promite algoritmul SQL (computed new_area
+  # din pre-save SELECT) și ce ajunge efectiv în BD prin compute_derived al
+  # modelului. Aceste două ar trebui să fie identice (ambele calculate de
+  # PostGIS pe aceeași geometrie), dar audit-ul prinde anomalii: corupere
+  # date, bug în compute_derived, divergență ST_Area, race conditions.
+  #
+  # Input:  modified — array de hash-uri cu {kind, entity_id, label, area_cad}
+  # Output: hash cu {checked, passed, failed, failures, total_area_*}
+  def audit_cleanup_areas(modified)
+    return blank_audit if modified.empty?
+
+    # Batch fetch suprafata_mp pentru toate poligoanele salvate (1 query/kind).
+    saved_areas = {}
+    parcele = modified.select { |m| m[:kind] == "parcela" }
+    cladiri = modified.select { |m| m[:kind] == "cladire" }
+
+    if parcele.any?
+      GisLandGeometry.where(land_id: parcele.map { |m| m[:entity_id] })
+                     .pluck(:land_id, :suprafata_mp).each do |id, area|
+        saved_areas[["parcela", id]] = area.to_f
+      end
+    end
+    if cladiri.any?
+      GisBuildingGeometry.where(building_id: cladiri.map { |m| m[:entity_id] })
+                         .pluck(:building_id, :suprafata_mp).each do |id, area|
+        saved_areas[["cladire", id]] = area.to_f
+      end
+    end
+
+    failures  = []
+    total_old = 0.0
+    total_new = 0.0
+
+    modified.each do |m|
+      total_old += m[:old_area].to_f
+      key = [m[:kind], m[:entity_id]]
+      saved = saved_areas[key]
+
+      if saved.nil?
+        failures << {
+          kind: m[:kind], entity_id: m[:entity_id], label: m[:label],
+          reason: "rândul gis_*_geometry lipsește post-save (find_by NULL)"
+        }
+        next
+      end
+
+      total_new += saved
+      saved_floor = saved.floor
+      expected    = m[:area_cad].to_i
+
+      if saved_floor != expected
+        failures << {
+          kind: m[:kind], entity_id: m[:entity_id], label: m[:label],
+          saved_area:     saved.round(4),
+          saved_floor:    saved_floor,
+          expected_floor: expected,
+          delta_vs_promised: (saved - m[:new_area].to_f).round(4),
+          reason: "aria în BD (FLOOR=#{saved_floor}) ≠ așteptat (FLOOR=#{expected}) — algoritmul a promis conservarea, BD spune altceva"
+        }
+      end
+    end
+
+    {
+      checked:          modified.length,
+      passed:           modified.length - failures.length,
+      failed:           failures.length,
+      failures:         failures,
+      total_area_old:   total_old.round(4),
+      total_area_new:   total_new.round(4),
+      total_area_delta: (total_new - total_old).round(4)
+    }
+  end
+
+  def blank_audit
+    { checked: 0, passed: 0, failed: 0, failures: [],
+      total_area_old: 0.0, total_area_new: 0.0, total_area_delta: 0.0 }
+  end
+
   # Calculează banda drumului + lista vecinilor afectați (parcele + clădiri).
   # Apelat de buffer_drum (preview UI) ȘI save_drum (persistare) — clientul NU
   # trimite niciodată geometrie de drum, o calculăm pe server din axă +
@@ -988,16 +1185,67 @@ class DigitizareController < ApplicationController
   # Returns: { band: {wkt, geojson, area_mp, nverts}, neighbors: [...] } sau
   # nil dacă banda nu poate fi construită (axă invalidă, buffer eșuat).
   def compute_drum_geometry(line_wkt, width_m, snap_dist_m)
-    # 1) Banda uniformă (nefraționată) — buffer-ul axei cu lățimea/2.
-    band_sql = ApplicationRecord.sanitize_sql_array([<<~SQL, line_wkt, width_m / 2.0])
-      WITH axis AS (SELECT ST_GeomFromText(?, 3844) AS geom),
-           buf  AS (SELECT ST_Buffer((SELECT geom FROM axis), ?, 'endcap=flat join=mitre quad_segs=4') AS geom)
-      SELECT ST_AsText(geom)                AS wkt,
-             ST_AsGeoJSON(geom, 6)          AS geojson,
-             ROUND(ST_Area(geom)::numeric, 4) AS area_mp,
-             ST_NPoints(geom)               AS nverts
-      FROM   buf
-    SQL
+    # 1) Banda uniformă cu AXIS AUGMENTATION:
+    # Adăugăm vertecși pe axă la proiecțiile vertecșilor poligoanelor vecine
+    # → bufferul rezultat are vertecși corespunzători pe limită → polygons
+    # se aliniază natural fără gap-uri.
+    band_sql = ApplicationRecord.sanitize_sql_array([
+      <<~SQL,
+        WITH initial_axis AS (SELECT ST_GeomFromText(?, 3844) AS geom),
+             initial_band AS (
+               SELECT ST_Buffer((SELECT geom FROM initial_axis), ?, 'endcap=flat join=mitre quad_segs=4') AS geom
+             ),
+             candidate_vertices AS (
+               SELECT (ST_DumpPoints(g.geom)).geom AS pt
+               FROM   gis_land_geometries g
+               JOIN   lands l ON l.id = g.land_id
+               WHERE  ST_DWithin(g.geom, (SELECT geom FROM initial_band), ?)
+                 AND  NOT EXISTS (
+                   SELECT 1 FROM parcels p
+                   WHERE p.land_id = l.id AND p.usecategory = 'DR'
+                 )
+               UNION ALL
+               SELECT (ST_DumpPoints(g.geom)).geom AS pt
+               FROM   gis_building_geometries g
+               WHERE  ST_DWithin(g.geom, (SELECT geom FROM initial_band), ?)
+             ),
+             projections_on_axis AS (
+               -- Proiecția perpendiculară a fiecărui vertex pe axă + poziția 0..1
+               -- pe axă. Filtru: poziția pe axă în [0, 1] (nu extensia după capete).
+               SELECT ST_ClosestPoint((SELECT geom FROM initial_axis), cv.pt) AS proj_pt,
+                      ST_LineLocatePoint((SELECT geom FROM initial_axis), cv.pt) AS pos
+               FROM   candidate_vertices cv
+               WHERE  ST_LineLocatePoint((SELECT geom FROM initial_axis), cv.pt) > 0
+                 AND  ST_LineLocatePoint((SELECT geom FROM initial_axis), cv.pt) < 1
+             ),
+             orig_axis_vertices AS (
+               -- Vertecșii originali ai axei + pozițiile lor (0 → 1).
+               SELECT ST_LineLocatePoint(ia.geom, dp.geom) AS pos,
+                      dp.geom AS pt
+               FROM   initial_axis ia,
+                      LATERAL ST_DumpPoints(ia.geom) AS dp
+             ),
+             all_axis_points AS (
+               SELECT pos, pt FROM orig_axis_vertices
+               UNION ALL
+               SELECT pos, proj_pt AS pt FROM projections_on_axis
+             ),
+             axis_augmented AS (
+               -- Reconstruiește axa cu TOATE punctele ordonate după poziție.
+               -- Vertecșii originali rămân pe loc; proiecțiile se INTERCALEAZĂ.
+               SELECT ST_MakeLine(pt ORDER BY pos) AS geom FROM all_axis_points
+             ),
+             buf AS (
+               SELECT ST_Buffer((SELECT geom FROM axis_augmented), ?, 'endcap=flat join=mitre quad_segs=4') AS geom
+             )
+        SELECT ST_AsText(geom)                AS wkt,
+               ST_AsGeoJSON(geom, 6)          AS geojson,
+               ROUND(ST_Area(geom)::numeric, 4) AS area_mp,
+               ST_NPoints(geom)               AS nverts
+        FROM   buf
+      SQL
+      line_wkt, width_m / 2.0, snap_dist_m, snap_dist_m, width_m / 2.0
+    ])
     band_row = ActiveRecord::Base.connection.select_one(band_sql)
     return nil if band_row.nil? || band_row["wkt"].blank?
 
@@ -1239,10 +1487,14 @@ class DigitizareController < ApplicationController
                               + (ps.uy*ps.uy + ps.ux*ps.ux/(ps.k*ps.k)) * (ST_Y(ps.pt_similarity) - ST_Y(ps.new_A))
                               + ST_Y(ps.new_A)
                             ), 3844)
-                          WHEN NOT ps.overlapping AND pt.entity_id IS NOT NULL THEN
-                            -- Caz 2: per-edge projection — pentru anchored polygons
-                            -- ȘI pentru polygons unde similarity nu s-a aplicat
-                            -- (k out of range, lipsă matrix, etc.) → forțează glue.
+                          WHEN NOT ps.overlapping
+                           AND (pt.entity_id IS NOT NULL
+                                OR ST_DWithin(ps.orig_pt, (SELECT geom FROM band), ?))
+                          THEN
+                            -- Caz 2: per-vertex projection — pentru anchored polygons
+                            -- ȘI pentru polygons unde similarity nu s-a aplicat.
+                            -- Acum proiectează ORICE vertex în limita pragului față
+                            -- de drum (nu doar endpoint-urile closest_segment).
                             ST_ClosestPoint(ST_Boundary((SELECT geom FROM band)), ps.orig_pt)
                           ELSE ps.pt_similarity
                         END AS pt
@@ -1332,12 +1584,33 @@ class DigitizareController < ApplicationController
                    AND  ST_Perimeter(op.piece) > 0.5
                    AND  ST_Area(op.old_geom) > ST_Area(op.piece) + 0.05
                ),
-               overlap_unified AS (
+               overlap_grouped AS (
                  SELECT entity_id, old_geom, member_count,
-                        ST_Multi(ST_MakeValid(ST_Union(new_piece))) AS new_geom,
-                        TRUE AS overlapping
+                        ST_Multi(ST_MakeValid(ST_Union(new_piece))) AS new_geom
                  FROM   overlap_expanded
                  GROUP  BY entity_id, old_geom, member_count
+               ),
+               overlap_unified AS (
+                 -- Fine-tuning area: dacă buffer compensation nu a recuperat arie
+                 -- exactă (diferență 0.05–5%), aplică scalare uniformă din centroid
+                 -- → aria EXACT egală cu old_area. Deplasare vertecși proporțională
+                 -- (pentru 0.1% diferență, ~2-3cm — neglijabil vizual).
+                 SELECT entity_id, old_geom, member_count,
+                        CASE
+                          WHEN ST_Area(new_geom) > 0.01
+                           AND ABS(ST_Area(new_geom) - ST_Area(old_geom)) > 0.05
+                           AND ST_Area(new_geom) BETWEEN ST_Area(old_geom) * 0.95 AND ST_Area(old_geom) * 1.05
+                          THEN ST_Multi(ST_MakeValid(ST_Affine(new_geom,
+                            sqrt(ST_Area(old_geom) / NULLIF(ST_Area(new_geom), 0)),
+                            0, 0,
+                            sqrt(ST_Area(old_geom) / NULLIF(ST_Area(new_geom), 0)),
+                            (1 - sqrt(ST_Area(old_geom) / NULLIF(ST_Area(new_geom), 0))) * ST_X(ST_Centroid(new_geom)),
+                            (1 - sqrt(ST_Area(old_geom) / NULLIF(ST_Area(new_geom), 0))) * ST_Y(ST_Centroid(new_geom))
+                          )))
+                          ELSE new_geom
+                        END AS new_geom,
+                        TRUE AS overlapping
+                 FROM   overlap_grouped
                ),
                final_geom AS (
                  SELECT b.entity_id, b.old_geom, b.member_count,
@@ -1357,7 +1630,7 @@ class DigitizareController < ApplicationController
           FROM   final_geom
           WHERE  ST_IsValid(new_geom) AND NOT ST_IsEmpty(new_geom)
         SQL
-        line_wkt, band[:wkt], detect_tolerance, detect_tolerance, width_m / 2.0
+        line_wkt, band[:wkt], detect_tolerance, detect_tolerance, width_m / 2.0, detect_tolerance
       ])
       ActiveRecord::Base.connection.select_all(n_sql).to_a.each do |r|
         eid = r["entity_id"].to_i
