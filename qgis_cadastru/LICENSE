@@ -1,0 +1,23 @@
+e-CAD Cadastru — plugin QGIS pentru cadastru
+Copyright (C) 2026  Ciprian Savescu
+
+Acest program este software liber: il puteti redistribui si/sau modifica
+in conformitate cu termenii GNU General Public License, asa cum este publicata
+de Free Software Foundation, fie versiunea 2 a Licentei, fie (la alegerea
+dumneavoastra) orice versiune ulterioara.
+
+Acest program este distribuit in speranta ca va fi util, dar FARA NICIO
+GARANTIE; nici macar garantia implicita de VANDABILITATE sau POTRIVIRE PENTRU
+UN ANUMIT SCOP. Consultati GNU General Public License pentru mai multe detalii.
+
+Ar fi trebuit sa primiti o copie a GNU General Public License impreuna cu acest
+program. Daca nu, consultati <https://www.gnu.org/licenses/gpl-2.0.html>.
+
+------------------------------------------------------------------------------
+NOTA privind licentierea:
+
+Acest plugin foloseste API-ul QGIS (qgis.core / qgis.gui), care este licentiat
+sub GNU GPL v2+. Prin urmare, aceasta lucrare derivata este distribuita tot sub
+GPL v2+. Textul complet al licentei trebuie inclus in distributie si este
+disponibil la adresa de mai sus. Inlocuiti acest fisier cu textul integral GPL-2.0
+inainte de prima livrare publica.

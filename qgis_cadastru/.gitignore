@@ -1,0 +1,9 @@
+# Artefacte Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Setari locale QGIS / IDE
+.idea/
+.vscode/
+*.qgs~

@@ -1,0 +1,27 @@
+# Metadata plugin QGIS pentru aplicatia de cadastru e-CAD.
+# Acest fisier este citit de QGIS la incarcarea plugin-ului.
+
+[general]
+name=e-CAD Cadastru
+qgisMinimumVersion=3.28
+description=Mediu de lucru cadastral in stil AutoCAD, construit peste QGIS si integrat cu e-CAD.
+about=Plugin care transforma QGIS intr-o aplicatie de cadastru cu UX in stil AutoCAD:
+    ascunde meniurile generale GIS care nu sunt utile in cadastru, adauga un toolbar
+    de desen (parcela, snapping, masuratori), o linie de comanda tip AutoCAD si punti
+    de integrare cu baza/serverul e-CAD (PostGIS / API Rails, import/export cgxml).
+version=0.1.0
+author=Ciprian Savescu
+email=ciprian.savescu@icloud.com
+tracker=https://github.com/CiprianS23/e-cad-qgis/issues
+repository=https://github.com/CiprianS23/e-cad-qgis
+
+# Plugin de tip vectorial / desktop GIS.
+tags=cadastru,cadastre,romania,ancpi,cgxml,e-cad,autocad,parcela
+category=Plugins
+icon=resources/icon.png
+experimental=True
+deprecated=False
+
+# Compatibilitate: plugin pentru aplicatia desktop QGIS (nu server).
+server=False
+hasProcessingProvider=False
