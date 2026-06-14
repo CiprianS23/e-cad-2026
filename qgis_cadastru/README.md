@@ -18,8 +18,10 @@ toolbar de desen și puncte de integrare cu aplicația **e-CAD**.
   cadastru (Web, Raster, Database…), reversibil (`profile/profile_cleanup.py`).
 - **Toolbar de cadastru** — desen parcelă cu snapping, măsurători
   (`tools/draw_parcela.py`, `tools/measure.py`).
-- **Linie de comandă tip AutoCAD** — tastezi `PA` (parcelă), `DI` (distanță),
-  `ZE` (zoom extent)… cu istoric pe săgeți (`ui/command_line.py`).
+- **Linie de comandă în limbaj natural** — scrii liber ce vrei („desenează o
+  parcelă", „cât e distanța până aici"), iar **Claude** alege acțiunea potrivită
+  prin *tool use* (`ui/command_line.py`, `ecad/ai.py`). Scurtăturile tip AutoCAD
+  (`PA`, `DI`, `ZE`…) rămân ca fast-path, cu istoric pe săgeți.
 - **Integrare e-CAD** — încarcă imobile/parcele din PostGIS, schelet export
   `cgxml` ANCPI (`ecad/connection.py`, `ecad/cgxml.py`).
 
@@ -32,7 +34,7 @@ qgis_cadastru/
 ├── cadastru_plugin.py        # clasa principala (orchestreaza tot)
 ├── ui/
 │   ├── theme.py              # tema AutoCAD-like
-│   └── command_line.py       # linia de comanda
+│   └── command_line.py       # linia de comanda (limbaj natural + fast-path)
 ├── profile/
 │   └── profile_cleanup.py    # ascunde UI irelevant (reversibil)
 ├── tools/
@@ -40,6 +42,7 @@ qgis_cadastru/
 │   └── measure.py            # masurare distanta
 ├── ecad/
 │   ├── connection.py         # conexiune PostGIS e-CAD
+│   ├── ai.py                 # interpretare comenzi prin Claude (tool use)
 │   └── cgxml.py              # export/import cgxml (stub)
 ├── resources/
 │   └── theme.qss             # stylesheet Qt
@@ -77,6 +80,32 @@ export ECAD_DB_HOST=localhost ECAD_DB_PORT=5432 \
 
 > Numele coloanei de geometrie pe `f_cg_land` trebuie confirmat din schema reală
 > e-CAD (vezi `CLAUDE.md` din repo-ul principal, „De aflat din schema reală").
+
+## Linia de comandă în limbaj natural (Claude)
+
+Scrii liber în linia de comandă; un model **Claude** interpretează intenția și
+declanșează acțiunea, folosind *tool use* (function calling) — alege **exact**
+una dintre comenzile reale ale aplicației, deci nu poate „inventa" acțiuni.
+
+Exemple:
+- „desenează o parcelă nouă" → unealta de desen parcelă
+- „cât e distanța până aici" → unealta de măsurare
+- „adu imobilele din comună" → import din e-CAD
+- „arată toată harta" → zoom extent
+
+Apelul rulează într-un **thread separat** (nu blochează QGIS). Configurare:
+
+```bash
+# 1. instalează SDK-ul în mediul Python al QGIS
+python3 -m pip install -r qgis_cadastru/requirements.txt
+# 2. setează cheia API (sau în setările plugin-ului, grup e-cad-cadastru/ai)
+export ANTHROPIC_API_KEY=sk-ant-...
+# opțional: alt model (implicit claude-opus-4-8)
+export ANTHROPIC_MODEL=claude-opus-4-8
+```
+
+Fără cheie/SDK, linia de comandă funcționează în continuare cu scurtăturile tip
+AutoCAD (`PA`, `DI`, `ZE`, `IMP`, `CGXML`) — doar interpretarea liberă e dezactivată.
 
 ## Desprindere în repo separat
 

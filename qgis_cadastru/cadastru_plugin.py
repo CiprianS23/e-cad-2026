@@ -60,8 +60,9 @@ class CadastruPlugin:
         self.toolbar.setObjectName("CadastruToolbar")
         self._build_tools()
 
-        # 4. Linia de comanda tip AutoCAD (dock jos).
-        self.command_dock = CommandLineDock(self.iface, self._command_registry())
+        # 4. Linia de comanda tip AutoCAD (dock jos), cu interpretare in limbaj
+        #    natural prin Claude. Comenzile sunt rutate prin acelasi registru.
+        self.command_dock = CommandLineDock(self.iface, self._commands())
         self.iface.addDockWidget(Qt.BottomDockWidgetArea, self.command_dock)
 
     def unload(self):
@@ -133,14 +134,70 @@ class CadastruPlugin:
         cgxml.export_current_selection(self.iface)
 
     # ------------------------------------------------------------------
-    # Registrul de comenzi pentru linia de comanda tip AutoCAD
+    # Registrul de comenzi pentru linia de comanda
     # ------------------------------------------------------------------
-    def _command_registry(self):
-        """Mapeaza comenzi (si alias-uri scurte, ca in AutoCAD) la actiuni."""
-        return {
-            ("parcela", "pa"): self.activate_draw_parcela,
-            ("masoara", "di", "dist"): self.activate_measure,
-            ("extent", "ze"): self.zoom_full,
-            ("import", "imp"): self.import_from_ecad,
-            ("cgxml", "export"): self.export_cgxml,
-        }
+    def _commands(self):
+        """Descrie comenzile aplicatiei.
+
+        Fiecare comanda are:
+          - name: identificator canonic (si numele tool-ului trimis lui Claude)
+          - aliases: scurtaturi tip AutoCAD, pentru executie rapida fara API
+          - description: text in romana, folosit ca descriere a tool-ului pentru
+            interpretarea in limbaj natural
+          - callback: actiunea efectiva
+
+        Aceeasi lista alimenteaza atat executia directa (alias exact) cat si
+        interpretarea in limbaj natural prin Claude.
+        """
+        return [
+            {
+                "name": "parcela",
+                "aliases": ["pa", "parcela"],
+                "description": (
+                    "Porneste desenarea unei parcele noi (poligon) pe harta, cu "
+                    "snapping la straturile existente. Foloseste cand utilizatorul "
+                    "vrea sa traseze/deseneze o parcela, un contur sau o limita."
+                ),
+                "callback": self.activate_draw_parcela,
+            },
+            {
+                "name": "masoara",
+                "aliases": ["di", "dist", "masoara"],
+                "description": (
+                    "Activeaza unealta de masurare a distantei intre doua puncte. "
+                    "Foloseste cand utilizatorul vrea sa masoare o distanta sau o "
+                    "lungime pe harta."
+                ),
+                "callback": self.activate_measure,
+            },
+            {
+                "name": "extent",
+                "aliases": ["ze", "extent"],
+                "description": (
+                    "Face zoom la extinderea completa a tuturor straturilor "
+                    "(vezi toata harta). Foloseste pentru 'arata tot', 'zoom "
+                    "general', 'incadreaza harta'."
+                ),
+                "callback": self.zoom_full,
+            },
+            {
+                "name": "import",
+                "aliases": ["imp", "import"],
+                "description": (
+                    "Importa imobilele/parcelele din baza de date e-CAD ca strat "
+                    "pe harta. Foloseste pentru 'adu parcelele', 'incarca imobilele "
+                    "din e-CAD', 'importa datele'."
+                ),
+                "callback": self.import_from_ecad,
+            },
+            {
+                "name": "cgxml",
+                "aliases": ["cgxml", "export"],
+                "description": (
+                    "Exporta selectia curenta in format cgxml (livrabilul ANCPI). "
+                    "Foloseste pentru 'exporta cgxml', 'genereaza fisierul pentru "
+                    "ANCPI', 'export cadastru'."
+                ),
+                "callback": self.export_cgxml,
+            },
+        ]

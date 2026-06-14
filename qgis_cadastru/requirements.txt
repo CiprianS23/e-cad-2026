@@ -1,0 +1,7 @@
+# Dependinte Python pentru plugin-ul de cadastru.
+# Se instaleaza in mediul Python al QGIS:
+#   python3 -m pip install -r requirements.txt
+# (sau din consola Python a QGIS / OSGeo4W Shell pe Windows)
+
+# SDK-ul oficial Anthropic, pentru linia de comanda in limbaj natural (Claude).
+anthropic>=0.40
