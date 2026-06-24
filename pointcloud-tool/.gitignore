@@ -1,0 +1,22 @@
+# Binare externe (download upstream, NU în git) — CLAUDE.md §4, §11.
+/bin/
+
+# Librăria Potree (build static oficial, descărcat separat).
+/potree/
+
+# Date de lucru / output (nu se versionează).
+/data/uploads/*
+/data/work/*
+/data/out/*
+/data/potree/*
+/data/jobs.json
+!/data/uploads/.keep
+!/data/work/.keep
+!/data/out/.keep
+!/data/potree/.keep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

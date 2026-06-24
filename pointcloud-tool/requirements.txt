@@ -1,0 +1,19 @@
+# Backend point-cloud tool (CLAUDE.md §11).
+# Recomandat: instalare PDAL + GDAL prin conda/mamba pentru a evita build-urile native.
+#   mamba create -n pointcloud -c conda-forge python=3.11 pdal python-pdal gdal rasterio shapely
+#   conda activate pointcloud
+#   pip install -r requirements.txt
+#
+# Pachetele de mai jos sunt cele instalabile prin pip peste un mediu cu PDAL/GDAL.
+
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+numpy>=1.26
+shapely>=2.0
+affine>=2.4
+
+# Instalate de preferință prin conda-forge (lăsate aici ca referință):
+#   pdal            (binding Python — `import pdal`)
+#   gdal
+#   rasterio>=1.3
