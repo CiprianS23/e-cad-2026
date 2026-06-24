@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Point Cloud Tool — Procesare &amp; Potree</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>Point Cloud Tool</h1>
+    <span class="srs">SRS țintă: <strong>EPSG:3844</strong> (Stereo 70)</span>
+  </header>
+
+  <main>
+    <section class="steps" id="steps">
+      <!-- Pas 1: Upload -->
+      <article class="step" data-step="upload">
+        <h2><span class="num">1</span> Upload <small>(las / laz / e57)</small></h2>
+        <div class="body">
+          <input type="file" id="fileInput" accept=".las,.laz,.e57">
+          <button id="uploadBtn">Încarcă</button>
+          <div class="status" id="status-upload"></div>
+        </div>
+      </article>
+
+      <!-- Pas 2: Normalize -->
+      <article class="step" data-step="normalize">
+        <h2><span class="num">2</span> Normalize <small>(doar E57)</small></h2>
+        <div class="body">
+          <label><input type="checkbox" data-param="use_e572las"> Folosește e572las (fallback)</label>
+          <button class="runBtn" data-step="normalize">Run</button>
+          <div class="status" id="status-normalize"></div>
+        </div>
+      </article>
+
+      <!-- Pas 3: Denoise -->
+      <article class="step" data-step="denoise">
+        <h2><span class="num">3</span> Denoise</h2>
+        <div class="body">
+          <label>mean_k <input type="number" data-param="mean_k" value="12" step="1"></label>
+          <label>multiplier <input type="number" data-param="multiplier" value="2.2" step="0.1"></label>
+          <button class="runBtn" data-step="denoise">Run</button>
+          <div class="status" id="status-denoise"></div>
+        </div>
+      </article>
+
+      <!-- Pas 4: Reproject -->
+      <article class="step" data-step="reproject">
+        <h2><span class="num">4</span> Reproject → EPSG:3844</h2>
+        <div class="body">
+          <label>out_srs <input type="text" data-param="out_srs" value="EPSG:3844"></label>
+          <label>in_srs <input type="text" data-param="in_srs" placeholder="opțional, ex. EPSG:32635"></label>
+          <button class="runBtn" data-step="reproject">Run</button>
+          <div class="status" id="status-reproject"></div>
+        </div>
+      </article>
+
+      <!-- Pas 5: Classify ground -->
+      <article class="step" data-step="classify">
+        <h2><span class="num">5</span> Classify ground <small>(SMRF)</small></h2>
+        <div class="body">
+          <label>window <input type="number" data-param="window" value="16" step="1"></label>
+          <label>slope <input type="number" data-param="slope" value="0.2" step="0.05"></label>
+          <label>threshold <input type="number" data-param="threshold" value="0.45" step="0.05"></label>
+          <label>scalar <input type="number" data-param="scalar" value="1.2" step="0.1"></label>
+          <button class="runBtn" data-step="classify">Run</button>
+          <div class="status" id="status-classify"></div>
+        </div>
+      </article>
+
+      <!-- Pas 6: Features -->
+      <article class="step" data-step="features">
+        <h2><span class="num">6</span> Features</h2>
+        <div class="body">
+          <fieldset class="feature" data-step="feature_dtm">
+            <legend><label><input type="checkbox" class="featChk"> DTM/DEM</label></legend>
+            <label>resolution <input type="number" data-param="resolution" value="0.5" step="0.1"></label>
+            <div class="status" id="status-feature_dtm"></div>
+          </fieldset>
+          <fieldset class="feature" data-step="feature_chm">
+            <legend><label><input type="checkbox" class="featChk"> CHM / vegetație</label></legend>
+            <label>resolution <input type="number" data-param="resolution" value="0.5" step="0.1"></label>
+            <label>HAG min <input type="number" data-param="hag_min" value="2" step="0.5"></label>
+            <label>HAG max <input type="number" data-param="hag_max" value="60" step="1"></label>
+            <div class="status" id="status-feature_chm"></div>
+          </fieldset>
+          <fieldset class="feature" data-step="feature_buildings">
+            <legend><label><input type="checkbox" class="featChk"> Clădiri</label></legend>
+            <label>HAG min <input type="number" data-param="hag_min" value="2.5" step="0.5"></label>
+            <label>resolution <input type="number" data-param="resolution" value="0.5" step="0.1"></label>
+            <label>min_area m² <input type="number" data-param="min_area" value="8" step="1"></label>
+            <label><input type="checkbox" data-param="use_cloudcompare"> CloudCompare RANSAC</label>
+            <div class="status" id="status-feature_buildings"></div>
+          </fieldset>
+          <fieldset class="feature" data-step="feature_powerlines">
+            <legend><label><input type="checkbox" class="featChk"> Linii electrice + stâlpi</label></legend>
+            <label>HAG min <input type="number" data-param="hag_min" value="5" step="1"></label>
+            <label>HAG max <input type="number" data-param="hag_max" value="40" step="1"></label>
+            <label>min_points <input type="number" data-param="min_points" value="10" step="1"></label>
+            <label>tolerance <input type="number" data-param="tolerance" value="1.0" step="0.1"></label>
+            <div class="status" id="status-feature_powerlines"></div>
+          </fieldset>
+          <button id="runFeaturesBtn">Run features selectate</button>
+        </div>
+      </article>
+
+      <!-- Pas 7: Build Potree -->
+      <article class="step" data-step="potree">
+        <h2><span class="num">7</span> Build Potree</h2>
+        <div class="body">
+          <button class="runBtn" data-step="potree">Build &amp; deschide viewer</button>
+          <div class="status" id="status-potree"></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="viewer">
+      <div class="viewer-head">
+        <h2>Viewer</h2>
+        <div id="featuresList" class="features-list"></div>
+      </div>
+      <iframe id="potreeFrame" title="Potree viewer"></iframe>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

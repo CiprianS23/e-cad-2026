@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Potree viewer</title>
+  <!-- Librăria Potree (build static oficial în /potree). Lipsa ei → mesaj clar. -->
+  <link rel="stylesheet" href="/potree/build/potree/potree.css">
+  <link rel="stylesheet" href="/potree/libs/jquery-ui/jquery-ui.min.css">
+  <link rel="stylesheet" href="/potree/libs/openlayers3/ol.css">
+  <link rel="stylesheet" href="/potree/libs/spectrum/spectrum.css">
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; color: #ddd;
+      font-family: system-ui, sans-serif; }
+    #potree_render_area { position: absolute; inset: 0; }
+    #fallback { padding: 2rem; max-width: 640px; line-height: 1.5; }
+    code { background: #222; padding: 0 0.3rem; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div class="potree_container" style="position: absolute; inset: 0;">
+    <div id="potree_render_area"></div>
+  </div>
+  <div id="fallback" style="display:none">
+    <h2>Potree nu este instalat</h2>
+    <p>Pune build-ul oficial Potree 2.x în folderul <code>pointcloud-tool/potree/</code>
+       (structura <code>build/</code> + <code>libs/</code>).</p>
+    <p>Octree-ul acestui scan se află la
+       <code id="metaPath"></code> și este servit static.</p>
+  </div>
+
+  <script src="/potree/libs/jquery/jquery-3.1.1.min.js"></script>
+  <script src="/potree/libs/three.js/build/three.min.js"></script>
+  <script src="/potree/build/potree/potree.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const scan = params.get('scan');
+    const metadataUrl = `/potree-data/${scan}/metadata.json`;
+    document.getElementById('metaPath').textContent = metadataUrl;
+
+    let viewer = null;
+    const overlayGroup = { obj: null };
+
+    function initPotree() {
+      if (typeof Potree === 'undefined' || !window.THREE) {
+        document.getElementById('fallback').style.display = 'block';
+        return;
+      }
+      viewer = new Potree.Viewer(document.getElementById('potree_render_area'));
+      viewer.setEDLEnabled(true);
+      viewer.setFOV(60);
+      viewer.setPointBudget(2_000_000);
+      viewer.loadGUI && viewer.loadGUI(() => {});
+
+      Potree.loadPointCloud(metadataUrl, scan, (e) => {
+        if (!e.pointcloud) return;
+        viewer.scene.addPointCloud(e.pointcloud);
+        const material = e.pointcloud.material;
+        material.size = 1;
+        material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+        // Colorare pe clasificare (CLAUDE.md §8).
+        try { material.activeAttributeName = 'classification'; } catch (err) { /* atribut absent */ }
+        viewer.fitToScreen();
+      });
+    }
+
+    // Overlay GeoJSON (linii/stâlpi/footprints) trimis din pagina părinte.
+    window.addEventListener('message', async (ev) => {
+      if (!viewer || !ev.data || ev.data.type !== 'overlay') return;
+      try {
+        const gj = await (await fetch(ev.data.url)).json();
+        drawGeoJSON(gj);
+      } catch (e) { console.error('overlay eșuat', e); }
+    });
+
+    function drawGeoJSON(gj) {
+      if (overlayGroup.obj) viewer.scene.scene.remove(overlayGroup.obj);
+      const group = new THREE.Group();
+      (gj.features || []).forEach((f) => {
+        const g = f.geometry;
+        if (!g) return;
+        if (g.type === 'LineString') {
+          group.add(makeLine(g.coordinates, 0xf0b429));
+        } else if (g.type === 'Point') {
+          group.add(makePoint(g.coordinates, 0xff6b6b));
+        } else if (g.type === 'Polygon') {
+          g.coordinates.forEach((ring) => group.add(makeLine(ring, 0x4ea1ff)));
+        }
+      });
+      overlayGroup.obj = group;
+      viewer.scene.scene.add(group);
+    }
+
+    function vec(c) { return new THREE.Vector3(c[0], c[1], c.length > 2 ? c[2] : 0); }
+
+    function makeLine(coords, color) {
+      const geom = new THREE.Geometry ? new THREE.Geometry() : new THREE.BufferGeometry();
+      const pts = coords.map(vec);
+      const buf = new THREE.BufferGeometry().setFromPoints(pts);
+      return new THREE.Line(buf, new THREE.LineBasicMaterial({ color, linewidth: 2 }));
+    }
+
+    function makePoint(coord, color) {
+      const buf = new THREE.BufferGeometry().setFromPoints([vec(coord)]);
+      return new THREE.Points(buf, new THREE.PointsMaterial({ color, size: 2 }));
+    }
+
+    window.addEventListener('load', initPotree);
+  </script>
+</body>
+</html>
